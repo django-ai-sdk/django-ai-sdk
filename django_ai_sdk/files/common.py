@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 def compute_file_hash(file: bytes | io.IOBase | DjangoFile) -> str:
     """SHA-256 hex digest of file content.
 
-    Accepts bytes or any binary IO object (UploadedFile, BytesIO, open()).
     Resets the IO pointer to 0 after reading so the caller can reuse it.
     """
     hasher = hashlib.sha256()
@@ -38,15 +37,12 @@ def compute_file_hash(file: bytes | io.IOBase | DjangoFile) -> str:
 
 @dataclass
 class UploadSettings:
-    """File upload constraints for the frontend."""
-
     max_upload_size: int
     allowed_mime_types: list[str] = field(default_factory=lambda: ["*/*"])
 
 
 @lru_cache(maxsize=1)
 def get_upload_settings() -> UploadSettings:
-    """Collect upload limits from Django settings and file processors."""
 
     max_size = resolve_setting("AI_SDK_MAX_UPLOAD_SIZE", 10 * 1024 * 1024)
 
@@ -73,7 +69,6 @@ AI_SDK_STORAGE_ALIAS = "django_ai_sdk"
 
 
 def get_entry_document_storage() -> Storage:
-    """Storage backend for documents."""
     try:
         return storages[AI_SDK_STORAGE_ALIAS]
     except InvalidStorageError:
@@ -84,19 +79,11 @@ DEFAULT_ENTRY_DOCUMENT_UPLOAD_TO = "memories/documents/"
 
 
 def get_entry_document_upload_to() -> str:
-    """model upload_to path for documents, with default fallback"""
     return resolve_setting("AI_SDK_FILE_UPLOAD_TO", DEFAULT_ENTRY_DOCUMENT_UPLOAD_TO)
 
 
 async def get_default_file_pipeline(file: object | None = None) -> FilePipeline:
-    """Return a default FilePipeline for uploads without agent context.
-
-    Configurable via AI_SDK_MEMORY_FILE_PIPELINE setting:
-      - single dotted path: "myapp.pipelines.get_my_pipeline"
-      - list of dotted paths: ["myapp.pipelines.ocr_pipeline", "myapp.pipelines.text_pipeline"]
-
-    Each path must be a zero-argument callable returning a FilePipeline.
-    When a list is given, the first pipeline whose accepts(file) is True is used.
+    """When a list is given, the first pipeline whose accepts(file) is True is used.
     Falls back to TextFileProcessor with no transforms when no match found.
     """
     from django_ai_sdk.files.pipeline import FilePipeline
@@ -106,11 +93,6 @@ async def get_default_file_pipeline(file: object | None = None) -> FilePipeline:
 
 
 async def get_default_file_pipelines(file: object | None = None) -> list[FilePipeline]:
-    """All AI_SDK_MEMORY_FILE_PIPELINE pipelines accepting file, in setting order.
-
-    Lets callers fall through to the next pipeline when one accepts the file but
-    its processor passes on it (returns None). No TextFileProcessor fallback.
-    """
     setting = resolve_setting("AI_SDK_MEMORY_FILE_PIPELINE")
     if not setting:
         return []

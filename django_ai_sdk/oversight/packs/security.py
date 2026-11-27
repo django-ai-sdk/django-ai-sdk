@@ -1,9 +1,3 @@
-"""The security pack: what is asked, what tools receive, and what leaves.
-
-Patterns catch plain injection attempts without a model; what they miss goes to
-the optional `classifier` alias. Every pattern here runs in linear time.
-"""
-
 from __future__ import annotations
 
 from django.utils.translation import gettext_lazy as _
@@ -16,33 +10,24 @@ from django_ai_sdk.oversight.registry import register_policy
 from django_ai_sdk.oversight.rules import Alert, Block, L, Mask, Rule
 from django_ai_sdk.oversight.types import Subject
 
-# A url's scheme, host and path, stopping before the "?".
 _URL = r"https?://[^\s()<>\"'?]{1,512}"
-# A query parameter named like data, q, text, secret or token, with a long value.
 _CARRIES = (
     r"\?(?:[^\s()<>&;]{0,512}[&;]){0,16}[^\s()<>&;=]{0,64}?"
     r"(?:data|q|text|secret|token)=[^\s()<>&;]{24,1024}"
 )
 
-# Markup that makes a client fetch a url carrying data, the classic exfiltration.
 EXFILTRATION_PATTERNS = {
-    # ![alt](https://host/path?x=data). The client fetches it as soon as it renders.
     "image_beacon": [
         r"!\[[^\[\]\n]{0,512}\]\(\s{0,8}" + _URL + r"\?[^\s()=]{0,512}=[^\s()]{1,2048}\)"
     ],
-    # [text](https://host/path?data=<long value>). One click sends it.
     "link_beacon": [r"\]\(\s{0,8}" + _URL + _CARRIES],
-    # <img src="https://host/path?x=data"> for clients that render HTML.
     "html_beacon": [
         r"<img\s[^<>]{0,256}?src\s{0,4}=\s{0,4}[\"']?https?://[^\s\"'<>?]{1,512}"
         r"\?[^\s\"'<>=]{0,512}=[^\s\"'<>]{1,2048}"
     ],
-    # [ref]: https://host/path?data=<long value> for reference-style links or images.
     "reference_beacon": [r"(?m)^ {0,3}\[[^\[\]\n]{1,256}\]:\s{0,8}" + _URL + _CARRIES],
 }
 
-# Explicit attempts to take over the assistant. A hit is certain and ends the lens.
-# A miss is not, so the classifier (if defined) judges next.
 INJECTION_PATTERNS = {
     "override": [
         r"\b(?:ignore|disregard|forget|override|bypass)\s{1,4}(?:(?:all|any|the|of|these)\s{1,4}){0,3}"

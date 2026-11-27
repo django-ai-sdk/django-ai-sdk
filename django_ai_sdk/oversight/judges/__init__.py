@@ -1,9 +1,3 @@
-"""Judge classes by the dotted path settings name them with ("class" in JUDGES).
-
-Imported lazily: lenses imports judges.base, and an eager import of classifier
-or llm here would import the half-initialised lenses again.
-"""
-
 from __future__ import annotations
 
 from importlib import import_module

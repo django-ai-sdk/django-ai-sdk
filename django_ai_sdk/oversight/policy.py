@@ -1,9 +1,3 @@
-"""Policies: an app's lenses and rules, layered over the built-in packs.
-
-The policy class wins over the packs it extends. Every value records where it
-came from; nothing changes a lens or rule declared in code at runtime.
-"""
-
 from __future__ import annotations
 
 import copy
@@ -30,27 +24,18 @@ logger = get_logger(__name__)
 
 
 class Policy:
-    """A named bundle of lenses and rules. Subclass it in an app's `oversight.py`."""
+    """Subclass it in an app's `oversight.py`."""
 
     name: str = ""
     label: str = ""
     description: str = ""
-    # Packs or policies to inherit lenses and rules from. A lens or rule declared
-    # here replaces an inherited one with the same name.
     extends: list[str] = []  # noqa: RUF012
-    # A LensPack, RulePack or another policy's list is flattened in place, one level.
     lenses: Sequence[Lens | type[Lens] | Sequence[Any]] = []  # noqa: RUF012
     rules: Sequence[Rule | Sequence[Any]] = []  # noqa: RUF012
-    # None inherits. The CAPTURE setting is always the ceiling.
     capture: Capture | None = None
-    # "auto" or "live". None inherits.
     stream_mode: str | None = None
-    # "closed" or "open"; None inherits FAIL_MODE. "open" suits an observe-only
-    # policy: a failed lens never stops a turn.
     fail_mode: str | None = None
-    # Days to keep turns, e.g. {"content": 90, "metadata": 730}; missing keys use RETENTION.
     retention: dict[str, int] = {}  # noqa: RUF012
-    # "code", "pack:<name>" or "authored".
     origin: str = "code"
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -70,10 +55,6 @@ def policy_rules(cls: type[Policy]) -> list[Rule]:
 class LensPack(list[Lens | type[Lens]]):
     """Lenses taken by name from a pack's `lenses`, in the order named; all without names.
 
-    List it in a policy's `lenses`, which takes its lenses in its place::
-
-        lenses = [LensPack(SecurityPack.lenses, "injection_question", "pii_question"), Topic]
-
     `overrides` set attributes such as `stages` on copies; the pack keeps its own.
     """
 
@@ -86,13 +67,6 @@ class LensPack(list[Lens | type[Lens]]):
 
 class RulePack(list[Rule]):
     """Rules taken by name from a pack's `rules`, in the order named; all without names.
-
-    List it in a policy's `rules`, which takes its rules in its place::
-
-        rules = [
-            SupportPolicy.rules,
-            RulePack(SecurityPack.rules, "pii_in_answer", mode=Mode.ENFORCE),
-        ]
 
     The rules are copies, so setting `mode` or `notice` does not change the pack.
     """
@@ -126,7 +100,6 @@ def _with_overrides(lens: Lens | type[Lens], overrides: Mapping[str, Any]) -> Le
         return lens(**overrides) if overrides else lens
     if not overrides:
         return copy.copy(lens)
-    # Rebuilt from what was set on it, so nothing worked out from the old values stays.
     declared = {
         key: value
         for key, value in vars(lens).items()
@@ -136,7 +109,6 @@ def _with_overrides(lens: Lens | type[Lens], overrides: Mapping[str, Any]) -> Le
 
 
 def flatten[T: (Lens | type[Lens], Rule)](items: Iterable[T | Sequence[Any]]) -> list[T]:
-    """Replace every list, tuple or pack in `items` by its items, one level deep."""
     flat: list[T] = []
     for item in items:
         if isinstance(item, Sequence):
@@ -146,15 +118,10 @@ def flatten[T: (Lens | type[Lens], Rule)](items: Iterable[T | Sequence[Any]]) ->
     return flat
 
 
-# Subjects a Mask can rewrite: the question, the answer, or both.
 MASKABLE = frozenset({"input", "output", "exchange"})
 
 
 def validate_policy(cls: type[Policy]) -> None:
-    """Raise ImproperlyConfigured unless every lens and rule is valid.
-
-    Inherited lenses are checked at resolve time (E002): a parent may register later.
-    """
     if not cls.name:
         raise ImproperlyConfigured(f"{cls.__name__} must set a non-empty `name`.")
     lenses: dict[str, Lens] = {}
@@ -172,11 +139,6 @@ def validate_policy(cls: type[Policy]) -> None:
 
 
 def validate_rule(rule: Rule, lenses: Mapping[str, Lens]) -> None:
-    """Raise when `rule` does nothing, can never see all its lenses, or masks what cannot be.
-
-    Only an entities lens on the question or answer says where to mask. Lenses
-    missing from `lenses` (inherited ones) are checked when the policy resolves.
-    """
     if not rule.then:
         raise ImproperlyConfigured(f"Rule {rule.name!r} does nothing: give it `then`.")
     read = [lenses[name] for name in sorted(rule.lenses()) if name in lenses]
@@ -225,8 +187,6 @@ def validate_rule(rule: Rule, lenses: Mapping[str, Lens]) -> None:
 
 @dataclass
 class ResolvedPolicy:
-    """A policy with packs and settings applied; this is what runs."""
-
     name: str
     label: str = ""
     description: str = ""
@@ -236,13 +196,11 @@ class ResolvedPolicy:
     stream_mode: str = "auto"
     fail_mode: str = "closed"
     retention: dict[str, int] = field(default_factory=dict)
-    # Who declared each value, e.g. "lens:pii" -> "security", "policy.capture" -> "settings".
     sources: dict[str, str] = field(default_factory=dict)
     origin: str = "code"
     extends: list[str] = field(default_factory=list)
 
     def changes_answer_at_finish(self) -> list[str]:
-        """Enforced rules that may mask or withhold the answer at finish."""
         finish = self.active_lenses(Stage.FINISH)
         reads = {
             "block": {lens.name for lens in finish},
@@ -265,7 +223,6 @@ class ResolvedPolicy:
         return self.stream_mode == "auto" and bool(self.changes_answer_at_finish())
 
     def blocks_tool_calls(self) -> bool:
-        """Whether an enforced rule may block a tool call for what the call holds."""
         calls = {lens.name for lens in self.active_lenses(Stage.TOOL, Subject.TOOL_CALL)}
         return any(
             rule.mode is Mode.ENFORCE
@@ -291,14 +248,12 @@ class ResolvedPolicy:
 
 
 def validate_choice(key: str, value: Any, choices: tuple[str, ...]) -> str:
-    """A typo such as "atuo" must not silently stream live."""
     if value not in choices:
         raise ValueError(f"{key} {value!r} is not one of {list(choices)}")
     return str(value)
 
 
 def default_stream_mode() -> str:
-    """Unlike FAIL_MODE, a typo is a configuration error."""
     try:
         return validate_choice("stream_mode", setting("STREAM_MODE"), STREAM_MODES)
     except ValueError as exc:
@@ -306,5 +261,4 @@ def default_stream_mode() -> str:
 
 
 def default_fail_mode() -> str:
-    """Anything but "open", typos included, means "closed"."""
     return "open" if setting("FAIL_MODE") == "open" else "closed"

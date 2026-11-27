@@ -19,8 +19,6 @@ if TYPE_CHECKING:
 
 @auto_register
 class ResearchPlannerAgent(Agent):
-    """Research subagent that searches the web and builds a report."""
-
     name = "Research Planner"
     description = (
         "Researches a topic by searching the web, fetching pages, "
@@ -68,10 +66,6 @@ class ResearchPlannerAgent(Agent):
 
 @auto_register
 class DeepResearchAgent(Agent):
-    """
-    Deep research agent that delegates to a hidden research subagent.
-    """
-
     name = "Deep Research Agent"
     description = "Delegates multi-step web research to a hidden research subagent."
     model = settings.AI_SDK_DEFAULT_MODEL
@@ -105,8 +99,6 @@ class DeepResearchAgent(Agent):
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Stream:
-        """Create Haystack pipeline adapter with the research subagent."""
-
         generator = self.get_llm()
         storage_adapter = await self.get_storage_adapter(thread_id)
 

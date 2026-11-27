@@ -1,5 +1,3 @@
-"""What the runner does with a step's outcome, and with the rest of the run."""
-
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
@@ -9,8 +7,6 @@ from tests.mocks.workflow import FakeStep, RecordingListener
 
 
 class TestOrdering:
-    """Steps run in the order they were declared, and read what came before."""
-
     async def test_steps_run_in_the_order_they_were_declared(self):
         journal: list[str] = []
         steps = [
@@ -24,14 +20,12 @@ class TestOrdering:
         assert journal == ["ocr", "extract", "match"]
 
     async def test_a_step_declared_ahead_of_its_producer_is_refused(self):
-        """Order is the author's, so a list that cannot run says so up front."""
         steps = [FakeStep("match", requires=("extract",)), FakeStep("extract")]
 
         with pytest.raises(ImproperlyConfigured, match="no earlier step"):
             await run_steps(steps)
 
     async def test_a_step_reads_what_an_earlier_one_produced(self):
-        """Keyed by the producing step's name, so nothing has to be declared twice."""
         seen = {}
 
         class Reader(FakeStep):
@@ -49,7 +43,6 @@ class TestOrdering:
         assert seen["text"] == "the text"
 
     async def test_a_step_reads_what_the_caller_passed_in(self):
-        """Inputs are their own namespace, so they need no `requires`."""
         seen = {}
 
         class Reader(FakeStep):
@@ -62,7 +55,6 @@ class TestOrdering:
         assert seen["doc"] == "a file"
 
     async def test_a_step_name_and_an_input_name_do_not_contend(self):
-        """Two namespaces: one key can mean both without either being renamed."""
         seen = {}
 
         class Reader(FakeStep):
@@ -93,14 +85,12 @@ class TestFailure:
             await run_steps(steps)
 
     async def test_a_returned_failure_obeys_on_error_too(self):
-        """`on_error=FAIL` applies whether a step raises or reports it."""
         steps = [FakeStep("ocr", outcome=StepOutcome(status="failed", detail="empty text"))]
 
         with pytest.raises(WorkflowStopped, match="empty text"):
             await run_steps(steps)
 
     async def test_a_nested_runs_failure_obeys_this_steps_on_error(self):
-        """A step wrapping its own runner is a step, not a second run."""
         steps = [
             FakeStep(
                 "nested",
@@ -116,7 +106,6 @@ class TestFailure:
         assert outcomes["after"].status == "completed"
 
     async def test_a_continue_failure_reaches_only_what_read_its_output(self, caplog):
-        """The triage case: a step nothing depends on must not cost the rest."""
         journal: list[str] = []
         steps = [
             FakeStep("ocr", journal=journal),
@@ -133,8 +122,6 @@ class TestFailure:
 
         outcomes = await run_steps(steps)
 
-        # The exception text can hold hosts or an upstream body, so the step shows a
-        # ref and the text goes to the log.
         detail = outcomes["extract"].detail
         assert "provider 503" not in detail
         assert "(ref " in detail
@@ -144,7 +131,6 @@ class TestFailure:
         assert journal == ["ocr", "extract", "triage"]
 
     async def test_a_listener_sees_the_failure_a_handler_step_used_to_read(self):
-        """What `error_key` was for: reacting to a failure is a listener's job now."""
         listener = RecordingListener()
         steps = [
             FakeStep(
@@ -175,7 +161,6 @@ class TestFailure:
         assert outcomes["match"].detail == "extract failed"
 
     async def test_a_step_that_produced_none_still_counts_as_run(self):
-        """Completion, not a truthy value: None is an answer."""
         steps = [
             FakeStep("ocr", outcome=StepOutcome(output=None)),
             FakeStep("triage", requires=("ocr",)),
@@ -186,7 +171,6 @@ class TestFailure:
         assert outcomes["triage"].status == "completed"
 
     async def test_a_failure_cascades_without_the_runner_tracking_it(self):
-        """A skipped step produces nothing, so its own readers skip in turn."""
         steps = [
             FakeStep("ocr", raises=RuntimeError("down"), on_error=OnError.CONTINUE),
             FakeStep("extract", requires=("ocr",)),
@@ -199,7 +183,6 @@ class TestFailure:
         assert outcomes["match"].status == "skipped"
 
     async def test_every_step_that_will_not_run_is_recorded(self):
-        """Nothing is merely absent, so a reader can see the whole run."""
         listener = RecordingListener()
         steps = [
             FakeStep("ocr", raises=RuntimeError("down")),
@@ -257,7 +240,6 @@ class TestResume:
         assert seen["text"] == "stored text"
 
     async def test_a_replayed_step_is_not_recorded_again(self):
-        """Recording it would date a row to a run the step took no part in."""
         listener = RecordingListener()
 
         await run_steps(
@@ -269,7 +251,6 @@ class TestResume:
         assert [name for _event, name, _status in listener.events if name] == ["triage", "triage"]
 
     async def test_a_replayed_step_appears_in_the_runs_outputs(self):
-        """Resume must not drop replayed output from the returned map."""
         from django_ai_sdk.workflows.runs import _published
 
         outcomes = await run_steps(
@@ -291,7 +272,6 @@ class TestListeners:
         assert outcomes["ocr"].status == "completed"
 
     async def test_two_runs_can_use_different_listeners(self):
-        """No process-wide listener: the record follows the call."""
         first, second = RecordingListener(), RecordingListener()
 
         await run_steps([FakeStep("ocr")], listeners=[first])
@@ -311,7 +291,6 @@ class TestListeners:
         ]
 
     async def test_a_step_listener_fires_for_that_step_alone(self):
-        """The difference the two attachment points buy."""
         on_the_step = RecordingListener()
 
         await run_steps([FakeStep("ocr", listeners=(on_the_step,)), FakeStep("triage")])
@@ -319,7 +298,6 @@ class TestListeners:
         assert [name for _e, name, _s in on_the_step.events] == ["ocr", "ocr"]
 
     async def test_a_step_listener_is_told_nothing_about_the_run(self):
-        """Run-level callbacks belong to listeners attached to the workflow."""
         on_the_step = RecordingListener()
 
         await run_steps([FakeStep("ocr", listeners=(on_the_step,))])
@@ -327,7 +305,6 @@ class TestListeners:
         assert [event for event, _n, _s in on_the_step.events] == ["step_start", "step_end"]
 
     async def test_a_broken_listener_does_not_fail_work_that_succeeded(self):
-        """A listener watches the run; a notification nobody received is not a failure."""
         from django_ai_sdk.workflows.listeners import RunListener
 
         class Broken(RunListener):
@@ -364,7 +341,6 @@ class TestListeners:
         assert outcomes["ocr"].status == "completed"
 
     async def test_the_recorders_error_stops_the_run_before_the_step(self):
-        """The recorder is the run's own record: a step must not run without its row."""
         from django_ai_sdk.workflows.listeners import RunListener
 
         class Recorder(RunListener):
@@ -402,10 +378,7 @@ class TestListeners:
 
 
 class TestNamesAreResolvable:
-    """The one name rule left: a step's name is its key, and it is unique."""
-
     async def test_a_required_name_with_no_source_is_refused(self):
-        """The typo case: no earlier step goes by that name."""
         steps = [FakeStep("ocr"), FakeStep("triage", requires=("ocrr",))]
 
         with pytest.raises(ImproperlyConfigured, match="ocrr"):
@@ -425,8 +398,6 @@ class TestNamesAreResolvable:
 
 
 class TestTheRunLevelBracket:
-    """A workflow listener is told the run started, and how it ended."""
-
     async def test_run_start_fires_before_the_first_step(self):
         listener = RecordingListener()
 

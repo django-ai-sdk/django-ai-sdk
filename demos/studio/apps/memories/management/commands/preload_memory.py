@@ -68,7 +68,7 @@ class Command(BaseCommand):
             except ConflictError:
                 skipped_count += 1
                 self.stdout.write(f"Skipped (duplicate): {file_path.name}")
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 error_count += 1
                 self.stderr.write(f"Error ({file_path.name}): {e}")
 

@@ -1,7 +1,3 @@
-"""
-Unit tests for ThreadService operations.
-"""
-
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -16,11 +12,6 @@ from django_ai_sdk.storage.services import (
     aget_thread_history,
 )
 from tests.factories.schemas import chat_message
-
-
-# ============================================================================
-# ThreadService — create
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -72,11 +63,6 @@ class TestThreadServiceCreateThread:
             )
 
 
-# ============================================================================
-# ThreadService — rate_message
-# ============================================================================
-
-
 @pytest.mark.asyncio
 class TestThreadServiceRateMessage:
     async def test_rates_message_success(
@@ -116,11 +102,6 @@ class TestThreadServiceRateMessage:
                 )
 
 
-# ============================================================================
-# ThreadService — delete_message
-# ============================================================================
-
-
 @pytest.mark.asyncio
 class TestThreadServiceDeleteMessage:
     async def test_deletes_message_success(
@@ -145,11 +126,6 @@ class TestThreadServiceDeleteMessage:
             await ThreadService.delete_message(
                 "nonexistent", "msg-1", user=mock_user
             )
-
-
-# ============================================================================
-# ThreadService — restore_message
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -178,15 +154,8 @@ class TestThreadServiceRestoreMessage:
             )
 
 
-# ============================================================================
-# ThreadService — create_thread permission checks
-# ============================================================================
-
-
 @pytest.mark.asyncio
 class TestThreadServiceCreateThreadPermissions:
-    """Thread creation permission-denied scenarios."""
-
     async def test_denies_create_when_deny_all(
         self, mock_agents_registry, mock_user
     ):
@@ -218,15 +187,8 @@ class TestThreadServiceCreateThreadPermissions:
         assert thread_id is not None
 
 
-# ============================================================================
-# ThreadService — object-level permissions
-# ============================================================================
-
-
 @pytest.mark.asyncio
 class TestThreadServiceObjectPermissions:
-    """Thread service methods that delegate to object-level permissions."""
-
     async def test_denies_rate_when_is_owner_and_mismatch(
         self, mock_storage_adapter_registry, mock_user
     ):
@@ -254,28 +216,15 @@ class TestThreadServiceObjectPermissions:
             assert result is True
 
 
-# ============================================================================
-# DbStorageAdapter — update_thread title truncation
-# ============================================================================
-
-
 @pytest.mark.django_db
 class TestThreadTitleMaxLengthConstant:
     def test_constant_matches_db_column(self):
-        """Guards against the constant and the model field drifting apart."""
         assert THREAD_TITLE_MAX_LENGTH == Thread._meta.get_field("title").max_length
 
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestDbStorageAdapterUpdateThreadTitle:
-    """`title` must never exceed the DB column's max_length.
-
-    `update_thread` saves via `thread.asave()`, which bypasses Django's
-    `full_clean()` validation - an over-length title would otherwise hit the
-    raw DB constraint and raise instead of being handled gracefully.
-    """
-
     async def test_truncates_title_exceeding_max_length(self):
         thread = await Thread.objects.acreate()
         overlong_title = "x" * (THREAD_TITLE_MAX_LENGTH + 50)
@@ -300,7 +249,7 @@ class TestDbStorageAdapterUpdateThreadTitle:
         from django_ai_sdk.memories.models import Memory
 
         thread = await Thread.objects.acreate()
-        stale = await Thread.objects.aget(id=thread.id)  # read before the upload lands
+        stale = await Thread.objects.aget(id=thread.id)
         memory = await Memory.objects.acreate(name="files", is_hidden=True)
         await Thread.objects.filter(id=thread.id).aupdate(file_memory=memory)
 
@@ -315,8 +264,6 @@ class TestDbStorageAdapterUpdateThreadTitle:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestRatingTwiceDoesNotRaise:
-    """A double-click rates twice at once: both requests may miss the existing row."""
-
     async def test_a_rating_that_raced_the_first_one_updates_it(self):
         from django_ai_sdk.conversation.models import Message, MessageFeedback
         from tests.factories.db import UserFactory
@@ -327,7 +274,6 @@ class TestRatingTwiceDoesNotRaise:
         adapter = DbStorageAdapter(str(thread.id))
         await adapter.rate_message(str(message.id), rating=1, user=user)
 
-        # The second request read before the first one's row existed.
         with patch.object(
             MessageFeedback.objects, "aget", AsyncMock(side_effect=MessageFeedback.DoesNotExist)
         ):
@@ -335,11 +281,6 @@ class TestRatingTwiceDoesNotRaise:
 
         [feedback] = [f async for f in MessageFeedback.objects.filter(message=message)]
         assert feedback.rating == -1
-
-
-# ============================================================================
-# Thread history & file meta
-# ============================================================================
 
 
 @pytest.mark.django_db
@@ -410,15 +351,13 @@ class TestGetThreadFileMeta:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestAgentHistoryChecksTheThreadOwner:
-    """An agent anyone may use still only shows a thread to its owner."""
-
     async def _history(self, thread_id, user):
         from django_ai_sdk.agents.base import Agent
         from django_ai_sdk.protocols.vercel import VercelProtocolHandler
         from django_ai_sdk.storage.db import DbStorageAdapter
         from tests.mocks.agent import create_agent_mock
 
-        agent = create_agent_mock()  # AllowAll: the agent chain alone lets anyone in.
+        agent = create_agent_mock()
         agent.get_storage_adapter = AsyncMock(return_value=DbStorageAdapter(thread_id))
         agent.protocol_handler = VercelProtocolHandler()
         return await Agent.history(agent, thread_id, user=user)

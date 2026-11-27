@@ -1,5 +1,3 @@
-"""The tool stage: each tool call checked before it runs, each result masked."""
-
 from __future__ import annotations
 
 import dataclasses
@@ -70,11 +68,9 @@ class TestTools:
         assert ran == []
         row = await RuleMatch.objects.aget(rule="no_secret_tools")
         assert row.acted
-        # The chat shows the call refused at once, not still running.
         outputs = [p for p in parts if p.get("type", "").startswith("tool-output")]
         assert len(outputs) == 1
         assert outputs[0]["type"] == "tool-output-error"
-        # And the answer's notice counts the refusal, so the badge under it does too.
         finished = next(n for n in oversight_parts(parts) if n["stage"] == "finish")
         assert "no_secret_tools" in {m["rule"] for m in finished["detail"]["matches"]}
 
@@ -124,7 +120,6 @@ class TestTools:
         tool, _ = lookup_tool()
         replies = [lookup("Mevrouw Jansen", "c1"), lookup("Jan", "c2"), "Done."]
         parts = await chat(make_agent(replies, Storage(), tools=[tool], policy=name), "look")
-        # Nothing holds this answer, yet the blocked call's arguments never reach the client.
         assert "Mevrouw" not in json.dumps(parts)
         shown = [p for p in parts if p.get("toolCallId") == "c2" and "available" in p["type"]]
         assert [(p["type"], p.get("input")) for p in shown] == [
@@ -132,7 +127,6 @@ class TestTools:
             ("tool-input-available", {"name": "Jan"}),
             ("tool-output-available", None),
         ]
-        # A policy whose tool call rules only report holds nothing back.
         report = policy("test-live-arguments-report", [], [])
         parts = await chat(make_agent(replies[1:], Storage(), tools=[tool], policy=report), "look")
         shown = [p.get("input") for p in parts if p.get("type") == "tool-input-available"]
@@ -145,7 +139,6 @@ class TestTools:
 
         from tests.oversight.helpers import lookup_tool
 
-        # The refusal names what it stopped, which a gate rule would block in a tool result.
         name = policy(
             "test-own-refusal",
             [
@@ -246,7 +239,6 @@ class TestTools:
             for choice in json.loads(line.removeprefix("data: ")).get("choices", [])
             for call in choice["delta"].get("tool_calls") or []
         ]
-        # Held back while the call was judged, then sent: the stream ends with the real ones.
         assert [c["function"]["arguments"] for c in calls] == ['{"name": "Jan"}']
 
     async def test_the_gate_can_take_every_tool_away(self):
@@ -379,10 +371,8 @@ class TestToolStage:
 
         guard = await start("test-narrowing")
         await guard.gate()
-        # The call that set it off is not one it names: it runs.
         assert await guard.tool_call(ToolCall(name="lookup", arguments={"q": "delete"})) is None
         assert guard.restrict == ["send"]
-        # Later calls to the tools it names are refused, and get_tools() leaves them out.
         refused = await guard.tool_call(ToolCall(name="send", arguments={"text": "hi"}))
         assert refused == str(TOOL_UNAVAILABLE_MESSAGE)
         assert await guard.tool_call(ToolCall(name="lookup", arguments={"q": "hi"})) is None
@@ -390,8 +380,6 @@ class TestToolStage:
 
 @pytest.mark.django_db(transaction=True)
 class TestToolResultMasking:
-    """What a tool hands the model follows the tool fail mode, and never breaks the loop."""
-
     IBAN_RESULT = '{"iban": "NL91ABNA0417164300"}'
 
     async def test_a_result_that_cannot_be_checked_is_withheld(self):
@@ -427,8 +415,6 @@ class TestToolResultMasking:
             assert await guard.mask_text(self.IBAN_RESULT) == str(UNCHECKED_TEXT)
 
     async def test_a_result_too_long_to_judge_is_withheld_without_firing_the_block(self):
-        # A gate lens behind an enforced block also reads tool results. One too long for
-        # its judge must be withheld, not count as the fraud the rule is about.
         from django_ai_sdk.oversight import Block, JudgeLens
         from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
         from django_ai_sdk.oversight.judges.base import TOO_LONG, Judge
@@ -470,7 +456,6 @@ class TestToolResultMasking:
         turn = await closed_turn(guard)
         row = await RuleMatch.objects.aget(turn=turn, rule="would_stop", stage="tool")
         assert not row.acted and turn.outcome == "allowed"
-        # A lens only a report rule reads withholds nothing when it fails.
         down = FnLens(name="down", stages=[Stage.GATE], fn=broken)
         guard = await start(policy("test-report-result-down", [down], rules("down")))
         assert await guard.mask_text("Please wire it today") == "Please wire it today"
@@ -517,7 +502,6 @@ class TestToolResultMasking:
         assert [lens.name for lens in other_text_lenses(policy)] == ["leak"]
         guard = await start("test-writer")
         await guard.gate()
-        # A record that mentions someone's mother takes no tools away mid-turn.
         assert await guard.mask_text("Visited; my mother said hi") == "Visited; my mother said hi"
         assert guard.restrict is None
 
@@ -549,8 +533,6 @@ class TestToolResultMasking:
 
 @pytest.mark.django_db(transaction=True)
 class TestOverLengthResults:
-    """A result longer than a judge reads is judged in chunks that it reads."""
-
     @staticmethod
     def short_judge(fn):
         from django_ai_sdk.oversight.judges.base import TOO_LONG, Judge
@@ -586,7 +568,6 @@ class TestOverLengthResults:
         return policy(name, [lens], [Rule("m", when=L("names").is_true, then=Mask(), mode=ENFORCE)])
 
     async def blocks(self, name, fn, when, text, **lens):
-        """Whether a block rule `when` on lens "x", answered by `fn` per chunk, withholds `text`."""
         from django_ai_sdk.oversight import Block, JudgeLens
         from django_ai_sdk.oversight.guard.notices import BLOCKED_TEXT
 
@@ -597,7 +578,6 @@ class TestOverLengthResults:
         return await guard.mask_text(text) == str(BLOCKED_TEXT)
 
     async def test_names_in_every_chunk_and_on_a_boundary_are_masked(self):
-        # 98 + "Jan" straddles the first 100-character chunk's end.
         text = "x" * 98 + "Jan" + "y" * 150 + "Jan" + "z" * 120
         guard = await start(self.masking("test-chunk-mask"))
         masked = await guard.mask_text(text)
@@ -735,7 +715,6 @@ class TestToolsTakenAwayInChat:
         with guarding(guard):
             guard.restrict = ["send"]
             for _ in range(2):
-                # Every step offers the full list again.
                 state.data["tools"] = [lookup, send]
                 LimitToolChoiceHook().run(state)
         notes = [m for m in state.get("messages") if m.meta.get(TOOLS_REMOVED_META_KEY)]

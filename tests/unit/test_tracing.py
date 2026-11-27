@@ -23,8 +23,6 @@ from haystack.utils import Secret
 
 @component
 class StubGenerator:
-    """Minimal component mimicking a generator's output shape — no LLM calls."""
-
     def __init__(self, model="stub-model"):
         self.model = model
         self.streaming_callback = None
@@ -60,7 +58,6 @@ async def _amake_thread_and_message():
 
 @pytest.fixture
 def orm_tracer():
-    """Enable the DB tracer, restoring Haystack's previous tracer afterwards."""
     from haystack import tracing
 
     previous = tracing.tracer.actual_tracer
@@ -145,7 +142,6 @@ class TestAsyncPipeline:
         child = await Trace.objects.aget(operation_name="worker-child")
         root_row = await Trace.objects.aget(operation_name="root")
         assert child.parent_id == root_row.id
-        # Inherited from the parent span object, not from the contextvar.
         assert child.thread_id == thread.id
         assert child.message_id == message.id
 
@@ -243,11 +239,7 @@ class TestCorrelation:
 
 
 class TestStreamAdapter:
-    """The streaming adapter's tracing touchpoints."""
-
     def test_generator_is_not_mutated(self):
-        # The adapter configures nothing on the generator: what a factory built is
-        # what runs, so streaming usage is the generator's own configuration.
         generator = OpenAIChatGenerator(api_key=Secret.from_token("test"))
         pipeline = Pipeline()
         pipeline.add_component("gen", generator)
@@ -279,8 +271,6 @@ class TestStreamAdapter:
 
 
 class TestUsageHarvesting:
-    """Token usage must land whether or not content tracing stores the payload."""
-
     @staticmethod
     def _llm_output(model="gpt-x", prompt=11, completion=7, total=18):
         reply = HaystackChatMessage.from_assistant(
@@ -305,7 +295,6 @@ class TestUsageHarvesting:
         row = Trace.objects.get(operation_name="haystack.agent.step.llm")
         assert row.model_name == "gpt-x"
         assert (row.prompt_tokens, row.completion_tokens, row.total_tokens) == (11, 7, 18)
-        # The payload itself stays out of the DB while content tracing is off.
         assert row.tags == {}
 
     @pytest.mark.django_db
@@ -372,7 +361,6 @@ class TestUsageHarvesting:
         stub = Trace.objects.get(operation_name="haystack.component.run")
         assert stub.model_name == "stub-model"
         assert (stub.prompt_tokens, stub.completion_tokens, stub.total_tokens) == (10, 5, 15)
-        # The payload is gated even though the counts are not.
         assert "haystack.component.output" not in stub.tags
 
     @pytest.mark.django_db
@@ -423,11 +411,8 @@ class TestUsageHarvesting:
 
 
 class TestTokenUsage:
-    """Totals must not double-count the agent's own rollup span."""
-
     @staticmethod
     def _agent_run(thread, message, usage):
-        """Trace a realistic agent run: a rollup span over one step per usage."""
         tracer = DefaultTracer()
         with bind(thread_id=thread.id, message_id=message.id):
             with tracer.trace("haystack.agent.run") as agent_span:
@@ -455,7 +440,6 @@ class TestTokenUsage:
         self._agent_run(thread, message_a, [(10, 5), (20, 8)])
         self._agent_run(thread, message_b, [(7, 3)])
 
-        # The rollups hold the same numbers, so a naive Sum would double these.
         assert Trace.objects.for_thread(thread.id).token_usage() == {
             "prompt_tokens": 37,
             "completion_tokens": 16,
@@ -521,8 +505,6 @@ class TestTagHandling:
 
     @pytest.mark.django_db
     def test_excluding_a_content_tag_keeps_its_token_usage(self, orm_tracer, settings, monkeypatch):
-        # Usage is harvested before the exclusion guard, so the counts survive
-        # even when the payload carrying them is dropped.
         monkeypatch.setattr(haystack_tracer, "is_content_tracing_enabled", True)
         settings.AI_SDK_TRACING_EXCLUDED_TAGS = ["haystack.agent.step.llm.output"]
         tracer = DefaultTracer()
@@ -546,9 +528,6 @@ class TestTagHandling:
 
 
 class TestSubagentSpan:
-    """A coordinator and its subagent both emit `haystack.agent.run`; the
-    named wrapper span is what tells the two subtrees apart."""
-
     @pytest.mark.django_db
     @pytest.mark.usefixtures("installs_as_is")
     def test_subagent_run_is_a_named_child_span(self, orm_tracer):
@@ -575,16 +554,11 @@ class TestSubagentSpan:
         coordinator = Trace.objects.get(parent_id=None)
         assert coordinator.operation_name == "haystack.agent.run"
         assert span.parent_id == coordinator.id
-        # The subagent's own loop nests under the named span, not the coordinator.
         inner = Trace.objects.get(operation_name="haystack.agent.run", parent_id=span.id)
         assert inner.parent_id == span.id
 
 
 def _span(operation_name, *, parent=None, agent_id="", agent_name="", tokens=None, thread=None):
-    """Create a Trace row directly — cheaper than driving a real agent loop.
-
-    Inherits the parent's thread the way TelemetrySpan does for real spans.
-    """
     prompt, completion, total = tokens or (None, None, None)
     return Trace.objects.create(
         operation_name=operation_name,
@@ -622,8 +596,6 @@ class TestSubagentColumn:
 
     @pytest.mark.django_db
     def test_excluded_tags_still_fill_the_columns(self, orm_tracer, settings):
-        """Excluding a tag from storage must not empty its column, the same
-        way excluding a tag never affects the token columns."""
         from django_ai_sdk.agents.subagent import SUBAGENT_ID_TAG, SUBAGENT_NAME_TAG
 
         settings.AI_SDK_TRACING_EXCLUDED_TAGS = [SUBAGENT_NAME_TAG, SUBAGENT_ID_TAG]
@@ -684,8 +656,6 @@ class TestSubagentQueries:
 
     @pytest.mark.django_db
     def test_two_subagents_sharing_a_name_do_not_merge(self):
-        """The bug agent_name-keying had: two different classes can share a
-        display name, and their totals must not collapse into one entry."""
         root = _span("haystack.agent.run")
         first = _span(
             "django_ai_sdk.subagent.run",
@@ -712,7 +682,6 @@ class TestSubagentQueries:
 
     @pytest.mark.django_db
     def test_usage_sums_the_subtree_not_the_wrapper(self):
-        """The wrapper span carries no tokens; its LLM calls are descendants."""
         root = _span("haystack.agent.run")
         planner = _span(
             "django_ai_sdk.subagent.run",
@@ -723,7 +692,6 @@ class TestSubagentQueries:
         inner = _span("haystack.agent.run", parent=planner)
         _span("haystack.agent.step.llm", parent=inner, tokens=(10, 5, 15))
         _span("haystack.agent.step.llm", parent=inner, tokens=(20, 7, 27))
-        # The coordinator's own call must not be attributed to the subagent.
         _span("haystack.agent.step.llm", parent=root, tokens=(99, 99, 198))
 
         assert Trace.objects.subagent_usage() == {
@@ -784,14 +752,11 @@ class TestSubagentQueries:
 
     @pytest.mark.django_db
     def test_span_without_an_id_is_excluded(self):
-        """Data recorded before agent_id existed, or a span that otherwise never
-        got tagged, cannot be attributed to a stable key."""
         root = _span("haystack.agent.run")
         _span("django_ai_sdk.subagent.run", parent=root, agent_name="Research Planner")
 
         assert Trace.objects.subagent_usage() == {}
         assert Trace.objects.subagent_ids() == []
-        # Still visible by name, since that column is unaffected.
         assert Trace.objects.subagent_names() == ["Research Planner"]
 
     @pytest.mark.django_db
@@ -813,7 +778,6 @@ class TestSubagentQueries:
             agent_name="Research Planner",
         )
         _span("haystack.agent.step.llm", parent=planner, tokens=(10, 5, 15))
-        # A second thread's subagent must not leak in.
         other_root = _span("haystack.agent.run")
         other = _span(
             "django_ai_sdk.subagent.run",

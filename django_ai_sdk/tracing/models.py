@@ -9,8 +9,6 @@ from django_ai_sdk.tracing.managers import TraceManager, TraceQuerySet
 
 
 class Trace(models.Model):
-    """A single span, persisted for observability."""
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     operation_name = models.CharField(max_length=255)
     started_at = models.DateTimeField()
@@ -42,7 +40,6 @@ class Trace(models.Model):
         db_constraint=False,
     )
 
-    # Type hints for FK id attrs
     parent_id: uuid.UUID | None
     thread_id: uuid.UUID | None
     message_id: uuid.UUID | None
@@ -55,7 +52,6 @@ class Trace(models.Model):
     completion_tokens = models.IntegerField(null=True, blank=True)
     total_tokens = models.IntegerField(null=True, blank=True)
 
-    # Typed as the queryset the manager proxies
     objects: ClassVar[TraceQuerySet] = TraceManager()  # ty: ignore[invalid-assignment]
 
     class Meta:

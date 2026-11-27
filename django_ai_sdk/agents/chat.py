@@ -1,5 +1,3 @@
-"""One chat turn of an agent: pick the history, stream the run, store the question once it passed."""
-
 from __future__ import annotations
 
 import uuid
@@ -36,18 +34,15 @@ async def chat_turn(
     storage_adapter: BaseStorageAdapter | None,
     user: AbstractBaseUser | AnonymousUser | None,
 ) -> Any:
-    """Pick the history, then stream. The run's hooks open the turn and gate it."""
     from django_ai_sdk.oversight.history import history_for
     from django_ai_sdk.oversight.plugin import TurnRequest, mask_stored_question
 
-    # Prefer the stored thread: the client's copy may be unmasked or made up.
     sent, vouched = await history_for(
         agent, storage_adapter if thread else None, messages, channel="chat", user=user
     )
     if sent is not messages:
         messages = sent
         newest = bool(messages) and messages[-1].role == "user"
-        # Validate the stored messages' attachments too.
         await agent._resolve_attachments(
             messages[:-1] if newest else messages, thread, user, inline_images=False
         )
@@ -59,13 +54,11 @@ async def chat_turn(
         )
 
     async def admit(request: TurnRequest) -> None:
-        """Called once the gate passed the question, so a blocked question is never stored."""
         mask_stored_question(messages, request)
         question_id = await _store_question(messages, storage_adapter, thread_id)
         if request.guard is not None and question_id:
             request.guard.user_message_id = question_id
         if agent.title_generation and thread and not thread.title:
-            # A failed title must not fail the reply.
             try:
                 title = await generate_thread_title(
                     agent=agent, messages=messages, thread_id=thread.id, user=user
@@ -76,7 +69,6 @@ async def chat_turn(
                 logger.exception("Thread title generation failed")
 
     async def build_adapter() -> Streamable:
-        # Built inside the stream, so a failure (e.g. RAG warmup) reaches the client.
         adapter = await agent.get_pipeline_adapter(thread_id=thread_id, user=user)
         suggestion_generator = agent.get_suggestion_generator()
         if suggestion_generator:
@@ -84,14 +76,11 @@ async def chat_turn(
         context: dict[str, Any] = {}
         if required_tools := agent.get_run_required_tools(messages):
             context["required_tools"] = required_tools
-        # Artifacts are stored on the thread: none without one.
         if thread_id:
             adapter.thread_id = thread_id
             adapter.user = user
-            # Shown after each mapped tool's result, for any tool of the run.
             adapter.tool_artifacts = agent.tool_artifacts
 
-            # Seed the citation registry with sources from current thread
             registry = getattr(adapter, "citation_registry", None)
             if registry is not None:
                 await registry.seed_from_thread(thread_id)
@@ -131,7 +120,6 @@ async def _unguardable(
     user: AbstractBaseUser | AnonymousUser | None,
     thread_id: str | None,
 ) -> Any:
-    """A non-Haystack adapter can't be checked: blocked under a policy unless it fails open."""
     from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.oversight.plugin import TurnRequest
     from django_ai_sdk.oversight.stream import close_unguardable
@@ -150,10 +138,6 @@ async def _store_question(
     storage_adapter: BaseStorageAdapter | None,
     thread_id: str | None,
 ) -> str:
-    """Store only the last user message, the one just sent, and return its id.
-
-    Many protocols send the full conversation, but only the new message is stored.
-    """
     if not (storage_adapter and thread_id):
         return ""
     question = last_user_message(messages)
@@ -161,7 +145,6 @@ async def _store_question(
         logger.debug("No user messages found to store")
         return ""
     logger.debug(f"Storing last user message: {len(question.content)} characters")
-    # FIXME: we need a better way on how to create a id for the user messages
     question.id = str(uuid.uuid4())
     await storage_adapter.store_chat_message(question)
     return question.id

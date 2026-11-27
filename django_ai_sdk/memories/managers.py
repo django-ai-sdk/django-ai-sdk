@@ -10,10 +10,7 @@ if TYPE_CHECKING:
 
 
 class EntryManager(models.Manager):
-    """Manager for Entry"""
-
     def for_rag(self, thread_id: str) -> QuerySet:
-        """Entries linked to this thread's memories, with `memory` preloaded."""
         return (
             self.filter(
                 memory__thread_links__thread_id=thread_id,

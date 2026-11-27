@@ -1,5 +1,3 @@
-"""No exception text may reach a client: not live, not on reload, in any protocol."""
-
 from __future__ import annotations
 
 import json

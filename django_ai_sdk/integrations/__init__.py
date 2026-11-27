@@ -7,8 +7,6 @@ from django_ai_sdk.integrations.base import (
     IntegrationNotConnectable,
     IntegrationStatus,
 )
-
-# Safe eagerly: loader.py defers its optional `mcp`/`haystack` imports.
 from django_ai_sdk.integrations.mcp.loader import MCPIntegration
 
 __all__ = [

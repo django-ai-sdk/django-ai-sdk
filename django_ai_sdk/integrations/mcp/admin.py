@@ -62,8 +62,6 @@ class MCPServerConfigAdmin(admin.ModelAdmin):
 
 @admin.register(MCPOAuthToken)
 class MCPOAuthTokenAdmin(admin.ModelAdmin):
-    """Read-only — observability only. Token material is never rendered, even encrypted."""
-
     list_display = ("user", "server_name", "is_expired_display", "expires_at")
     list_filter = ("server_name",)
     search_fields = ("server_name",)
@@ -80,8 +78,6 @@ class MCPOAuthTokenAdmin(admin.ModelAdmin):
 
 @admin.register(MCPOAuthClient)
 class MCPOAuthClientAdmin(admin.ModelAdmin):
-    """Read-only — observability only. ``client_secret`` is never rendered."""
-
     list_display = ("server_name", "client_id", "registered_at")
     search_fields = ("server_name", "client_id")
     fields = ("server_name", "client_id", "redirect_uri", "registered_at")

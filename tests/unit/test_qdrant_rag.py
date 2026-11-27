@@ -1,10 +1,3 @@
-"""
-Tests for Qdrant Hybrid RAG implementation.
-
-These tests use in-memory Qdrant (no LLM needed).
-Document indexing uses local FastEmbed models.
-"""
-
 import asyncio
 import threading
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -28,10 +21,7 @@ from tenacity import stop_after_delay as tenacity_stop_after_delay, wait_none
 
 
 class TestQdrantRAGInit:
-    """Test Qdrant RAG initialization."""
-
     def test_init_with_documents(self):
-        """Test initialization with document list."""
         docs = [RagDocument(id="1", content="test", title="Test")]
         rag = QdrantBM25HybridRAG(documents=docs)
         assert len(rag.documents) == 1
@@ -39,14 +29,12 @@ class TestQdrantRAGInit:
         assert rag._cached_document_store is None
 
     def test_init_with_config(self):
-        """Test initialization with custom config."""
         config = QdrantBM25HybridRAGConfig()
         docs = [RagDocument(id="1", content="test")]
         rag = QdrantBM25HybridRAG(documents=docs, config=config)
         assert rag.config == config
 
     def test_init_stores_documents(self):
-        """Test that initialization stores documents."""
         docs = [RagDocument(id="1", content="test", title="Test")]
         rag = QdrantBM25HybridRAG(documents=docs)
         assert len(rag.documents) == 1
@@ -54,8 +42,6 @@ class TestQdrantRAGInit:
 
 
 class TestQdrantRAGRemoteEmbeddings:
-    """AI_SDK_EMBEDDINGS_MODEL moves dense embeddings to the OpenAI-compatible API."""
-
     def test_local_fastembed_by_default(self):
         config = QdrantBM25HybridRAGConfig()
         assert not config.remote_embeddings
@@ -66,7 +52,6 @@ class TestQdrantRAGRemoteEmbeddings:
         )
 
     def test_the_dimension_setting_only_applies_to_a_remote_model(self, settings):
-        # Model switched off, dimension left: local vectors are 384
         settings.AI_SDK_EMBEDDINGS_DIM = 4096
         assert QdrantBM25HybridRAGConfig().embedding_dim == 384
         assert QdrantBM25HybridRAGConfig(embedding_dim=768).embedding_dim == 768
@@ -101,13 +86,10 @@ class TestQdrantRAGRemoteEmbeddings:
 
 
 class TestQdrantRAGWarmup:
-    """Test Qdrant RAG warmup (document indexing)."""
-
     @pytest.mark.asyncio
     async def test_warmup_creates_store(self):
-        """Test that warmup creates the document store."""
         docs = [RagDocument(id=f"doc-{i}", content=f"Content {i}") for i in range(3)]
-        config = QdrantBM25HybridRAGConfig()  # Uses :memory: by default
+        config = QdrantBM25HybridRAGConfig()
         rag = QdrantBM25HybridRAG(documents=docs, config=config)
         await rag.warmup()
 
@@ -117,38 +99,31 @@ class TestQdrantRAGWarmup:
 
     @pytest.mark.asyncio
     async def test_warmup_skip_if_already_warmed(self):
-        """Test that warmup skips if already warmed up."""
         docs = [RagDocument(id="1", content="test")]
         config = QdrantBM25HybridRAGConfig()
         rag = QdrantBM25HybridRAG(documents=docs, config=config)
         await rag.warmup()
         assert rag._is_warmed_up
 
-        # Store the current count
         count_before = rag._cached_document_store.count_documents()
 
-        # Second warmup should skip (is_warmed_up remains True)
         await rag.warmup()
         assert rag._is_warmed_up
         assert rag._cached_document_store.count_documents() == count_before
 
     @pytest.mark.asyncio
     async def test_warmup_with_chunking(self):
-        """Test that warmup applies chunking."""
-        # Create a long document that will be chunked
         long_content = "This is a test. " * 100
         docs = [RagDocument(id="1", content=long_content)]
         config = QdrantBM25HybridRAGConfig(chunk_size=50, chunk_overlap=10)
         rag = QdrantBM25HybridRAG(documents=docs, config=config)
         await rag.warmup()
 
-        # Should have more chunks than documents
         chunk_count = rag._cached_document_store.count_documents()
         assert chunk_count > 1
 
     @pytest.mark.asyncio
     async def test_warmup_with_empty_documents(self):
-        """Test warmup with no documents."""
         config = QdrantBM25HybridRAGConfig()
         rag = QdrantBM25HybridRAG(documents=[], config=config)
         await rag.warmup()
@@ -158,11 +133,8 @@ class TestQdrantRAGWarmup:
 
 
 class TestQdrantRAGAddDocuments:
-    """Test adding documents incrementally."""
-
     @pytest.mark.asyncio
     async def test_add_documents(self):
-        """Test adding new documents to existing index."""
         docs = [RagDocument(id="1", content="Original", title="Orig")]
         config = QdrantBM25HybridRAGConfig()
         rag = QdrantBM25HybridRAG(documents=docs, config=config)
@@ -177,7 +149,6 @@ class TestQdrantRAGAddDocuments:
 
     @pytest.mark.asyncio
     async def test_add_multiple_documents(self):
-        """Test adding multiple documents at once."""
         docs = [RagDocument(id="1", content="Original")]
         config = QdrantBM25HybridRAGConfig()
         rag = QdrantBM25HybridRAG(documents=docs, config=config)
@@ -193,25 +164,20 @@ class TestQdrantRAGAddDocuments:
 
     @pytest.mark.asyncio
     async def test_add_to_unwarmed_rag(self):
-        """Test adding documents when not warmed up."""
         docs = [RagDocument(id="1", content="Original")]
         config = QdrantBM25HybridRAGConfig()
         rag = QdrantBM25HybridRAG(documents=docs, config=config)
-        await rag.warmup()  # Warmup first!
+        await rag.warmup()
 
         new_docs = [RagDocument(id="2", content="New")]
         await rag.add_documents(new_docs)
 
-        # Should have been auto-warmed
         assert rag._is_warmed_up
 
 
 class TestQdrantRAGRemoveDocuments:
-    """Test Qdrant RAG document removal."""
-
     @pytest.mark.asyncio
     async def test_remove_documents(self):
-        """Test removing a document from the index."""
         docs = [
             RagDocument(id="1", content="Keep this"),
             RagDocument(id="2", content="Remove this"),
@@ -221,16 +187,12 @@ class TestQdrantRAGRemoveDocuments:
         await rag.warmup()
         original_count = rag._cached_document_store.count_documents()
 
-        # Remove one document
         await rag.remove_documents(["2"])
 
-        # The count should be less than or equal to original
-        # Note: due to chunking, the exact count may vary
         assert rag._cached_document_store.count_documents() <= original_count
 
     @pytest.mark.asyncio
     async def test_remove_multiple(self):
-        """Test removing multiple documents."""
         docs = [
             RagDocument(id="1", content="Doc 1"),
             RagDocument(id="2", content="Doc 2"),
@@ -242,17 +204,12 @@ class TestQdrantRAGRemoveDocuments:
 
         await rag.remove_documents(["1", "3"])
 
-        # After removing 2 docs out of 3, should have at most 1 remaining
-        # (or more if chunking created multiple chunks per doc)
         assert rag._cached_document_store.count_documents() <= 2
 
 
 class TestQdrantRAGRefreshDocuments:
-    """Test refreshing all documents."""
-
     @pytest.mark.asyncio
     async def test_refresh_documents(self):
-        """Test refreshing with completely new documents."""
         docs = [RagDocument(id="old", content="old", title="Old")]
         config = QdrantBM25HybridRAGConfig()
         rag = QdrantBM25HybridRAG(documents=docs, config=config)
@@ -265,7 +222,6 @@ class TestQdrantRAGRefreshDocuments:
 
     @pytest.mark.asyncio
     async def test_refresh_reuses_store(self):
-        """Test that refresh reuses the cached store."""
         docs = [RagDocument(id="old", content="old")]
         config = QdrantBM25HybridRAGConfig()
         rag = QdrantBM25HybridRAG(documents=docs, config=config)
@@ -276,12 +232,10 @@ class TestQdrantRAGRefreshDocuments:
         new_docs = [RagDocument(id="new", content="new")]
         await rag.refresh_documents(new_docs)
 
-        # Should reuse the same store instance
         assert rag._cached_document_store is old_store
 
     @pytest.mark.asyncio
     async def test_refresh_full_rebuild(self):
-        """Test that refresh completely replaces documents."""
         docs = [
             RagDocument(id="old1", content="old content 1"),
             RagDocument(id="old2", content="old content 2"),
@@ -293,21 +247,15 @@ class TestQdrantRAGRefreshDocuments:
         new_docs = [RagDocument(id="new1", content="new content")]
         await rag.refresh_documents(new_docs)
 
-        # Should only have 1 source document (new1)
         assert rag._cached_document_store.count_documents() >= 1
 
-        # Verify old documents are gone by checking the count is less than before
-        # (or just check that it's the right number for new docs)
         assert len(rag.documents) == 1
         assert rag.documents[0].id == "new1"
 
 
 class TestQdrantFileLockRetry:
-    """Tests for Qdrant file lock retry logic (_create_document_store)."""
-
     @pytest.fixture(autouse=True)
     def no_retry_wait(self):
-        """Disable retry backoff sleeps so exhaustion tests run instantly."""
         with (
             patch(
                 "django_ai_sdk.rags.qdrant_hybrid.wait_exponential",
@@ -322,7 +270,6 @@ class TestQdrantFileLockRetry:
 
     @pytest.fixture
     def rag(self, tmp_path):
-        """Persistent-mode RAG instance backed by a temp directory."""
         storage = QdrantStorageConfig(backend="persistent", persist_path=str(tmp_path))
         config = QdrantBM25HybridRAGConfig(storage=storage)
         docs = [RagDocument(id="1", content="test", title="Test")]
@@ -330,7 +277,6 @@ class TestQdrantFileLockRetry:
 
     @pytest.mark.asyncio
     async def test_retry_on_file_lock_contention(self, rag):
-        """Verify retry succeeds when first QdrantDocumentStore call raises lock error."""
         valid_store = MagicMock()
         valid_store.count_documents.return_value = 0
 
@@ -359,8 +305,6 @@ class TestQdrantFileLockRetry:
 
     @pytest.mark.asyncio
     async def test_exhausts_retries(self, rag):
-        """Verify retry raises after exhausting attempts."""
-
         def always_fail(*args, **kwargs):
             raise RuntimeError(
                 f"Storage folder {rag.config.storage.persist_path} is already accessed by "
@@ -379,7 +323,6 @@ class TestQdrantFileLockRetry:
 
     @pytest.mark.asyncio
     async def test_non_lock_errors_propagate_immediately(self, rag):
-        """Verify non-lock RuntimeErrors are not retried."""
         with patch(
             "django_ai_sdk.rags.qdrant_hybrid.QdrantDocumentStore",
             side_effect=RuntimeError("Something else went wrong"),
@@ -392,8 +335,6 @@ class TestQdrantFileLockRetry:
 
 
 class TestQdrantServerCollectionRace:
-    """Two first writes to a new collection on a Qdrant server: the second sees it exist."""
-
     @pytest.mark.asyncio
     async def test_a_collection_another_worker_just_created_is_used(self):
         class Conflict(Exception):
@@ -411,17 +352,10 @@ class TestQdrantServerCollectionRace:
             "django_ai_sdk.rags.qdrant_hybrid.QdrantDocumentStore", side_effect=[raced, ready]
         ) as store:
             assert rag._create_document_store(recreate=True) is ready
-        # Recreating again would delete the collection the other worker just created.
         assert [c.kwargs["recreate_index"] for c in store.call_args_list] == [True, False]
 
 
 class TestQdrantRealFileLock:
-    """Against a real lock held by another client, not a mocked constructor.
-
-    The store opens its client lazily, so a retry around the constructor alone
-    never sees the lock.
-    """
-
     @staticmethod
     def rag(path, lock_timeout):
         storage = QdrantStorageConfig(
@@ -460,8 +394,6 @@ class TestQdrantRealFileLock:
 
 
 class TestQdrantMissingEmbeddings:
-    """Chunks the embedding API failed on are stored sparse only; embed just those."""
-
     @staticmethod
     def _store():
         from haystack.dataclasses import Document, SparseEmbedding
@@ -481,7 +413,6 @@ class TestQdrantMissingEmbeddings:
 
     @staticmethod
     def _embed_missing(store, vector):
-        """Run with an embedder that gives every document `vector` (None: it fails)."""
         from dataclasses import replace
 
         seen = []
@@ -506,7 +437,7 @@ class TestQdrantMissingEmbeddings:
         docs = {d.id: d for d in store.filter_documents()}
         assert docs["a"].embedding == pytest.approx([0.0, 1.0, 0.0])
         assert docs["b"].embedding == pytest.approx([1.0, 0.0, 0.0])
-        assert docs["b"].sparse_embedding is not None  # kept
+        assert docs["b"].sparse_embedding is not None
 
     def test_a_failing_embedder_leaves_the_chunk_for_the_next_run(self):
         store = self._store()

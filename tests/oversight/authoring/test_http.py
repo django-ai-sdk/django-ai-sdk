@@ -1,5 +1,3 @@
-"""The authoring routes: who may call them, what they answer, and that each checks a permission."""
-
 from __future__ import annotations
 
 import pytest

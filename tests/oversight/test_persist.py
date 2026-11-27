@@ -1,5 +1,3 @@
-"""What is written when a stage breaks, and what a turn records about it."""
-
 from __future__ import annotations
 
 import asyncio
@@ -140,7 +138,6 @@ class TestRecordingFailures:
         assert await guard.mask_result("c1", "a@b.nl") == "[EMAIL]"
         await guard.finish("fine")
         turn = await closed_turn(guard)
-        # The question had no PII. The tool result's finding is recorded, not labelled.
         assert turn.labels["pii"] == []
         assert await LensAnswer.objects.filter(turn=turn, lens="pii").acount() == 2
 
@@ -231,7 +228,6 @@ class TestRecordingFailures:
 
 
 def test_a_user_id_fits_wherever_a_person_is_recorded():
-    """A UUID primary key as text is 36 characters: the person columns take it."""
     import uuid
 
     from django_ai_sdk.oversight.models import ReviewItem

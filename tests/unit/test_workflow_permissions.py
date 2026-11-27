@@ -1,6 +1,3 @@
-"""WorkflowService ACL: running is for any signed-in user, authoring takes a model permission,
-and a run is read by the user it ran as or a holder of view_workflowrun."""
-
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -74,7 +71,6 @@ class TestManagingTakesTheModelPermission:
         ]
 
     async def test_without_it_every_manage_door_reads_as_absent(self):
-        """Absent rather than forbidden, because a 403 here would confirm the id exists."""
         record = await stored()
         plain = await make_user("plain")
         for call in (
@@ -102,8 +98,6 @@ class TestManagingTakesTheModelPermission:
 
 @pytest.mark.django_db(transaction=True)
 class TestAnUnstoredDefinition:
-    """A definition that is neither stored nor registered is authored by whoever runs it."""
-
     async def test_a_chat_only_user_is_refused(self):
         plain = await make_user("plain")
 
@@ -133,7 +127,6 @@ class TestAnUnstoredDefinition:
                 run = await WorkflowService.run(definition(), user=plain)
             assert run.user_id == plain.pk
 
-            # The same name with other steps is not the registered workflow.
             changed = WorkflowDefinition(
                 name="acl-wf", steps=[StepDefinition(name="other", agent_id="a")]
             )
@@ -177,7 +170,6 @@ class TestReadingRuns:
         assert await WorkflowService.list_runs(str(record.id), user=b) == []
 
     async def test_the_author_does_not_read_a_run_someone_else_started(self):
-        # A run's outputs are the user's content, not the author's.
         author = await make_user("author", MANAGE_WORKFLOWS)
         record = await stored(author)
         run = await run_as(record, await make_user("other"))
@@ -202,7 +194,6 @@ class TestReadingRuns:
         assert len(await WorkflowService.list_runs(str(record.id), user=reader)) == 1
 
     async def test_reading_a_run_is_not_resuming_it(self):
-        # DoesNotExist rather than PermissionDenied: a 403 confirms the id exists.
         record = await stored()
         run = await failed(await run_as(record, await make_user("owner")))
         reader = await make_user("reader", VIEW_WORKFLOW_RUNS)
@@ -232,7 +223,6 @@ class TestReadingRuns:
         manager = await make_user("manager", MANAGE_WORKFLOWS)
         with patch(ENQUEUE):
             run = await failed(await WorkflowService.run(definition(), user=manager))
-        # The permission was taken away after the run was started.
         await WorkflowRun.objects.filter(pk=run.pk).aupdate(user=await make_user("plain"))
         plain = await WorkflowRun.objects.select_related("user").aget(pk=run.pk)
 

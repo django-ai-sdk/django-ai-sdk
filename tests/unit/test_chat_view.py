@@ -1,5 +1,3 @@
-"""ChatView through real URLs: with a thread, and stateless with a fixed agent."""
-
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -68,7 +66,6 @@ class TestStatelessChat:
         response = client.post("/stateless-chat/", data=body, content_type="application/json")
 
         assert response.content == b"streamed"
-        # The URL's agent, never the payload's; and no thread, so nothing is stored.
         mock_agents_registry.get.assert_called_with("test-agent")
         assert agent.as_view.await_args.kwargs["thread_id"] is None
 

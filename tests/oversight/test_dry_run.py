@@ -1,5 +1,3 @@
-"""dry_run: what a policy would do with one exchange, recording nothing."""
-
 from __future__ import annotations
 
 import pytest
@@ -69,7 +67,6 @@ class TestDryRun:
             await dry_run("no-such-policy", question="x")
 
     async def test_a_failed_reflect_lens_is_unknown_as_in_reflect(self):
-        # A rule on "not grounded" must not match when the reflect lens failed.
         name = policy(
             "dry-failed-reflect",
             [FnLens(name="grounded", subject=Subject.ANSWER, stages=[Stage.REFLECT], fn=broken)],

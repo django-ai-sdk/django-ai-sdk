@@ -1,5 +1,3 @@
-"""The authoring tests run with a fresh loader and a code policy of their own to extend."""
-
 from __future__ import annotations
 
 import pytest

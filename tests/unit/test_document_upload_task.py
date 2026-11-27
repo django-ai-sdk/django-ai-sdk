@@ -8,10 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from django.core.files.base import ContentFile
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 async def _make_entry_doc(memory):
     from django_ai_sdk.memories.models import EntryDocument
@@ -24,7 +20,6 @@ async def _make_entry_doc(memory):
         file_extension="txt",
         processing_status=EntryDocument.ProcessingStatus.PENDING,
     )
-    # file.save() is sync; Django wraps it fine inside acreate's sync path
     entry_doc.file.save("test.txt", ContentFile(b"hello world!"), save=False)
     await entry_doc.asave()
     return entry_doc
@@ -56,11 +51,6 @@ async def _get_status_with_mocked_task(entry_doc, task_status):
         return await MemoryService.get_document_status(
             str(entry_doc.id), user=MagicMock(is_authenticated=True)
         )
-
-
-# ---------------------------------------------------------------------------
-# run_file_pipeline
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.django_db
@@ -179,8 +169,6 @@ class TestProcessAsync:
         assert "OCR failed" in entry_doc.processing_error
 
     async def test_cancelled_at_stops_at_next_step_and_does_not_clobber(self):
-        """cancel_document already wrote CANCELLED; the pipeline should stop
-        at the next on_step checkpoint and leave that status alone."""
         from django.utils import timezone
 
         from django_ai_sdk.memories.models import EntryDocument, Memory
@@ -213,8 +201,6 @@ class TestProcessAsync:
         assert entry_doc.processing_error == "Cancelled by user"
 
     async def test_cancelled_at_after_last_checkpoint_does_not_clobber_completed(self):
-        """Cancelled after the last on_step call but before the pipeline
-        finished — the COMPLETED write must not overwrite CANCELLED."""
         from django.utils import timezone
 
         from django_ai_sdk.memories.models import Entry, EntryDocument, Memory
@@ -250,7 +236,6 @@ class TestProcessAsync:
         assert not await Entry.objects.filter(document=entry_doc).aexists()
 
     async def test_step_callback_updates_and_resets_processing_step(self):
-        """Also covers that PROCESSING is set before the pipeline starts."""
         from django_ai_sdk.memories.models import EntryDocument, Memory
         from django_ai_sdk.memories.tasks import run_file_pipeline
 
@@ -285,7 +270,7 @@ class TestProcessAsync:
 
         await entry_doc.arefresh_from_db()
         assert entry_doc.processing_status == EntryDocument.ProcessingStatus.COMPLETED
-        assert entry_doc.processing_step is None  # reset once the run finishes
+        assert entry_doc.processing_step is None
 
     async def test_timeout_marks_failed_with_clear_message(self):
         from django_ai_sdk.memories import tasks as tasks_module
@@ -349,11 +334,6 @@ class TestProcessAsync:
         assert entry_doc.processing_status == EntryDocument.ProcessingStatus.COMPLETED
 
 
-# ---------------------------------------------------------------------------
-# upload_document — enqueues, does NOT block
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestUploadDocumentEnqueues:
@@ -387,7 +367,6 @@ class TestUploadDocumentEnqueues:
             await MemoryService.upload_document(str(memory.id), uploaded, user=None)
 
         mock_task.aenqueue.assert_called_once()
-        # pipeline.run NOT called — task was enqueued, not run inline
         mock_pipeline.run.assert_not_called()
 
     async def test_returns_document_upload_response(self):
@@ -408,11 +387,10 @@ class TestUploadDocumentEnqueues:
             result = await MemoryService.upload_document(str(memory.id), uploaded, user=None)
 
         assert isinstance(result, DocumentUploadResponse)
-        assert result.id  # has a UUID
+        assert result.id
         assert result.status == "processing"
 
     async def test_entry_doc_saved_before_task_enqueued(self):
-        """EntryDocument must be in DB before task is enqueued (task needs the ID)."""
         from django.core.files.uploadedfile import SimpleUploadedFile
         from django_ai_sdk.memories.models import EntryDocument, Memory
         from django_ai_sdk.memories.services import MemoryService
@@ -424,7 +402,6 @@ class TestUploadDocumentEnqueues:
         captured_args = []
 
         async def capture_enqueue(*args, **kwargs):
-            # verify the doc exists in DB at enqueue time
             doc_id = args[0]
             exists = await EntryDocument.objects.filter(id=doc_id).aexists()
             captured_args.append((doc_id, exists))
@@ -437,12 +414,7 @@ class TestUploadDocumentEnqueues:
             mock_task.aenqueue = capture_enqueue
             await MemoryService.upload_document(str(memory.id), uploaded, user=None)
 
-        assert captured_args[0][1] is True  # doc existed in DB when enqueue was called
-
-
-# ---------------------------------------------------------------------------
-# Deduplication — same hash, same memory
-# ---------------------------------------------------------------------------
+        assert captured_args[0][1] is True
 
 
 @pytest.mark.django_db
@@ -504,8 +476,6 @@ class TestUploadDocumentDedup:
         assert result.status == "processing"
 
     async def test_duplicate_after_failed_still_conflicts(self):
-        """A FAILED document keeps its hash reserved — re-upload is rejected until
-        the user deletes it (or retries the existing document)."""
         from django.core.files.uploadedfile import SimpleUploadedFile
         from django_ai_sdk.memories.models import EntryDocument, Memory
         from django_ai_sdk.memories.services import MemoryService
@@ -522,7 +492,6 @@ class TestUploadDocumentDedup:
             mock_task.aenqueue = AsyncMock(return_value=_mock_task_result("task-1"))
             result = await MemoryService.upload_document(str(memory.id), uploaded, user=None)
 
-        # Manually mark the first doc as FAILED
         doc = await EntryDocument.objects.aget(id=result.id)
         doc.processing_status = EntryDocument.ProcessingStatus.FAILED
         await doc.asave(update_fields=["processing_status"])
@@ -567,11 +536,6 @@ class TestUploadDocumentDedup:
 
         assert result2.status == "processing"
         assert result2.id != result.id
-
-
-# ---------------------------------------------------------------------------
-# get_document_status
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.django_db
@@ -621,7 +585,6 @@ class TestGetDocumentStatus:
 
         memory = await Memory.objects.acreate(name="status-no-task")
         entry_doc = await _make_entry_doc(memory)
-        # task_id left null
 
         result = await MemoryService.get_document_status(
             str(entry_doc.id), user=MagicMock(is_authenticated=True)
@@ -650,11 +613,6 @@ class TestGetDocumentStatus:
         assert "File type not supported" not in result.model_dump_json()
 
 
-# ---------------------------------------------------------------------------
-# compute_file_hash
-# ---------------------------------------------------------------------------
-
-
 class TestComputeFileHash:
     def test_bytes_input(self):
         from django_ai_sdk.files.common import compute_file_hash
@@ -672,7 +630,6 @@ class TestComputeFileHash:
         stream = BytesIO(data)
         result = compute_file_hash(stream)
         assert result == hashlib.sha256(data).hexdigest()
-        # pointer should be reset to 0
         assert stream.tell() == 0
         assert stream.read() == data
 
@@ -686,14 +643,9 @@ class TestComputeFileHash:
     def test_large_content_chunking(self):
         from django_ai_sdk.files.common import compute_file_hash
 
-        big_data = b"x" * 200000  # > 64KB
+        big_data = b"x" * 200000
         result = compute_file_hash(big_data)
         assert result == hashlib.sha256(big_data).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# get_task_status
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.django_db
@@ -752,11 +704,6 @@ class TestGetTaskStatus:
             )
 
 
-# ---------------------------------------------------------------------------
-# cancel_document
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestCancelDocument:
@@ -773,7 +720,6 @@ class TestCancelDocument:
 
         UserModel = get_user_model()
         user = await UserModel.objects.acreate(email=f"owner-{uuid.uuid4()}@example.com")
-        # Private memory — an unrelated authenticated user must still be denied.
         memory = await Memory.objects.acreate(name="cancel-test", is_public=False)
         await MemoryUser.objects.acreate(memory=memory, user=user, can_manage=True)
         entry_doc = await _make_entry_doc(memory)
@@ -842,11 +788,6 @@ class TestCancelDocument:
             await MemoryService.cancel_document(str(entry_doc.id), user=other_user)
 
 
-# ---------------------------------------------------------------------------
-# self-healing stuck PROCESSING documents
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestSelfHealStaleProcessing:
@@ -855,8 +796,6 @@ class TestSelfHealStaleProcessing:
         settings.MEDIA_ROOT = str(tmp_path / "media")
 
     async def test_marks_failed_when_task_already_finished(self):
-        """Worker died after the task backend recorded FAILED/SUCCESSFUL but
-        before our own EntryDocument write landed."""
         from django_ai_sdk.memories.models import EntryDocument, Memory
         from django_ai_sdk.tasks import TaskError, TaskStatus
 
@@ -881,7 +820,6 @@ class TestSelfHealStaleProcessing:
         assert "RuntimeError: boom" in entry_doc.processing_error
 
     async def test_marks_failed_when_running_past_timeout_grace(self):
-        """Task backend still says RUNNING but the worker is long gone."""
         from datetime import timedelta
 
         from django.utils import timezone
@@ -933,4 +871,4 @@ def test_thread_file_task_uses_priority_setting(settings):
 
     settings.AI_SDK_THREAD_FILE_PRIORITY = 10
     assert thread_file_task().priority == 10
-    assert process_document_upload.priority == 0  # memory documents stay at default
+    assert process_document_upload.priority == 0

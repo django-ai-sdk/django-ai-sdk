@@ -7,10 +7,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .formatter import NumberedSource
 
-# seed limit for sources from earlier turns
 SEED_LIMIT = 30
 
-# registry of the turn being streamed.
 current_registry: ContextVar[SourceRegistry | None] = ContextVar("source_registry", default=None)
 
 
@@ -27,13 +25,11 @@ def source_key(source: NumberedSource) -> str:
 
 
 class SourceRegistry:
-    """The sources an answer may cite"""
-
     def __init__(self) -> None:
 
         self._by_key: dict[str, NumberedSource] = {}
-        self.seeded: set[str] = set()  # keys from earlier turns
-        self.stored: set[str] = set()  # keys a text an earlier turn stored.
+        self.seeded: set[str] = set()
+        self.stored: set[str] = set()
         self.ranks: dict[str, int] = {}
 
     def add(self, sources: list[NumberedSource], *, ranked: bool = True) -> list[NumberedSource]:
@@ -45,7 +41,7 @@ class SourceRegistry:
                 self.ranks[key] = min(rank, self.ranks.get(key, rank))
             known = self._by_key.get(key)
             if known is not None:
-                known.content = source.content or known.content  # the latest text wins
+                known.content = source.content or known.content
                 self.seeded.discard(key)
                 registered.append(known)
                 continue
@@ -64,7 +60,6 @@ class SourceRegistry:
                 self.seeded.add(key)
 
     async def seed_from_thread(self, thread_id: str, limit: int = SEED_LIMIT) -> None:
-        """Seed with the sources stored in the thread's citation artifacts."""
         from django_ai_sdk.artifacts.models import Artifact  # noqa: PLC0415
         from django_ai_sdk.artifacts.schemas import (  # noqa: PLC0415
             CitationsArtifact,
@@ -78,7 +73,6 @@ class SourceRegistry:
             thread_id=thread_id, schema_name=CitationsArtifact.__name__
         ).order_by("-created_at")
         async for row in rows:
-            # only the sources with their text: an uncited one is stored without
             for s in map(CitedSource.model_validate, row.data.get("sources", [])):
                 if s.content and s.key not in found and len(found) < limit:
                     found[s.key] = NumberedSource(

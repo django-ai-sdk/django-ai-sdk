@@ -1,9 +1,3 @@
-"""The policy an agent asks for in code, and how a turn identifies its agent.
-
-An agent names its policy with an `oversight` attribute or an async
-`get_oversight(channel=, user=)` hook.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -20,12 +14,10 @@ if TYPE_CHECKING:
     from django_ai_sdk.agents.base import Agent
 
 FINGERPRINT_CHARS = 16
-# The channel of a turn whose caller named none.
 DEFAULT_CHANNEL = "default"
 
 
 def agent_key(agent: Agent) -> str:
-    """A runtime agent built on a registered class uses its own id, not the class's."""
     return str(getattr(agent, "agent_id", "") or "")
 
 
@@ -36,10 +28,6 @@ def turn_channel(channel: str | None) -> str:
 async def declared_policy(
     agent: Agent, *, channel: str | None = None, user: Any = None
 ) -> tuple[str, str]:
-    """(policy name, reason "agent" | "off" | "default") the agent's code asks for.
-
-    Errors from `get_oversight()` propagate, so the caller decides (fail mode).
-    """
     getter = getattr(agent, "get_oversight", None)
     if callable(getter):
         chosen = getter(channel=turn_channel(channel), user=user)
@@ -51,15 +39,12 @@ async def declared_policy(
 
 
 def attribute_policy(agent: Any) -> tuple[str, str]:
-    """Like `declared_policy` without calling `get_oversight()`, so sync code can ask."""
     return _policy_name_and_reason(getattr(agent, "oversight", None))
 
 
 def overrides_get_oversight(agent: Any) -> bool:
-    """Whether only an async run can tell the agent's policy."""
     from django_ai_sdk.agents.base import Agent
 
-    # The base method only returns `oversight`, which sync code reads itself.
     return "get_oversight" in getattr(agent, "__dict__", {}) or (
         getattr(type(agent), "get_oversight", Agent.get_oversight) is not Agent.get_oversight
     )
@@ -71,16 +56,11 @@ def _policy_name_and_reason(chosen: Any) -> tuple[str, str]:
     if chosen is None:
         return str(setting("DEFAULT_POLICY") or ""), "default"
     if chosen == "":
-        # Unchecked, "" would run the turn unguarded.
         raise TypeError('get_oversight() returned ""; return None for the default, or False')
     return policy_name(chosen), "agent"
 
 
 def validate_oversight(cls: type) -> None:
-    """Fail at import on an `oversight` value that would silently leave the agent unguarded.
-
-    Registering a Policy subclass here lets the system checks see it.
-    """
     value = cls.__dict__.get("oversight")
     if value is None or value is False or (isinstance(value, str) and value):
         return
@@ -95,7 +75,6 @@ def validate_oversight(cls: type) -> None:
 
 
 def fingerprint(agent: Agent) -> str:
-    """A short hash of the agent's model, prompt, tools and integrations."""
     parts: list[str] = []
     for getter in ("get_model", "get_system_prompt"):
         fn = getattr(agent, getter, None)

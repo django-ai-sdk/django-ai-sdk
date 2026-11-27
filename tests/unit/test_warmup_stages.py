@@ -1,5 +1,3 @@
-"""A chat says which part of the adapter build it waits on, and which parts were skipped."""
-
 from __future__ import annotations
 
 import asyncio
@@ -37,7 +35,6 @@ async def warmup_parts(*parts: dict[str, Any]) -> AsyncGenerator[dict[str, Any],
 
 
 async def streamed(build: Any, warmup: Any = None) -> list[dict[str, Any]]:
-    """The data-warmup parts a chat streams, in order."""
     response = await stream_response(build, [], VercelProtocolHandler(), warmup=warmup)
     text = b"".join([chunk async for chunk in response.streaming_content]).decode()
     return [
@@ -156,7 +153,6 @@ class TestAgentWarmupProgress:
 
         parts = [p async for p in agent.warmup_progress()]
 
-        # Both are named while both are pending; the one still pending is named after.
         assert parts == [
             warmup("integrations", "Slow, Down"),
             unavailable("integrations", "Down"),
@@ -176,7 +172,6 @@ class TestAgentWarmupProgress:
         parts = [p async for p in agent.warmup_progress()]
 
         assert [p["data"]["detail"] for p in parts[:-1]] == ["A, B, C", "B, C", "C"]
-        # The build that follows is not loading the step last named any more.
         assert parts[-1] == PLAIN_START
 
     async def test_an_integration_whose_check_raises_is_reported_and_the_rest_carry_on(self):

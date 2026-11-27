@@ -1,6 +1,3 @@
-"""Forgetting, as the review API shows it: a deleted thread's or user's turns read back without
-what was forgotten, and pruned turns are gone."""
-
 from __future__ import annotations
 
 from datetime import timedelta
@@ -29,7 +26,6 @@ async def test_a_deleted_thread_reads_back_without_its_content():
     thread_id = str(thread.id)
     turn_id = await a_turn(thread_id=thread_id)
     user = await reader(METRICS, CONTENT, REVIEW)
-    # A reviewer's note is content too.
     [item] = (await OversightService.list_reviews(user=user)).items
     await OversightService.resolve_review(
         item.id, ResolveIn(agree=True, note="Asked about pay."), user=user
@@ -45,7 +41,6 @@ async def test_a_deleted_thread_reads_back_without_its_content():
     assert after.content_state == "none"
     assert after.preview == ""
     assert all(a.rationale == "" for a in after.answers)
-    # The record stays: labels, matches and the reviewer's verdict, without the note.
     assert after.labels["topic"] == "hr"
     assert {m.rule for m in after.matches} >= {"hr_to_people"}
     [review] = after.reviews
@@ -93,7 +88,6 @@ async def test_expired_content_reads_back_as_none():
     await TurnContent.objects.filter(id=turn.content_id).aupdate(
         expires_at=timezone.now() - timedelta(days=1)
     )
-    # Expired and not yet pruned: withheld as expired.
     assert (await OversightService.get_turn(turn_id, user=user)).content_state == "expired"
     await sync_to_async(prune)()
     detail = await OversightService.get_turn(turn_id, user=user)

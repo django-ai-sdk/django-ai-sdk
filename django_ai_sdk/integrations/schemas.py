@@ -15,9 +15,8 @@ class IntegrationOut(BaseModel):
     status: IntegrationStatus
     supports_connect: bool = False
     supports_test: bool = True
-    #: "oauth" or None; a string so more flows fit without a contract change.
+    #: "oauth" or None.
     connect_kind: str | None = None
-    #: Human-readable setup problem, e.g. a missing secret.
     detail: str | None = None
     connected: bool | None = None
 

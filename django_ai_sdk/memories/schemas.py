@@ -6,8 +6,6 @@ from pydantic import BaseModel, Field
 
 from django_ai_sdk.tasks import TaskStatus
 
-# Data schema
-
 
 class Predicate(StrEnum):
     """Allowed predicate values for extracted facts."""
@@ -64,9 +62,6 @@ class DocumentExtraction(BaseModel):
     facts: list[Fact] = Field(..., description="Extracted facts for graph + narrative context.")
     sections: list[Section] = Field(..., description="Detected sections with headings and content")
     events: list[Event] = Field(..., description="Events extracted from text")
-
-
-# What MemoryService returns (also reused as API response shapes)
 
 
 class MemoryOut(BaseModel):

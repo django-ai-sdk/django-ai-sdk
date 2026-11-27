@@ -25,12 +25,10 @@ _warned_unconfigured: set[str] = set()
 
 @csrf_exempt
 async def receive(request: HttpRequest, name: str) -> HttpResponse:
-    """Verify, normalise and queue one inbound platform event."""
     if request.method != "POST":
         return HttpResponseNotFound()
 
     integration = (await get_integrations([name])).get(name)
-    # Admin-created MCP servers are not WebhookIntegrations, so they cannot be reached here.
     if not isinstance(integration, WebhookIntegration):
         return HttpResponseNotFound()
     if integration.detail:
@@ -69,7 +67,6 @@ async def receive(request: HttpRequest, name: str) -> HttpResponse:
         )
         return HttpResponse(status=200)
 
-    # Platform limits are far too high for one agent turn.
     max_text = resolve_setting("AI_SDK_WEBHOOK_MAX_TEXT", 4000)
     if len(parsed.text) > max_text:
         logger.info(
@@ -80,13 +77,11 @@ async def receive(request: HttpRequest, name: str) -> HttpResponse:
         )
     parsed.text = parsed.text[:max_text]
 
-    # The worker drops repeats, so a crash before queueing leaves nothing claimed.
     await handle_inbound.aenqueue(parsed.model_dump())
     return integration.ack(parsed)
 
 
 async def _over_rate_limit(name: str, event: InboundEvent) -> bool:
-    """More than AI_SDK_WEBHOOK_RATE_LIMIT_PER_MINUTE events from one sender this minute."""
     per_minute = int(resolve_setting("AI_SDK_WEBHOOK_RATE_LIMIT_PER_MINUTE", 0) or 0)
     if per_minute <= 0:
         return False

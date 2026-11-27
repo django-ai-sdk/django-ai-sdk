@@ -11,7 +11,6 @@ from django_ai_sdk.utils import resolve_setting
 
 @watched_factory
 def openai_chat(**kwargs: Any) -> OpenAIChatGenerator:
-    """OpenAI Chat Completions generator wired to Django settings."""
     return OpenAIChatGenerator(
         **build_kwargs(
             {
@@ -25,7 +24,6 @@ def openai_chat(**kwargs: Any) -> OpenAIChatGenerator:
 
 @watched_factory
 def openai_responses_chat(**kwargs: Any) -> OpenAIResponsesChatGenerator:
-    """OpenAI Responses API generator wired to Django settings."""
     return OpenAIResponsesChatGenerator(
         **build_kwargs(
             {

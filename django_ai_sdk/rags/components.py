@@ -13,16 +13,11 @@ from django_ai_sdk.logger import get_logger
 
 logger = get_logger(__name__)
 
-#: Candidates each query fetches per document kept: fusion and exact words can then
-#: lift a document a single query ranks below the cut (an acronym at rank 7 of 5).
 CANDIDATES_PER_QUERY = 4
-#: Reciprocal rank fusion's constant (the usual 60): rank 1 adds 1/61, rank 10 1/70.
 RRF_K = 60
 
 
 def _words(text: str) -> set[str]:
-    """The words of `text`, plus each identifier whole ("inc-2025-03-002", a file name):
-    matching only its parts, every "...-002" would match as well as the one asked for."""
     text = text.lower()
     return set(re.findall(r"\w+", text)) | set(re.findall(r"\w+(?:[-./]\w+)+", text))
 
@@ -33,28 +28,6 @@ def _name(doc: HaystackDocument) -> str:
 
 
 class MultiQueryDeduplicationMixin:
-    """
-    Mixin providing multi-query deduplication and ranking logic.
-
-    This can be used by any retriever that needs to:
-    1. Run multiple queries
-    2. Deduplicate results by document ID
-    3. Sort by score (descending)
-    4. Return top_k results
-
-    Example usage:
-        class MyRetriever(MultiQueryDeduplicationMixin):
-            def run(self, queries: list[str], top_k: int = 3):
-                # Run your queries
-                results = []
-                for query in queries:
-                    results.append(self._retrieve(query, top_k))
-
-                # Use mixin to deduplicate and rank
-                docs = self.deduplicate_and_rank(results, top_k)
-                return {"documents": docs}
-    """
-
     @staticmethod
     def deduplicate_and_rank(
         results: list[dict[str, list[HaystackDocument]]],
@@ -62,32 +35,21 @@ class MultiQueryDeduplicationMixin:
         min_score: float | None = None,
     ) -> list[HaystackDocument]:
         """
-        Deduplicate documents across multiple query results, filter by score, and rank.
-
-        Args:
-            results: List of retrieval result dicts, each containing "documents"
-            top_k: Maximum number of documents to return
-            min_score: Minimum score threshold; documents below this are dropped.
-                       None disables filtering.
-
         Returns:
             List of unique documents sorted by score (descending), limited to top_k
         """
-        # Deduplicate by document ID
         all_docs: dict[str, HaystackDocument] = {}
         for result in results:
             for doc in result.get("documents", []):
                 if doc.id not in all_docs:
                     all_docs[doc.id] = doc
 
-        # Sort by score
         docs = list(all_docs.values())
         docs.sort(
             key=lambda x: x.score if hasattr(x, "score") and x.score is not None else 0.0,
             reverse=True,
         )
 
-        # Keep filter for non native support for min_score (BM25 e.g.)
         if min_score is not None:
             docs = [d for d in docs if (d.score or 0.0) >= min_score]
 
@@ -102,24 +64,6 @@ class MultiQueryDeduplicationMixin:
         query: str | None = None,
     ) -> list[HaystackDocument]:
         """
-        The documents of all queries' results by reciprocal rank fusion.
-
-        What several queries find ranks high, however each query scored it: scores
-        of different queries don't compare. One more ranking counts the words of the
-        user's own query (`query`, else the first) found verbatim, weighing as much as
-        all queries together: an exact term such as "SABRE", which embeddings don't
-        know, then lifts a document only one query found low. Identifiers count whole
-        as well as by their parts, and a chunk's file name counts as its text, so a
-        search for "INC-2025-03-002" or a file name finds that file first. Words in
-        most candidates ("the", "is") don't count.
-
-        Args:
-            results: Per query (in `queries` order), its retrieval result
-            queries: The queries that were run
-            top_k: Maximum number of documents to return
-            min_score: Hits below this score are left out before fusing
-            query: The user's query, before expansion
-
         Returns:
             Unique documents, best first, at most top_k (scores unchanged)
         """
@@ -132,7 +76,6 @@ class MultiQueryDeduplicationMixin:
             for r in results
         ]
         found = {doc.id: doc for ranking in rankings for doc in ranking}
-        # The file name counts as the chunk's text: asked by name, every chunk of it matches.
         words = {
             doc_id: _words(f"{_name(doc)} {doc.content or ''}") for doc_id, doc in found.items()
         }
@@ -148,13 +91,10 @@ class MultiQueryDeduplicationMixin:
         for ranking in rankings:
             for rank, doc in enumerate(ranking, 1):
                 fused[doc.id] += 1 / (RRF_K + rank)
-        # As much as all queries together, for a document matching every term; one
-        # matching a single part of an identifier ("002") gets a fraction of that.
         most = max(matched.values(), default=0) or 1
         for rank, doc in enumerate(exact, 1):
             fused[doc.id] += len(rankings) * (matched[doc.id] / most) / (RRF_K + rank)
         docs = sorted(found.values(), key=lambda doc: fused[doc.id], reverse=True)[:top_k]
-        # One line per search: one query means the expander fell back to the original.
         logger.info(
             "RAG search: {} queries {}, hits per query {}, exact terms {} in {} -> {} kept",
             len(queries),
@@ -169,29 +109,6 @@ class MultiQueryDeduplicationMixin:
 
 @component
 class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
-    """
-    Base class for multi-query retrievers with deduplication.
-
-    This provides a template method pattern where subclasses only need to
-    implement retrieve() for their specific retriever type.
-
-    Suitable for simple retrievers like BM25 and Chroma that don't need
-    special preprocessing (like embedding generation).
-
-    Example:
-        @component
-        class MultiQueryBM25Retriever(BaseMultiQueryRetriever):
-            def __init__(self, document_store, top_k=3):
-                super().__init__(document_store, top_k)
-                from haystack.components.retrievers.in_memory import InMemoryBM25Retriever
-                self._retriever = InMemoryBM25Retriever(
-                    document_store=document_store, top_k=top_k
-                )
-
-            def retrieve(self, query: str, top_k: int) -> dict:
-                return self._retriever.run(query=query, top_k=top_k)
-    """
-
     def __init__(
         self,
         document_store: Any,
@@ -204,19 +121,7 @@ class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
         self._retriever: Any
 
     def retrieve(self, query: str, top_k: int) -> dict[str, list[HaystackDocument]]:
-        """
-        Perform a single query retrieval.
-
-        Subclasses must override this method to perform the actual retrieval
-        using their specific retriever implementation.
-
-        Args:
-            query: The search query string
-            top_k: Maximum documents to retrieve for this query
-
-        Returns:
-            Dict with "documents" key containing list of HaystackDocument
-        """
+        """Subclasses must override this method."""
         raise NotImplementedError(f"{self.__class__.__name__} must implement retrieve()")
 
     @component.output_types(documents=list[HaystackDocument])
@@ -236,7 +141,6 @@ class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
         """
         k = top_k if top_k is not None else self.top_k
 
-        # Run all queries
         results: list[dict[str, list[HaystackDocument]]] = []
         for q in queries:
             results.append(self.retrieve(q, k * CANDIDATES_PER_QUERY))
@@ -258,18 +162,6 @@ class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
 
 @component
 class MultiQueryBM25Retriever(BaseMultiQueryRetriever):
-    """
-    Retriever that runs multiple queries and deduplicates results for BM25.
-    Uses BaseMultiQueryRetriever to handle multi-query logic.
-
-    Example:
-        retriever = MultiQueryBM25Retriever(
-            document_store=memory_store,
-            top_k=3
-        )
-        result = retriever.run(queries=["query1", "query2", "query3"])
-    """
-
     def __init__(
         self,
         document_store: Any,
@@ -283,5 +175,4 @@ class MultiQueryBM25Retriever(BaseMultiQueryRetriever):
         )
 
     def retrieve(self, query: str, top_k: int) -> dict[str, list[HaystackDocument]]:
-        """Retrieve documents for a single query using BM25."""
         return self._retriever.run(query=query, top_k=top_k)

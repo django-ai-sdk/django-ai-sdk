@@ -1,10 +1,3 @@
-"""Run a script in a fresh interpreter on the test settings without some apps.
-
-A fresh interpreter, so nothing this test run imported or registered leaks in. Each opt-in
-app keeps its own small test that calls `run_without`, so the app and its test come and go
-together.
-"""
-
 from __future__ import annotations
 
 import os
@@ -18,7 +11,6 @@ if TYPE_CHECKING:
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Runs before every script: the project still checks, migrates and has no missing migration.
 SETUP = """
 import django
 
@@ -41,9 +33,6 @@ def run_without(
     settings: str = "",
     files: Mapping[str, str] | None = None,
 ) -> None:
-    """Run `script` with `apps` left out of INSTALLED_APPS, and fail with its stderr unless
-    it gets to the end. `settings` adds lines to the settings module, `files` adds modules
-    next to it, and `before_setup` runs before Django is set up."""
     removed = sorted(apps)
     # A file, not :memory:: a run's queries can come from a thread with a connection of its own.
     database = str(tmp_path / "db.sqlite3")
@@ -74,7 +63,6 @@ def run_without(
 
 
 def ask(question: str, reply: str, *, policy: str | None = None) -> str:
-    """For use inside a script: run an agent that answers `reply`, under `policy` if given."""
     import asyncio
 
     from haystack.components.generators.chat import MockChatGenerator
@@ -84,7 +72,7 @@ def ask(question: str, reply: str, *, policy: str | None = None) -> str:
     from django_ai_sdk.adapters.base import Run
     from django_ai_sdk.permissions import AllowAll
 
-    async def get_run_adapter(self, thread_id=None, user=None):  # noqa: ANN001, ANN202
+    async def get_run_adapter(self, thread_id=None, user=None):
         generator = MockChatGenerator(responses=[HaystackChatMessage.from_assistant(reply)])
         return Run(generator=generator)
 

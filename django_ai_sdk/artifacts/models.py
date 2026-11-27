@@ -10,12 +10,6 @@ from django_ai_sdk.conversation.models import Thread
 
 
 class Artifact(models.Model):
-    """
-    Structured artifact submitted by the agent via tool call.
-    Linked to a thread; the tool result JSON carries the artifact_id for
-    message-level association on the frontend.
-    """
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     thread = models.ForeignKey(Thread, on_delete=models.CASCADE, related_name="artifacts")
     schema_name = models.CharField(max_length=255)

@@ -1,5 +1,3 @@
-"""System checks for the core app. Ids are `ai_sdk.E001` and up."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -14,10 +12,6 @@ OVERSIGHT_APP = "django_ai_sdk.oversight"
 
 
 def check_oversight_installed(app_configs: Any = None, **kwargs: Any) -> list[Any]:
-    """Report policies that are set while the oversight app is not installed.
-
-    Those agents run unguarded: `oversight`, a `get_oversight()` override or DEFAULT_POLICY.
-    """
     from django.apps import apps
     from django.conf import settings
 
@@ -51,7 +45,6 @@ def check_oversight_installed(app_configs: Any = None, **kwargs: Any) -> list[An
     return messages
 
 
-# Caches that each process keeps to itself, or that keep nothing.
 _UNSHARED_CACHES = (
     "django.core.cache.backends.locmem.LocMemCache",
     "django.core.cache.backends.dummy.DummyCache",
@@ -59,7 +52,6 @@ _UNSHARED_CACHES = (
 
 
 def check_webhook_dedup_cache(app_configs: Any = None, **kwargs: Any) -> list[Any]:
-    """Warn when webhooks dedup events in a cache other processes cannot see."""
     from django.conf import settings
 
     from django_ai_sdk.integrations.registry import _registry
@@ -88,7 +80,6 @@ def check_webhook_dedup_cache(app_configs: Any = None, **kwargs: Any) -> list[An
 def dict_setting_errors(
     name: str, accepts: dict[str, tuple[Callable[[Any], bool], str]], prefix: str
 ) -> list[Error]:
-    """E012: setting `name` is a dict of `accepts` keys, each of the kind it takes."""
     from django.conf import settings
 
     user_settings = getattr(settings, name, None) or {}

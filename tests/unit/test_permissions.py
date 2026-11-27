@@ -1,7 +1,3 @@
-"""
-Unit tests for the permission system.
-"""
-
 from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,13 +5,9 @@ import pytest
 from django.test.utils import override_settings
 
 
-
-
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestPermissions:
-    """Direct unit tests for the permission system classes."""
-
     async def test_allow_all_grants_permission(self):
         from django_ai_sdk.permissions import AllowAll, Operation, PermissionDenied, check_permissions
 
@@ -138,7 +130,6 @@ class TestPermissions:
         user = MagicMock(is_staff=True)
         await check_permissions(user, Operation.VIEW_AGENT, [IsAdminUser])
 
-    # --- get_domain_permissions ---
 
     async def test_get_domain_permissions_falls_back_to_default(self):
         from django_ai_sdk.permissions import AgentDefaultPermission, get_domain_permissions, PermissionDomain
@@ -196,13 +187,9 @@ class TestPermissions:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestMemoryDefaultPermission:
-    """Tests for MemoryDefaultPermission three-tier access model."""
-
     async def _make_memory_user(self, user, can_manage=False):
-        """Helper to create a memory user."""
         from django_ai_sdk.memories.models import MemoryUser
 
-        # Need real Memory object with is_public
         from django_ai_sdk.memories.models import Memory
 
         memory = Memory(name="Test", is_public=False)
@@ -226,7 +213,6 @@ class TestMemoryDefaultPermission:
         return memory
 
     async def _make_memory_group(self, user, can_manage=False, memory=None):
-        """Helper to link *user* to *memory* (or a fresh one) via a group."""
         from asgiref.sync import sync_to_async
         from django.contrib.auth.models import Group
 
@@ -296,8 +282,6 @@ class TestMemoryDefaultPermission:
             )
 
     async def test_group_manage_grant_overrides_weaker_direct_membership(self):
-        """A user's direct (non-manager) membership must not mask a manager
-        grant coming from a group they also belong to."""
         from django_ai_sdk.permissions import (
             MemoryDefaultPermission,
             check_object_permissions,
@@ -312,8 +296,6 @@ class TestMemoryDefaultPermission:
             await check_object_permissions(user, op, memory, [MemoryDefaultPermission])
 
     async def test_direct_manage_grant_overrides_weaker_group_membership(self):
-        """The reverse: a manager-level direct membership must not be masked
-        by a weaker group membership on the same memory."""
         from django_ai_sdk.permissions import (
             MemoryDefaultPermission,
             check_object_permissions,
@@ -429,10 +411,7 @@ class TestMemoryDefaultPermission:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestAgentDefaultPermission:
-    """Tests for AgentDefaultPermission three-tier access model."""
-
     async def _make_agent_user(self, user, can_manage=False):
-        """Helper to create an agent with a user entry."""
         from django_ai_sdk.agents.models import AgentSettings, AgentUser
 
         config = AgentSettings(name="Test Agent", slug=str(uuid4()), agent="test")
@@ -442,7 +421,6 @@ class TestAgentDefaultPermission:
         return config
 
     async def _make_agent_group(self, user, can_manage=False, agent=None):
-        """Helper to link *user* to *agent* (or a fresh one) via a group."""
         from asgiref.sync import sync_to_async
         from django.contrib.auth.models import Group
 
@@ -588,8 +566,6 @@ class TestAgentDefaultPermission:
             )
 
     async def test_group_manage_grant_overrides_weaker_direct_membership(self):
-        """A user's direct (non-manager) membership must not mask a manager
-        grant coming from a group they also belong to."""
         from django_ai_sdk.permissions import (
             AgentDefaultPermission,
             check_object_permissions,
@@ -604,8 +580,6 @@ class TestAgentDefaultPermission:
             await check_object_permissions(user, op, config, [AgentDefaultPermission])
 
     async def test_direct_manage_grant_overrides_weaker_group_membership(self):
-        """The reverse: a manager-level direct membership must not be masked
-        by a weaker group membership on the same agent."""
         from django_ai_sdk.permissions import (
             AgentDefaultPermission,
             check_object_permissions,
@@ -620,11 +594,6 @@ class TestAgentDefaultPermission:
             await check_object_permissions(user, op, config, [AgentDefaultPermission])
 
     async def test_multiple_groups_manage_granted_when_any_can_manage(self):
-        """Manage is granted when *any* group linking the user to the agent
-        has can_manage=True, even when weaker sibling groups exist.
-
-        Regression test: the check must aggregate across all group rows,
-        not gate on an arbitrary single one."""
         from django_ai_sdk.permissions import (
             AgentDefaultPermission,
             check_object_permissions,
@@ -640,7 +609,6 @@ class TestAgentDefaultPermission:
             await check_object_permissions(user, op, config, [AgentDefaultPermission])
 
     async def test_multiple_groups_manage_denied_when_none_can_manage(self):
-        """All-weak groups deny manage but still allow view/use access."""
         from django_ai_sdk.permissions import (
             AgentDefaultPermission,
             Operation,
@@ -689,7 +657,6 @@ class TestAgentDefaultPermission:
         )
 
     async def test_non_agent_object_passes_through(self):
-        """AgentDefaultPermission should not interfere with non-AgentSettings objects."""
         from django_ai_sdk.permissions import (
             AgentDefaultPermission,
             Operation,
@@ -700,7 +667,6 @@ class TestAgentDefaultPermission:
         user = await UserFactory.acreate()
         some_obj = MagicMock()
 
-        # Should not raise for any operation on non-AgentSettings objects
         for op in Operation:
             await check_object_permissions(
                 user, op, some_obj, [AgentDefaultPermission]
@@ -710,8 +676,6 @@ class TestAgentDefaultPermission:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestAgentServicePermissions:
-    """Permission checks in AgentService (list_agents, get_agent_info)."""
-
     async def test_list_agents_filters_by_permission(self):
         from django_ai_sdk.agents.models import AgentSettings
         from django_ai_sdk.agents.services import AgentService
@@ -726,7 +690,6 @@ class TestAgentServicePermissions:
         reg.visible.return_value = {"allow": allow_agent, "deny": deny_agent}
         reg.get.side_effect = lambda id: reg.visible.return_value.get(id)
 
-        # Patch DB query to yield nothing so only registry agents are tested
         with patch("django_ai_sdk.agents.services.registry", reg):
             with patch.object(
                 AgentSettings.objects, "filter", return_value=AgentSettings.objects.none()
@@ -773,15 +736,9 @@ class TestAgentServicePermissions:
                 await AgentService.get_agent_info("nonexistent", user=user)
 
 
-# ============================================================================
-# IsOwner — configurable field & null-owner behavior
-# ============================================================================
-
-
 @pytest.mark.asyncio
 class TestIsOwner:
     async def test_custom_field_parameter(self):
-        """IsOwner(field="owner_id") checks the specified attribute."""
         from django_ai_sdk.permissions import IsOwner, Operation, check_object_permissions
 
         obj = MagicMock(spec=["owner_id"], owner_id="user-1")
@@ -792,7 +749,6 @@ class TestIsOwner:
         )
 
     async def test_custom_field_denies_mismatch(self):
-        """IsOwner with custom field denies on mismatch."""
         from django_ai_sdk.permissions import (
             IsOwner,
             Operation,
@@ -809,7 +765,6 @@ class TestIsOwner:
             )
 
     async def test_null_owner_denies_all(self):
-        """obj.user_id = None denies even for authenticated users."""
         from django_ai_sdk.permissions import (
             IsOwner,
             Operation,
@@ -826,7 +781,6 @@ class TestIsOwner:
             )
 
     async def test_null_owner_denies_anonymous(self):
-        """obj.user_id = None denies anonymous users."""
         from django_ai_sdk.permissions import (
             IsOwner,
             Operation,
@@ -842,10 +796,9 @@ class TestIsOwner:
             )
 
     async def test_no_attr_no_opinion(self):
-        """Object without the field has no opinion (allows through)."""
         from django_ai_sdk.permissions import IsOwner, Operation, check_permissions
 
-        obj = MagicMock(spec=[])  # no user_id attribute
+        obj = MagicMock(spec=[])
         user = MagicMock(pk="user-1")
 
         await check_permissions(
@@ -853,15 +806,8 @@ class TestIsOwner:
         )
 
 
-# ============================================================================
-# ObjectPermissions schema and mixin
-# ============================================================================
-
-
 @pytest.mark.asyncio
 class TestObjectPermissionsSchema:
-    """Tests for the ObjectPermissions schema and ObjectPermsSchema mixin."""
-
     async def test_default_values_all_false(self):
         from django_ai_sdk.permissions import ObjectPermissions
 
@@ -894,15 +840,12 @@ class TestObjectPermissionsSchema:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestAgentDefaultPermissionCreator:
-    """Creator automatically becomes manager via create_runtime_agent."""
-
     async def _make_user(self):
         from tests.factories.db import UserFactory
 
         return await UserFactory.acreate()
 
     async def test_creator_is_manager(self):
-        """After create_runtime_agent, creator can manage."""
         from django_ai_sdk.agents.services import AgentService
         from django_ai_sdk.permissions import (
             AgentDefaultPermission,
@@ -922,18 +865,15 @@ class TestAgentDefaultPermissionCreator:
             user=user,
         )
 
-        # Creator should be able to update (manager operation)
         await check_object_permissions(
             user, Operation.UPDATE_AGENT, config, [AgentDefaultPermission]
         )
 
-        # Creator should be able to delete (manager operation)
         await check_object_permissions(
             user, Operation.DELETE_AGENT, config, [AgentDefaultPermission]
         )
 
     async def test_stranger_cannot_manage(self):
-        """Non-member cannot perform manager operations."""
         from django_ai_sdk.agents.services import AgentService
         from django_ai_sdk.permissions import (
             AgentDefaultPermission,
@@ -961,7 +901,6 @@ class TestAgentDefaultPermissionCreator:
             )
 
     async def test_add_user_upsert(self):
-        """Adding existing user updates can_manage flag."""
         from django_ai_sdk.agents.models import AgentUser
         from django_ai_sdk.agents.services import AgentService
 
@@ -978,12 +917,10 @@ class TestAgentDefaultPermissionCreator:
             user=creator,
         )
 
-        # Add as viewer
         await AgentService.add_agent_user(
             str(config.id), str(member.id), can_manage=False, user=creator
         )
 
-        # Re-add as manager (upsert)
         await AgentService.add_agent_user(
             str(config.id), str(member.id), can_manage=True, user=creator
         )
@@ -992,7 +929,6 @@ class TestAgentDefaultPermissionCreator:
         assert entry.can_manage is True
 
     async def test_add_group_upsert(self):
-        """Adding existing group updates can_manage flag."""
         from django.contrib.auth.models import Group
         from django_ai_sdk.agents.models import AgentGroup
         from django_ai_sdk.agents.services import AgentService
@@ -1010,12 +946,10 @@ class TestAgentDefaultPermissionCreator:
             user=creator,
         )
 
-        # Add as viewer
         await AgentService.add_agent_group(
             str(config.id), group.id, can_manage=False, user=creator
         )
 
-        # Re-add as manager (upsert)
         await AgentService.add_agent_group(
             str(config.id), group.id, can_manage=True, user=creator
         )
@@ -1027,15 +961,12 @@ class TestAgentDefaultPermissionCreator:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestAgentUserManagement:
-    """Agent owner/manager can add users; strangers and viewers are blocked."""
-
     async def _make_user(self):
         from tests.factories.db import UserFactory
 
         return await UserFactory.acreate()
 
     async def test_manager_can_add_user(self):
-        """Agent manager can add other users as viewers."""
         from unittest.mock import patch
 
         from django_ai_sdk.agents.models import AgentSettings, AgentUser
@@ -1067,7 +998,6 @@ class TestAgentUserManagement:
         assert await AgentUser.objects.filter(agent=config, user=viewer).aexists()
 
     async def test_manager_can_promote_user_to_manager(self):
-        """Agent manager can promote viewer to manager."""
         from unittest.mock import patch
 
         from django_ai_sdk.agents.models import AgentSettings, AgentUser
@@ -1102,7 +1032,6 @@ class TestAgentUserManagement:
         assert result.can_manage is True
 
     async def test_stranger_cannot_add_user(self):
-        """Non-member cannot add users to agent."""
         from unittest.mock import patch
 
         from django_ai_sdk.agents.models import AgentSettings
@@ -1133,7 +1062,6 @@ class TestAgentUserManagement:
                 )
 
     async def test_viewer_cannot_add_user(self):
-        """Non-manager member cannot add other users."""
         from unittest.mock import patch
 
         from django_ai_sdk.agents.models import AgentSettings
@@ -1171,8 +1099,6 @@ class TestAgentUserManagement:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestAgentDefaultPermissionUse:
-    """Tests for gating *use* of a DB-backed agent by its row."""
-
     async def _runtime_agent(self, *, is_public=False):
         from django_ai_sdk.agents.models import AgentSettings
         from django_ai_sdk.agents.runtime import RuntimeAgent
@@ -1266,12 +1192,6 @@ class TestAgentDefaultPermissionUse:
 
 
 class TestGetAgentPermissionsFallback:
-    """An empty list must fall back, not silently switch every check off.
-
-    The three resolvers used to disagree about what [] meant, and the agent one was the
-    outlier where it disabled gating.
-    """
-
     def _resolve(self, perms):
         from django_ai_sdk.permissions import get_agent_permissions
 

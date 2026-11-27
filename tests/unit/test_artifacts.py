@@ -1,10 +1,3 @@
-"""
-Tests for the artifact layer:
-  - ArtifactSchema.as_tool() produces valid Haystack Tool
-  - as_tool() closure stores Artifact in DB via ORM
-  - ArtifactType enum values
-"""
-
 from __future__ import annotations
 
 import json
@@ -12,11 +5,6 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
-
-
-# ============================================================================
-# ArtifactType enum
-# ============================================================================
 
 
 class TestArtifactType:
@@ -27,11 +15,6 @@ class TestArtifactType:
         assert ArtifactType.OPTION_LIST == "option_list"
         assert ArtifactType.QUESTION_FLOW == "question_flow"
         assert ArtifactType.APPROVAL == "approval"
-
-
-# ============================================================================
-# ArtifactSchema
-# ============================================================================
 
 
 class TestArtifactSchema:
@@ -94,13 +77,7 @@ class TestArtifactSchema:
         params = tool.parameters
         assert "title" in params.get("properties", {})
         assert "count" in params.get("properties", {})
-        # artifact_type must NOT appear
         assert "artifact_type" not in params.get("properties", {})
-
-
-# ============================================================================
-# as_tool() DB write (DB tests)
-# ============================================================================
 
 
 @pytest.mark.django_db
@@ -163,11 +140,6 @@ class TestArtifactToolDbWrite:
         payload = json.loads(result)
         artifact = await Artifact.objects.aget(id=payload["artifact_id"])
         assert artifact.created_by_id is None
-
-
-# ============================================================================
-# FileArtifact: thread files resolved server-side
-# ============================================================================
 
 
 @pytest.mark.django_db(transaction=True)

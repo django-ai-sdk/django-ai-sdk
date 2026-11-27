@@ -1,5 +1,3 @@
-"""Lenses: pattern, check and judge lenses, their presets, and the rules they follow."""
-
 from __future__ import annotations
 
 import re
@@ -55,7 +53,6 @@ from tests.oversight.helpers import FnLens, turn_context
 
 
 async def answer(lens, turn: TurnContext) -> Answer | None:
-    """What the lens's one step answers about `turn`."""
     [step] = lens.steps()
     return await ask_judge(step, lens, turn)
 
@@ -89,12 +86,10 @@ class TestPII:
     async def test_nothing_found_is_a_quiet_no(self):
         found = await answer(PIILens(), turn_context("How do I reset my password?"))
         assert found.value == []
-        # What patterns find is a fact, so a miss is as sure as a hit.
         assert found.confidence == 1
         assert found.rationale == "found none of: email, iban, credit card, phone, ip address"
 
     async def test_an_address_has_no_format_to_find(self):
-        # Code finds what has a fixed shape; a street address or a name needs a model.
         assert (
             await answer(PIILens(), turn_context("Mijn adres is Jan Voornstraat 8"))
         ).value == []
@@ -123,13 +118,11 @@ class TestPII:
         assert email.search("a@b.nl.").group() == "a@b.nl"
 
     async def test_patterns_read_all_of_a_long_text(self):
-        # Padding must not hide what comes after it.
         late = "x " * 50_000 + "a@b.nl"
         found = await answer(PIILens(), turn_context(late))
         assert found.value == ["email"] and late[found.spans[0].start :].startswith("a@b.nl")
 
     async def test_a_long_private_key_is_masked_whole(self):
-        # Longer than 2k chars, and across where 50k-char scan windows once split it.
         key = "-----BEGIN RSA PRIVATE KEY-----\n" + ("A" * 64 + "\n") * 40
         key += "-----END RSA PRIVATE KEY-----"
         text = "x" * 48_000 + key + " tail"
@@ -145,7 +138,6 @@ class TestPII:
         text = "abcdefghij"
         groups = [
             ([TextSpan(start=1, end=4, label="one")], "<{label}>"),
-            # Overlaps the first: merged into it. Adjacent to it: masked on its own.
             (
                 [TextSpan(start=3, end=6, label="two"), TextSpan(start=6, end=8, label="three")],
                 "[{label}]",
@@ -197,8 +189,6 @@ class TestPatternLens:
 
 
 class TestPatternsInTheWild:
-    """What real text looks like: a payment line, a server spec, a question about settings."""
-
     @pytest.mark.parametrize(
         "text",
         [
@@ -213,7 +203,6 @@ class TestPatternsInTheWild:
         assert found.value == ["iban"]
         masked = mask(text, found.spans)
         assert "[IBAN]" in masked and "0754" not in masked and "0417" not in masked
-        # Only the IBAN: what follows it stays.
         assert masked.split("[IBAN]")[1].split()[0] in {"EUR", "GKCCBEBB", "ABNANL2A"}
 
     @pytest.mark.parametrize(
@@ -254,15 +243,12 @@ class TestPatternsInTheWild:
             "Totaal 1.170,00",
             "op 2026/11/17 om 14:00",
             "INC-0152",
-            # Nine digits that pass the 11-check, labelled as something else.
             "Garage invoice no. 202611188 for the door",
             "factuurnummer: 202611188",
             "Order #202611188",
             "bestelnummer 202611188",
-            # A date and a time.
             "afspraak 03-11-2026 14:00",
             "op 01.02.2026 09:00",
-            # "at" and "dot" as words.
             "Ik ben (at) home om 5 uur",
             "we meet at the office dot com later",
             "kijk op punt 3 en punt 4",
@@ -278,12 +264,10 @@ class TestPatternsInTheWild:
         ("text", "masked"),
         [
             ("invoice 111222333 and bsn 123456782", "invoice 111222333 and bsn [BSN]"),
-            # Only the label itself: not a longer word, and not a label further back.
             ("ordered 123456782", "ordered [BSN]"),
             ("referendum 123456782", "referendum [BSN]"),
             ("ticket 123456782", "ticket [BSN]"),
             ("invoice for client 123456782", "invoice for client [BSN]"),
-            # A personal number goes by these labels too.
             ("Mijn BSN, kenmerk: 111222333", "Mijn BSN, kenmerk: [BSN]"),
             ("referentie 111222333", "referentie [BSN]"),
             ("reference no. 111222333", "reference no. [BSN]"),
@@ -328,7 +312,6 @@ class TestPatternsInTheWild:
             "password=hunter2",
             'password: "correcthorse"',
             "wachtwoord: Welkom2024!",
-            # Tool-call arguments as JSON, and a passphrase.
             '{"password": "hunter2!"}',
             '{"pwd": "s3cret!"}',
             '{"db_password":"abcdef"}',
@@ -343,13 +326,10 @@ class TestPatternsInTheWild:
 
         pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKj\n-----END RSA PRIVATE KEY-----"
         assert mask_secrets(f"key: {pem} ok") == "key: [PRIVATE_KEY] ok"
-        # Cut off before its END line, the rest is masked too.
         assert mask_secrets("-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbn") == "[PRIVATE_KEY]"
 
 
 class TestPIIKinds:
-    """Formats that mean the same everywhere by default; a country's own when asked for."""
-
     TEXT = "BSN 111222333, bel 06-12345678 of +31 6 12345678, Damrak 1, 1012 LG Amsterdam"
 
     async def test_country_kinds_are_off_by_default(self):
@@ -437,7 +417,6 @@ class TestCheckLens:
         assert mismatch.value is True
         looked = TurnContext(tool_calls=[ToolCall(name="search", result=None)])
         assert (await answer(EmptyRetrievalLens(), looked)).value is True
-        # An empty search leaves no grounding, and the lens still runs.
         assert EmptyRetrievalLens().applies(looked) and not EmptyRetrievalLens().applies(
             TurnContext()
         )
@@ -453,8 +432,6 @@ class TestFlag:
 
 
 class TestAttributesBelongWhereTheyAreRead:
-    """An attribute a lens does not read is refused, never silently ignored."""
-
     def test_an_attribute_no_lens_of_its_kind_has(self):
         with pytest.raises(ImproperlyConfigured, match="judges"):
             CheckLens(name="x", validators=[even], judges=["judge"])
@@ -481,7 +458,6 @@ class TestAttributesBelongWhereTheyAreRead:
     def test_a_judge_only_choice_needs_no_other_label(self):
         lens = JudgeLens(name="c", judges=["j"], answer=Choice, labels=["a", "b"])
         lens.validate()
-        # Patterns that find none give the last label.
         assert Choice.from_detections(lens, []) == "b"
 
 

@@ -26,13 +26,11 @@ class TaskStatus(BaseModel):
     enqueued_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
-    # Server-side only.
     errors: list[TaskError] = Field(default_factory=list, exclude=True)
     return_value: Any | None = None
 
 
 async def aget_task_status(task_id: str) -> TaskStatus:
-    """Generic task status lookup by django-tasks result ID."""
     result = await default_task_backend.aget_result(task_id)
     return TaskStatus(
         id=str(result.id),
@@ -44,26 +42,18 @@ async def aget_task_status(task_id: str) -> TaskStatus:
             TaskError(type=e.exception_class_path, traceback=e.traceback)
             for e in (result.errors or [])
         ],
-        # `.return_value` raises unless the task actually succeeded — only
-        # SUCCESSFUL tasks have one.
+        # `.return_value` raises unless the task actually succeeded.
         return_value=result.return_value if result.status == TaskResultStatus.SUCCESSFUL else None,
     )
 
 
 async def aget_principal(user_id: Any, *, source: str = "") -> AbstractBaseUser | None:
-    """Load the active user a queued run was created for, or None.
-
-    A worker is a fresh process with no request, so permission checks and per-user
-    credentials need this. A database failure propagates rather than downgrading.
-    """
     if user_id is None:
         return None
 
     from django.contrib.auth import get_user_model
 
     try:
-        # SECURITY: inactive is treated as absent. Answering anonymously is the
-        # lower privilege; running as a disabled account is not.
         return await get_user_model()._default_manager.aget(pk=user_id, is_active=True)
     except (ObjectDoesNotExist, ValueError, TypeError):
         logger.warning(

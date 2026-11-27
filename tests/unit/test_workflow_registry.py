@@ -1,5 +1,3 @@
-"""Declaring workflows, and the wiring rules that catch a typo before a worker does."""
-
 from __future__ import annotations
 
 import pytest
@@ -70,8 +68,6 @@ class TestRegistration:
 
 
 class TestABrokenDeclarationDoesNotStopTheSite:
-    """A typo in one app's workflows module must not take Django's boot with it."""
-
     def test_it_does_not_raise(self, caplog):
         with caplog.at_level("WARNING"):
             register_workflow(definition("broken", steps=[]))
@@ -109,7 +105,6 @@ class TestTheNameIsTheRegistryKey:
         validate_name("weekly-triage")
 
     def test_a_non_slug_name_is_rejected_and_the_message_carries_the_slug(self):
-        # Held to slug form so a declaration and a row cannot sit under two keys.
         with pytest.raises(ImproperlyConfigured, match="'weekly-review'"):
             validate_name("Weekly Review")
 
@@ -119,8 +114,6 @@ class TestTheNameIsTheRegistryKey:
 
 
 class TestValidation:
-    """What one step cannot see alone: the registries, and its neighbours' names."""
-
     def test_at_least_one_step(self):
         with pytest.raises(ImproperlyConfigured, match="no steps"):
             validate_definition(WorkflowDefinition(name="empty", steps=[]))
@@ -132,7 +125,6 @@ class TestValidation:
             StepDefinition(name="result", agent_id="")
 
     def test_a_registered_step_takes_no_output_fields(self):
-        """Only an agent step runs with structured output; declaring it elsewhere is dropped."""
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError, match="output_fields"):
@@ -147,7 +139,6 @@ class TestValidation:
             StepDefinition(name="", agent_id="a")
 
     def test_a_duplicate_step_name_is_refused(self):
-        """The one name rule left: a step's name is the key its result is filed under."""
         with pytest.raises(ImproperlyConfigured, match="duplicate step name"):
             validate_definition(
                 definition(
@@ -159,7 +150,6 @@ class TestValidation:
             )
 
     def test_a_step_may_not_require_a_name_no_earlier_step_produces(self):
-        """The typo case, caught where it is written rather than by a worker."""
         with pytest.raises(ImproperlyConfigured, match="sumary"):
             validate_definition(
                 definition(
@@ -171,7 +161,6 @@ class TestValidation:
             )
 
     def test_a_step_may_not_require_a_later_one(self):
-        """Order is the author's: a list that cannot run says so up front."""
         with pytest.raises(ImproperlyConfigured, match="later"):
             validate_definition(
                 definition(
@@ -183,7 +172,6 @@ class TestValidation:
             )
 
     def test_a_step_name_may_match_a_run_input_name(self):
-        """Two namespaces, so neither has to be renamed for the other's sake."""
         validate_definition(
             definition(
                 input_fields={"summary": FieldDefinition()},
@@ -243,7 +231,6 @@ class TestValidation:
             )
 
     def test_input_fields_that_cannot_compile_are_refused(self):
-        """`validate_definition` promises a check where it is written, so it builds the model."""
         with pytest.raises(ImproperlyConfigured, match="input_fields cannot compile"):
             validate_definition(definition(input_fields={"model_dump": FieldDefinition()}))
 
@@ -260,7 +247,6 @@ class TestValidation:
             )
 
     def test_a_stored_definition_needs_no_name(self):
-        # A row is keyed by its `slug` column, so the name inside the JSON is unused.
         validate_definition(definition(""))
 
 
@@ -302,7 +288,6 @@ class TestStoredWorkflows:
                 "shared", steps=[StepDefinition(name="r", agent_id="db")]
             ).model_dump(),
         )
-        # A database row adds a workflow where there is no code; it never overrides one.
         assert (await aget_workflow("shared")).steps[0].agent_id == "a"
 
     async def test_a_deleted_row_is_gone_on_the_next_lookup(self):
@@ -321,7 +306,6 @@ class TestStoredWorkflows:
             await aget_workflow("broken")
 
     async def test_a_row_that_fails_the_wiring_checks_raises(self):
-        # Rows get the same wiring checks a declaration does (a duplicate step name).
         broken = definition(
             "broken",
             steps=[
@@ -341,8 +325,6 @@ class TestSlug:
         assert row.slug == "weekly-review"
 
     def test_a_colliding_name_gets_a_suffix(self):
-        # Names are not unique and the API takes free text, so this has to be a working
-        # create rather than an integrity error.
         first = Workflow.objects.create(name="Weekly Review", definition={})
         second = Workflow.objects.create(name="Weekly Review", definition={})
         assert (first.slug, second.slug) == ("weekly-review", "weekly-review-2")

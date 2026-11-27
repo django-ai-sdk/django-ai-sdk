@@ -26,7 +26,6 @@ async def _safe_status_and_tools(
     integration: Integration,
     user: AbstractBaseUser | AnonymousUser | None,
 ) -> tuple[IntegrationStatus, list[str]]:
-    """One integration's (status, tool_names); any failure becomes (DEGRADED, [])."""
     try:
         status = await integration.get_status(user)
         tool_names = await integration.get_tool_names(user)
@@ -37,8 +36,6 @@ async def _safe_status_and_tools(
 
 
 class IntegrationService:
-    """Resolve, permission-check, and act on integrations by name."""
-
     @classmethod
     async def get(cls, name: str) -> Integration | None:
         """Return the named integration, or None if it isn't configured."""
@@ -82,10 +79,7 @@ class IntegrationService:
         request: HttpRequest,
         redirect_uri: str,
     ) -> dict[str, Any] | None:
-        """Begin connecting name for user.
-
-        None if unknown; raises PermissionDenied or IntegrationNotConnectable.
-        """
+        """None if unknown; raises PermissionDenied or IntegrationNotConnectable."""
         integration = await cls.get(name)
         if integration is None:
             return None
@@ -118,7 +112,6 @@ class IntegrationService:
         return await integration.test(user)
 
 
-# Sync wrappers, for sync views (e.g. Django REST framework).
 list_integrations_for_user = async_to_sync(IntegrationService.list_for_user)
 connect_integration = async_to_sync(IntegrationService.connect)
 disconnect_integration = async_to_sync(IntegrationService.disconnect)

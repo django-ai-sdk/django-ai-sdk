@@ -1,6 +1,3 @@
-"""Email-only user, the common shape in host projects. Keeps the SDK honest about
-not assuming a ``username`` field."""
-
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.db import models

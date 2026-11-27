@@ -16,7 +16,6 @@ def resolve_secret(setting_name: str) -> Secret | None:
 
 
 def build_kwargs(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
-    """Merge caller kwargs over settings defaults."""
     return {key: value for key, value in {**defaults, **overrides}.items() if value is not None}
 
 

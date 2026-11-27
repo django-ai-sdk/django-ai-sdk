@@ -1,9 +1,3 @@
-"""Who may read the record, its content, and the review queues: denied unless granted.
-
-Each operation takes a model permission; `is_staff` grants nothing. The scope hooks
-narrow which turns and review items a reader reaches.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -19,7 +13,6 @@ from tests.oversight.review.helpers import CONTENT, METRICS, REVIEW, a_turn, rea
 
 
 async def allowed(user, turn_id: str) -> dict[str, bool]:
-    """What `user` may do, one operation each."""
     item = await ReviewItem.objects.filter(turn_id=turn_id).afirst()
     assert item is not None
 
@@ -109,15 +102,11 @@ class TestDefaultDeny:
 
 
 class OnlyAgent(OversightDefaultPermission):
-    """Reaches the turns of one channel only."""
-
     def scope_turns(self, user, operation, queryset):
         return queryset.filter(channel="api")
 
 
 class NoContentForWebhooks(OversightDefaultPermission):
-    """Every turn's record, but no webhook turn's content."""
-
     def scope_turns(self, user, operation, queryset):
         if operation == "view_oversight_content":
             return queryset.exclude(channel__startswith="webhook")
@@ -202,7 +191,6 @@ class TestWhatEachOperationShows:
             item.id, ResolveIn(agree=False, note="Not HR."), user=reviewer
         )
         assert resolved.status == "done"
-        # The note is content: a reviewer without content access writes it but does not read it.
         assert resolved.note == ""
         [done] = (await OversightService.list_reviews(user=reviewer, status="done")).items
         assert done.note == ""

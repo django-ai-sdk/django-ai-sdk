@@ -1,9 +1,3 @@
-"""Oversight as a Haystack plugin: the turn around a run, and the hooks inside it.
-
-A run inside a turn of the same policy joins it, another policy opens a child turn; a run
-naming no SDK agent joins or uses DEFAULT_POLICY. A sync run cannot open a turn.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -49,7 +43,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.oversight.policy import Policy
 
-# A Haystack run that names no agent runs under DEFAULT_POLICY, recorded under this name.
 UNNAMED_AGENT = SimpleNamespace(name="Haystack agent", oversight=None)
 
 
@@ -69,11 +62,6 @@ async def open_turn(
     input: str | None = None,
     oversight: type[Policy] | str | Literal[False] | None = None,
 ) -> tuple[TurnGuard, bool]:
-    """Start a turn of `agent`. Returns its guard and whether it opened a turn of its own.
-
-    A child turn (another policy inside a turn) keeps the outer turn's person and
-    the tools the outer turn took away.
-    """
     outer = current_guard()
     guard = await TurnGuard.start(
         agent,
@@ -96,11 +84,6 @@ async def open_turn(
 
 
 def settled_outside_a_turn() -> contextlib.AbstractContextManager[None]:
-    """Around a run without a turn of its own.
-
-    Outside a turn it has no policy, an opt-out on purpose. One that joined a turn
-    counts as overseen once that turn's gate ran, like the turn's own model calls.
-    """
     return settled() if current_guard() is None else contextlib.nullcontext()
 
 
@@ -109,11 +92,7 @@ def joins_turn(outer: TurnGuard | None, policy_name: str) -> bool:
 
 
 def needs_own_turn_sync(turn: TurnRequest) -> bool:
-    """Whether the run needs a turn of its own, which only an async run opens.
-
-    Sync code cannot await `get_oversight()`, so an override of it, or a policy
-    name that does not resolve, is assumed to need one.
-    """
+    """Whether the run needs a turn of its own, which only an async run opens."""
     agent, oversight = policy_agent(turn), turn.oversight
     if agent is None or oversight in (False, "") or not is_enabled():
         return False
@@ -153,12 +132,7 @@ def build_oversight_hooks() -> dict[str, list[Any]]:
 
 
 def merge_oversight_hooks(hooks: dict[str, list[Any]] | None) -> dict[str, list[Any]]:
-    """Merge the oversight hooks into `hooks`, once, where each must run.
-
-    They come first, so a blocked call is neither budgeted nor logged and a
-    result is masked before any other hook reads or cuts it. Only after_run comes
-    last, after any hook that completes the answer.
-    """
+    """Merge the oversight hooks into `hooks`, once, where each must run."""
     merged = {
         point: [h for h in items if not isinstance(h, OversightHook)]
         for point, items in (hooks or {}).items()
@@ -177,16 +151,11 @@ async def run_with_oversight(
     hook_context: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Run a Haystack Agent with oversight. Read what it decided on `turn` afterwards.
-
-    The turn closes after the run, also when it raises, since Haystack then skips
-    after_run.
-    """
+    """Run a Haystack Agent with oversight. Read what it decided on `turn` afterwards."""
     turn = turn or TurnRequest()
     kwargs["hook_context"] = turn.hook_context(**(hook_context or {}))
     agent = apply_oversight(agent)
     if turn.oversight is False:
-        # Unguarded on purpose: it does not join the outer turn either.
         with guarding(None), settled():
             return await agent.run_async(messages=messages, **kwargs)
     guard = turn.guard = await _open(turn, messages)
@@ -201,11 +170,8 @@ async def run_with_oversight(
 def run_with_oversight_sync(
     agent: Any, messages: list[Any], *, turn: TurnRequest, **kwargs: Any
 ) -> dict[str, Any]:
-    """Run with oversight from sync code, which cannot open a turn.
-
-    Inside a turn its tool calls are blocked (the guard is async only). A run that
-    needs its own turn raises RuntimeError; ask `needs_own_turn_sync(turn)` first
-    to answer instead.
+    """Inside a turn its tool calls are blocked (the guard is async only). A run that
+    needs its own turn raises RuntimeError.
     """
     if needs_own_turn_sync(turn):
         raise RuntimeError("This run needs a turn of its own: use run_with_oversight.")
@@ -220,11 +186,9 @@ def apply_oversight(agent: Any) -> Any:
 
 
 async def _open(turn: TurnRequest, messages: list[Any]) -> TurnGuard | None:
-    """None when the run joins the turn it runs inside, or has no policy."""
     agent = policy_agent(turn)
     if agent is None:
         return None
-    # GateQuestionHook takes the question again once Haystack rendered any user_prompt.
     asked = question_index(messages)
     question = said_text(messages[asked]) if asked is not None else ""
     guard, opened = await open_turn(
@@ -243,11 +207,6 @@ async def _open(turn: TurnRequest, messages: list[Any]) -> TurnGuard | None:
 
 
 def mask_stored_question(messages: list[ChatMessage], turn: TurnRequest) -> None:
-    """Mask the caller's last user message as the gate did, so the caller stores that copy.
-
-    When the masked text no longer splits back into content and attachment
-    context, the content is withheld rather than stored possibly unmasked.
-    """
     gate = turn.gate_result
     if gate is not None and gate.changed and (question := last_user_message(messages)):
         content = user_content(question, gate.text)

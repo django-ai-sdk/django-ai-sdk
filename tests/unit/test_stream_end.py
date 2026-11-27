@@ -1,5 +1,3 @@
-"""The client waits for the end marker: an unexpected error must still send it."""
-
 from unittest.mock import MagicMock, patch
 
 import pytest

@@ -1,11 +1,3 @@
-"""Endpoint tables that build fresh Ninja Routers, and the error handlers.
-
-Each module keeps an :class:`ApiRouter` and hands out a new ``ninja.Router`` per call
-(``get_threads_router()`` and friends). A fresh Router per call is what makes
-``exclude`` possible: Ninja can't remove an endpoint from a router, and adding your own
-endpoints to a shared module-level router would change it for every project using it.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
@@ -23,33 +15,21 @@ if TYPE_CHECKING:
     from ninja import NinjaAPI
 
 
-# Paging for list endpoints. Services accept `limit=None` (everything); over HTTP a
-# page is bounded, and a client pages through with `offset`.
 MAX_PAGE_SIZE = 100
 Limit = Annotated[int, Field(ge=1, le=MAX_PAGE_SIZE)]
 Offset = Annotated[int, Field(ge=0)]
 
-# Documented on every operation; raised by services, answered by the handlers below.
-# 409 is the shared "changed by someone else" conflict.
 ERRORS = {code: ErrorResponse for code in (400, 403, 404, 409, 500)}
 
 
 def found(value: Any, what: str) -> Any:
-    """Return `value`, or answer 404 "<what> not found" when a service returned None."""
     if value is None:
         raise NotFound(f"{what} not found")
     return value
 
 
 class ApiRouter:
-    """A table of endpoints; ``build()`` turns it into a new ``ninja.Router``.
-
-    Not a ``ninja.Router`` subclass: it records endpoints with the same decorators
-    (``get``, ``post``, ...) so every build starts from the full set.
-    """
-
     def __init__(self, *tables: ApiRouter) -> None:
-        """Start empty, or with the endpoints of `tables`."""
         self._ops: list[tuple[str, str, FunctionType, dict[str, Any]]] = [
             op for table in tables for op in table._ops
         ]
@@ -79,11 +59,6 @@ class ApiRouter:
     def build(
         self, *, exclude: Collection[str] = (), default_auth: Any = None, **router_kwargs: Any
     ) -> Router:
-        """Build a new Router without the endpoints in `exclude`.
-
-        `default_auth` applies when the caller passes no `auth=`. Routers that guard
-        sensitive data set it, so mounting one never leaves it open.
-        """
         if default_auth is not None:
             router_kwargs.setdefault("auth", default_auth)
         unknown = set(exclude) - {func.__name__ for _, _, func, _ in self._ops}
@@ -99,7 +74,6 @@ class ApiRouter:
                 response = {}
             elif not isinstance(response, dict):
                 response = {200: response}
-            # Every route documents ERRORS; a route's own codes win.
             response = {**response, **{c: s for c, s in ERRORS.items() if c not in response}}
             operation_id = opts.pop("operation_id", func.__name__)
             router.add_api_operation(
@@ -109,11 +83,7 @@ class ApiRouter:
 
 
 def register_error_handlers(api: NinjaAPI) -> None:
-    """Answer every unhandled exception with an error code instead of its text.
-
-    Ninja's own handlers (request validation, ``HttpError``, auth) are more
-    specific, so they still win.
-    """
+    """Answer every unhandled exception with an error code instead of its text."""
 
     @api.exception_handler(Exception)
     def handle(request: HttpRequest, exc: Exception) -> HttpResponse:

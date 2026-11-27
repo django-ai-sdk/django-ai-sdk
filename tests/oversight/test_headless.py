@@ -1,5 +1,3 @@
-"""Turns opened outside chat: by hand, in workflow steps, and reflected later."""
-
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -52,7 +50,6 @@ class TestHeadless:
         assert not guard.active
 
     async def test_reflection_adds_answers_and_decisions_later(self):
-        # About salary: gate matches exist before reflection adds its own.
         guard = await start("test-guard", "Tell me a lot about salary")
         await guard.gate()
         await guard.finish("x" * 80)
@@ -62,7 +59,6 @@ class TestHeadless:
         assert turn.labels["length"] == 0.8
         assert turn.reflected_at is not None
         assert await RuleMatch.objects.filter(turn_id=turn_id, rule="long_answers").aexists()
-        # A retried task adds nothing twice.
         assert await run_reflection(turn_id) == 0
         assert await LensAnswer.objects.filter(turn_id=turn_id, lens="length").acount() == 1
 
@@ -72,7 +68,6 @@ class TestHeadless:
         await guard.finish("x" * 80)
         turn_id = await guard.close()
         stale = await Turn.objects.select_related("content").aget(id=turn_id)
-        # Another write lands while reflect is still judging its stale copy.
         await Turn.objects.filter(id=turn_id).aupdate(
             labels={**stale.labels, "topic": "hr"}, severity="critical"
         )
@@ -129,13 +124,11 @@ class TestHeadless:
             with patch.object(
                 tasks, "enqueue_notifications", wraps=tasks.enqueue_notifications
             ) as queued:
-                # The gate's notification leaves when the gate ends, and only then.
                 await guard.gate()
                 queued.assert_called_once()
                 await guard.close()
         queued.assert_called_once()
         assert [(e["rule"], e["turn_id"]) for e in sent] == [("tell", guard.id)]
-        # A Notify marks the turn at its severity by itself, without an Alert beside it.
         assert (await Turn.objects.aget(id=guard.id)).severity == "high"
 
     def test_reflect_reads_the_gate_answer_not_one_on_a_tool_result(self):
@@ -159,10 +152,8 @@ class TestHeadless:
                 created_at=at + timedelta(seconds=later),
             )
 
-        # The gate said no about the question; masking later judged a client record yes.
         rows = [row("gate", False, 0), row("tool", True, 1)]
         assert answers_from(rows, {"worry": worry})["worry"].value is False
-        # What another model said first comes along, so a reflect rule can test `disputed`.
         rows[0].trail = [{"answerer": "a", "model": "a", "value": True, "confidence": 0.3, "error": ""}]
         assert answers_from(rows, {"worry": worry})["worry"].disputed
 
@@ -199,17 +190,14 @@ class TestHeadless:
             await turn("t-1")
             await turn("t-1")
             await turn("t-2")
-            # Each turn is listed for review; the lead is told once per thread.
             assert await ReviewItem.objects.acount() == 3
             assert len(sent) == 2
-            # Once someone resolves it, the next match is raised again.
             await ReviewItem.objects.filter(turn__thread_id="t-1").aupdate(
                 status=ReviewItem.Status.DONE
             )
             await turn("t-1")
         assert await ReviewItem.objects.filter(status=ReviewItem.Status.OPEN).acount() == 2
         assert len(sent) == 3
-        # Every turn still records that the rule matched.
         assert await RuleMatch.objects.filter(rule="alert_lead").acount() == 4
 
     async def test_a_broken_finish_withholds_the_answer_unless_open(self):
@@ -354,7 +342,6 @@ class TestHeadless:
         said = await LensAnswer.objects.aget(turn_id=full, lens="said")
         assert said.value is True
         turn = await Turn.objects.select_related("content").aget(id=full)
-        # By answer: the reason, beside the turn's content.
         assert turn.content.stored["texts"] == {str(said.id): {"rationale": "quote"}}
 
         metadata = await turn_under("metadata")

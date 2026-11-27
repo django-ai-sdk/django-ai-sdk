@@ -75,12 +75,11 @@ class TestToolArtifacts:
         )
         events = await _events(
             stream,
-            StreamingChunk(content="", index=0, tool_calls=[delta]),  # the model's call
+            StreamingChunk(content="", index=0, tool_calls=[delta]),
             _result_chunk(ASK_IMAGE_TOOL, arguments, "grey"),
             writer=writer,
         )
 
-        # The tool call and its output first, then the artifact as its own tool call.
         assert [e.event_type for e in events] == [
             "tool_call_start",
             "tool_input_complete",
@@ -94,7 +93,6 @@ class TestToolArtifacts:
         assert payload["files"][0]["filename"] == "cat.png"
         artifact = await Artifact.objects.aget(id=payload["artifact_id"])
         assert artifact.schema_name == "FileArtifact"
-        # Stored with the message, so a reloaded thread shows it too.
         names = [c["name"] for c in writer.message.tool_calls]
         assert names == [ASK_IMAGE_TOOL, "artifact_file_artifact"]
 
@@ -115,7 +113,7 @@ class TestToolArtifacts:
         from django_ai_sdk.artifacts.models import Artifact
 
         thread_id, _ = await self._thread_image()
-        data = None if case == "builder returns None" else {"files": []}  # [] fails FileData
+        data = None if case == "builder returns None" else {"files": []}
         spec = ToolArtifact(FileArtifact, lambda args, result, tid: data)
         stream = _stream({"lookup": spec}, None if case == "no thread" else thread_id)
         name = "other" if case == "unmapped tool" else "lookup"

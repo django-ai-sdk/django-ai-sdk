@@ -1,5 +1,3 @@
-"""Ninja and DRF answer the workflow endpoints with the same JSON."""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -24,7 +22,6 @@ def run(django_user_model):
         attempt=1,
         outputs={"result": "plain text"},
     )
-    # A step may return any JSON, not only an object.
     StepRun.objects.create(
         run=run, sequence=0, step_name="result", status="completed", output="plain text"
     )
@@ -35,7 +32,6 @@ def run(django_user_model):
 
 
 def same_instant(value):
-    """A timestamp as a datetime, so ISO spellings of one instant compare equal."""
     if isinstance(value, str) and value[:4].isdigit() and "T" in value:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     if isinstance(value, list):
@@ -59,7 +55,6 @@ class TestParity:
 
         assert both["ninja"] == both["drf"]
         assert both["ninja"]["steps"][0]["output"] == "plain text"
-        # A skipped step says why over HTTP, not only in the ORM.
         assert both["ninja"]["steps"][1]["detail"] == "result was skipped"
         assert both["ninja"]["attempt"] == 1
 
@@ -85,7 +80,6 @@ class TestParity:
             assert client.get(f"{root}{other.pk}/runs/{run.pk}/").status_code == 404
 
     def test_a_run_started_by_key_reads_the_same_from_both_by_its_id(self, client, run):
-        # A registered or ad-hoc run has no stored workflow, so only its id finds it.
         keyed = WorkflowRun.objects.create(
             workflow_key="registered-parity",
             user=run.user,

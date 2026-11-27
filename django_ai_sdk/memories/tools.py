@@ -15,7 +15,6 @@ ASK_IMAGE_TOOL = "ask_image"
 
 
 async def get_thread_image(thread_id: str, image: str) -> EntryDocument | None:
-    """An image uploaded to this thread, by document id or (partial) filename."""
     qs = EntryDocument.objects.filter(
         memory__thread_files__id=thread_id, content_type__startswith="image/"
     )
@@ -26,11 +25,6 @@ async def get_thread_image(thread_id: str, image: str) -> EntryDocument | None:
 
 
 def ask_image_tool(thread_id: str) -> Tool:
-    """Answer a question about an image in the thread with the vision model.
-
-    Lets agents whose own model can't see images, and follow-up turns after
-    the one the image was sent on, still look at the picture.
-    """
 
     async def _run(image: str, question: str) -> str:
         doc = await get_thread_image(thread_id, image)
@@ -67,7 +61,6 @@ def ask_image_tool(thread_id: str) -> Tool:
 
 
 def get_thread_file(doc: EntryDocument, thread_id: str) -> dict[str, str]:
-    """Document of the thread."""
     return {
         "documentId": str(doc.id),
         "filename": doc.file_name,
@@ -83,6 +76,4 @@ async def _get_image(
     return {"files": [get_thread_file(doc, thread_id)]} if doc else None
 
 
-#: Show the image `ask_image` looked at, as a file artifact:
-#: ``tool_artifacts = {ASK_IMAGE_TOOL: ASK_IMAGE_ARTIFACT}``.
 ASK_IMAGE_ARTIFACT = ToolArtifact(FileArtifact, _get_image)

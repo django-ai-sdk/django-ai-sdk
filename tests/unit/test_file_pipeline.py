@@ -6,10 +6,6 @@ import pytest
 from django_ai_sdk.files.pipeline import FilePipeline, parse_data
 from pydantic import BaseModel
 
-# ---------------------------------------------------------------------------
-# parse_data
-# ---------------------------------------------------------------------------
-
 
 class _FakePydantic(BaseModel):
     summary: str
@@ -45,11 +41,6 @@ class TestParseData:
     def test_int_returns_empty_dict(self):
         result = parse_data(42)
         assert result == {}
-
-
-# ---------------------------------------------------------------------------
-# FilePipeline.run — content / data split
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture

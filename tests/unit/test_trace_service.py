@@ -28,7 +28,6 @@ def _thread_with_messages():
 
 
 def _agent_run(thread, message, usage):
-    """Trace one agent run: a rollup span over one step per usage pair."""
     tracer = DefaultTracer()
     with bind(thread_id=thread.id, message_id=message.id):
         with tracer.trace("haystack.agent.run") as agent_span:
@@ -61,7 +60,6 @@ def _agent_run(thread, message, usage):
 
 @pytest.fixture
 def traced_thread(mock_storage_adapter_registry, mock_user):
-    """A thread with two traced runs, resolvable by ThreadService."""
     with thread_permissions(ALLOW_ALL):
         setup_thread_adapter(mock_storage_adapter_registry, user_id=mock_user.pk)
         thread, first, second = _thread_with_messages()
@@ -77,7 +75,6 @@ class TestThreadTraces:
 
         traces = await TraceService.thread_traces(thread.id, user=mock_user)
 
-        # One rollup + 2 spans per step, per run: (1 + 2*2) + (1 + 2*1)
         assert len(traces) == 8
         assert all(isinstance(t, TraceOut) for t in traces)
         assert [t.started_at for t in traces] == sorted(
@@ -123,7 +120,6 @@ class TestThreadTraces:
     async def test_unknown_thread_raises_value_error(
         self, mock_storage_adapter_registry, mock_user
     ):
-        # No adapter resolves the id, which is how a missing thread looks.
         mock_storage_adapter_registry.get_all_adapters.return_value = []
 
         with thread_permissions(ALLOW_ALL), pytest.raises(ValueError, match="Thread not found"):
@@ -187,7 +183,6 @@ class TestPermissions:
 
 
 def _subagent_run(thread, message, agent_id, name, usage):
-    """Trace a coordinator delegating one sub-task to a named subagent."""
     from django_ai_sdk.agents.subagent import SUBAGENT_ID_TAG, SUBAGENT_NAME_TAG
 
     tracer = DefaultTracer()
@@ -223,14 +218,7 @@ CHECKER_ID = "22222222-2222-2222-2222-222222222222"
 
 @pytest.mark.django_db(transaction=True)
 class TestSubagentUsage:
-    """thread_token_usage() carries the per-subagent breakdown — one call for
-    both the total and the crew's cost, no separate round trip."""
-
     async def test_breakdown_keys_by_id_not_name(self, mock_user):
-        """You never have to know a subagent's id — it comes back as the key.
-        Keyed by id, not name: two different classes sharing a display name
-        must not merge their totals (agent_name is carried for display only).
-        """
         thread, first, second = await sync_to_async(_thread_with_messages)()
         await sync_to_async(_subagent_run)(
             thread, first, PLANNER_ID, "Research Planner", [(10, 5), (20, 7)]
@@ -240,9 +228,7 @@ class TestSubagentUsage:
         with thread_permissions(ALLOW_ALL):
             usage = await TraceService.thread_token_usage(thread.id, user=mock_user)
 
-        # The outer total still covers every run in the thread…
         assert usage.total_tokens == 46
-        # …and each subagent's own cost is broken out under its id.
         assert usage.by_subagent == {
             PLANNER_ID: TokenUsage(
                 agent_name="Research Planner",

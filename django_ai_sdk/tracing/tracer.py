@@ -20,7 +20,6 @@ if TYPE_CHECKING:
 
 
 def _write(rows: list[Trace]) -> None:
-    """Persist a whole trace tree"""
     if not rows:
         return
     try:
@@ -34,13 +33,11 @@ def _write(rows: list[Trace]) -> None:
 
 
 def _reply_meta(value: dict[str, Any]) -> dict[str, Any]:
-    """Find the metadata dict of a component or agent output"""
     reply = value.get("replies") or value.get("last_message")
     if isinstance(reply, list):
         reply = reply[-1] if reply else None
     if isinstance(meta := getattr(reply, "meta", None), dict) and meta:
         return meta
-    # Put it in a top-level meta, one entry per reply.
     meta = value.get("meta")
     if isinstance(meta, list):
         meta = meta[0] if meta else {}
@@ -48,8 +45,6 @@ def _reply_meta(value: dict[str, Any]) -> dict[str, Any]:
 
 
 class TelemetrySpan(Span):
-    """A span, buffered as one ``Trace`` row"""
-
     def __init__(self, operation_name: str, parent_span: Span | None = None) -> None:
         self._t0 = time.monotonic()
         self._trace = Trace(operation_name=operation_name, started_at=timezone.now(), tags={})
@@ -62,30 +57,24 @@ class TelemetrySpan(Span):
             self._trace.message_id = parent.message_id
             self._root = parent_span._root
         else:
-            # Root spans are created on the thread context
             ids = context.current() or {}
             self._trace.thread_id = ids.get("thread_id")
             self._trace.message_id = ids.get("message_id")
             self._root = self
-            # Only a root buffers
             self._rows: list[Trace] = []
 
         self._root._rows.append(self._trace)
 
     def set_tag(self, key: str, value: Any) -> None:
-        """Set a single tag on the span"""
-        # read before the exclusion check
         if key == SUBAGENT_NAME_TAG and isinstance(value, str):
             self._trace.agent_name = value
         if key == SUBAGENT_ID_TAG and isinstance(value, str):
             self._trace.agent_id = value or None
-        # checked before coercion
         if key in self._excluded:
             return
         self._trace.tags[key] = coerce_tag_value(value)
 
     def set_content_tag(self, key: str, value: Any) -> None:
-        """Harvest token usage"""
         self._get_usage(value)
         super().set_content_tag(key, value)
 
@@ -111,13 +100,10 @@ class TelemetrySpan(Span):
         self._trace.ended_at = timezone.now()
         self._trace.duration_ms = (time.monotonic() - self._t0) * 1000
         if self._root is self:
-            # Rows are in creation order, so parents precede their children
             _write(self._rows)
 
 
 class DefaultTracer(Tracer):
-    """Persists every span as a ``Trace``"""
-
     @contextlib.contextmanager
     def trace(
         self,
@@ -125,7 +111,6 @@ class DefaultTracer(Tracer):
         tags: dict[str, Any] | None = None,
         parent_span: Span | None = None,
     ) -> Generator[Span]:
-        """Trace the execution of a block of code."""
         span = TelemetrySpan(operation_name, parent_span or context.current_span())
         if tags:
             span.set_tags(tags)
@@ -136,9 +121,7 @@ class DefaultTracer(Tracer):
             span._end()
 
     def current_span(self) -> Span | None:
-        """Return the currently active span."""
         return context.current_span()
 
     async def aflush(self) -> None:
-        """Wait until every scheduled span write"""
         await context.aflush()

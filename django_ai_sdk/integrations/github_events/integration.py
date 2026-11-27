@@ -21,7 +21,6 @@ API_BASE = "https://api.github.com"
 # GitHub rejects a comment body longer than this.
 MAX_COMMENT_LENGTH = 65536
 
-# A draft waits for ready_for_review; the other actions are new code to look at.
 DEFAULT_ACTIONS = frozenset({"opened", "reopened", "synchronize", "ready_for_review"})
 
 SIGNATURE_HEADER = "X-Hub-Signature-256"
@@ -29,26 +28,9 @@ EVENT_HEADER = "X-GitHub-Event"
 
 
 class GitHubEventsIntegration(WebhookIntegration):
-    """Run the agent on a pull request and post its answer as a PR comment.
-
-    Webhook: HTTPS, the `pull_request` event, a sha256 secret; the token must comment:
-
-        AI_SDK_INTEGRATIONS = {"github_events": {
-            "WEBHOOK_SECRET": env("GITHUB_WEBHOOK_SECRET"),
-            "TOKEN": env("GITHUB_TOKEN"),
-            "ALLOW_WORKSPACES": ["owner/repo"],
-            "ALLOW_FROM": ["octocat"],
-            "AGENT": "myapp.agents.ReviewAgent",
-        }}
-
-    To read the diff, give the agent the `github` integration.
-    """
-
-    # Not "github": that name is the MCP integration that reads the code.
     name = "github_events"
     label = "GitHub"
     dedup_ttl = UNSIGNED_DEDUP_TTL
-    # One thread per pull request, so a new push continues the review.
     thread_per_ref = True
 
     def missing_config(self) -> str | None:
@@ -59,7 +41,6 @@ class GitHubEventsIntegration(WebhookIntegration):
             "pull requests.",
         ):
             return missing
-        # One webhook secret can cover a whole organization: require explicit repositories.
         if not self._config().get("ALLOW_WORKSPACES"):
             return (
                 "No repositories. Set AI_SDK_INTEGRATIONS['github_events']"
@@ -75,7 +56,6 @@ class GitHubEventsIntegration(WebhookIntegration):
         )
 
     def parse(self, request: HttpRequest) -> InboundEvent | HttpResponse | None:
-        # Acknowledge other events, such as the setup ping, without answering.
         if request.headers.get(EVENT_HEADER, "") != "pull_request":
             return None
         body = self._json(request)

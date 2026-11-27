@@ -1,5 +1,3 @@
-"""FakeLLM: an agent, its chat and a model judge run on canned replies."""
-
 from __future__ import annotations
 
 import pytest

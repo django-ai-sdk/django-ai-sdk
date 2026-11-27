@@ -32,12 +32,10 @@ class Memory(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # Reverse relation type hints
     entries: models.Manager[Entry]
     memory_users: models.Manager[MemoryUser]
     memory_groups: models.Manager[MemoryGroup]
 
-    # Annotated field from queries
     document_count: int
 
     objects = NaturalKeyManager("slug")
@@ -69,20 +67,10 @@ class Memory(models.Model):
 
     @property
     def tool_name(self) -> str:
-        """Provider-safe function name for this memory's RAG tool.
-
-        Function names are restricted to ``[a-zA-Z0-9_-]``; anything else is
-        rejected for the whole request. Names that sanitise to nothing (e.g.
-        non-Latin scripts) fall back to the memory id.
-
-        Truncation means this is not unique on its own — ``get_rag_tools``
-        de-duplicates across the memories active on a thread.
-        """
         slug = re.sub(r"[^a-z0-9]+", "_", self.name.lower()).strip("_")[:20].strip("_")
         return f"search_{slug}" if slug else f"search_memory_{str(self.id).replace('-', '')[:8]}"
 
     async def get_tool_spec(self, doc_count: int | None = None) -> ToolSpec:
-        """Generate ToolSpec for this memory."""
         if doc_count is None:
             doc_count = await Entry.objects.filter(memory_id=self.id).acount()
 
@@ -109,7 +97,6 @@ class MemoryUser(models.Model):
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # Reverse relation type hints
     memory_id: int
     user_id: int
 
@@ -137,7 +124,6 @@ class MemoryGroup(models.Model):
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # Reverse relation type hints
     memory_id: int
     group_id: int
 
@@ -156,12 +142,6 @@ class MemoryGroup(models.Model):
 
 
 class Entry(models.Model):
-    """
-    A piece of knowledge stored in a Memory.
-    Text content + JSON metadata. No file columns — clean and lightweight.
-    File-backed entries are represented by an associated EntryDocument (OneToOne).
-    """
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="entries")
     memory_id: str
@@ -171,7 +151,6 @@ class Entry(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # Annotated
     file_size: int
 
     objects = EntryManager()
@@ -184,7 +163,6 @@ class Entry(models.Model):
 
     @property
     def extraction(self) -> DocumentExtraction | None:
-        """Parse data JSON as DocumentExtraction. Returns None for non-file entries."""
         if not self.data:
             return None
         try:
@@ -200,7 +178,6 @@ class Entry(models.Model):
             self.data = value.model_dump()
 
     def to_rag_document(self) -> RagDocument:
-        """Convert to RagDocument for retrieval. Enriches with extraction data when present."""
         extraction = self.extraction
         if extraction:
             parts = [self.content]
@@ -245,8 +222,6 @@ class EntryDocument(models.Model):
         null=True,
         blank=True,
     )
-    # Direct link to the owning Memory, set at upload time. Lets in-flight and
-    # failed documents (which have no Entry yet) still be listed by memory.
     memory = models.ForeignKey(
         Memory,
         on_delete=models.CASCADE,
@@ -270,16 +245,9 @@ class EntryDocument(models.Model):
         db_index=True,
     )
     task_id = models.CharField(max_length=64, null=True, blank=True)
-    # Pipeline-defined progress marker (e.g. "ocr", "extracting"), null except
-    # while processing_status=PROCESSING. Not a TextChoices enum: any
-    # agent's custom processor/transform can supply its own step string.
     processing_step = models.CharField(max_length=32, null=True, blank=True, default=None)
-    # Raw text, for admins only; clients get processing_error_code.
     processing_error = models.TextField(blank=True, default="")
     processing_error_code = models.CharField(max_length=64, blank=True, default="")
-    # Checked cooperatively at each pipeline step boundary (see
-    # memories/tasks.py); cancellation only takes effect between steps, not
-    # mid-call. Null means not cancelled.
     cancelled_at = models.DateTimeField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -303,7 +271,6 @@ class ThreadMemory(models.Model):
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
 
-    # Annotated field from queries
     document_count: int
 
     class Meta:

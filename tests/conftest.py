@@ -1,14 +1,9 @@
-"""
-Test configuration and shared fixtures for django-ai-sdk tests.
-"""
-
 import asyncio
 import pytest
 import pytest_asyncio
 from unittest.mock import MagicMock, patch
 from collections.abc import AsyncGenerator
 
-# Django configuration for tests
 pytest_plugins = ["pytest_django"]
 
 from django_ai_sdk.rags.schemas import RagDocument
@@ -16,7 +11,6 @@ from django_ai_sdk.rags.schemas import RagDocument
 
 @pytest.fixture(scope="session")
 def event_loop():
-    """Create an instance of the default event loop for the test session."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
@@ -33,7 +27,6 @@ def postgres_only():
 
 @pytest.fixture
 def mock_storage_adapter():
-    """Mock storage adapter."""
     from unittest.mock import AsyncMock, MagicMock
 
     adapter = MagicMock()
@@ -45,7 +38,6 @@ def mock_storage_adapter():
 
 @pytest.fixture
 def mock_user():
-    """Mock user with predictable pk and is_authenticated."""
     from unittest.mock import MagicMock
 
     user = MagicMock()
@@ -56,7 +48,6 @@ def mock_user():
 
 @pytest.fixture
 def mock_agents_registry():
-    """Patch the global agent registry at both import paths."""
     from unittest.mock import MagicMock, patch
     from tests.mocks.agent import create_agent_mock
 
@@ -72,15 +63,6 @@ def mock_agents_registry():
 
 @pytest.fixture
 def agent_permissions(mock_agents_registry):
-    """Fixture returning a setter that changes the registry agent's permissions.
-
-    Usage::
-
-        def test_something(self, agent_permissions):
-            agent_permissions(DenyAll)        # single
-            agent_permissions(IsOwner, DenyAll)  # multiple
-    """
-
     def set_perms(*perms):
         mock_agents_registry.get.return_value.permissions = list(perms)
 
@@ -89,7 +71,6 @@ def agent_permissions(mock_agents_registry):
 
 @pytest.fixture
 def mock_storage_adapter_registry():
-    """Patch the StorageAdapterRegistry."""
     from unittest.mock import MagicMock, patch
 
     with patch("django_ai_sdk.storage.services.StorageAdapterRegistry") as sr:
@@ -99,26 +80,21 @@ def mock_storage_adapter_registry():
 
 @pytest.fixture
 def sample_thread_id():
-    """Sample thread ID."""
     return "thread_test_12345"
 
 
 @pytest.fixture
 def sample_user_message():
-    """Sample user message."""
     return {"role": "user", "content": "Tell me a joke"}
 
 
 @pytest.fixture
 def sample_agent_response():
-    """Sample agent response."""
     return {"role": "assistant", "content": "Here's a joke for you!"}
 
 
 @pytest.fixture
 def rag_document_factory():
-    """Factory for creating RagDocument objects."""
-
     def create(**kwargs):
         defaults = {
             "id": "test-doc-1",
@@ -134,7 +110,6 @@ def rag_document_factory():
 
 @pytest.fixture
 def sample_rag_documents():
-    """Create a list of sample RagDocuments."""
     return [
         RagDocument(
             id=f"doc-{i}",
@@ -147,7 +122,6 @@ def sample_rag_documents():
 
 @pytest.fixture
 def installs_as_is():
-    """Run a mocked Haystack Agent as it is: oversight would run a copy of a real one."""
     installed = MagicMock(side_effect=lambda agent: agent)
     with patch("django_ai_sdk.oversight.plugin.apply_oversight", installed):
         yield installed
@@ -155,7 +129,6 @@ def installs_as_is():
 
 @pytest.fixture(autouse=True)
 def inline_workflow_runs(request, monkeypatch):
-    """Queued workflow runs execute inline; tests that take `dbos` get the real worker."""
     if "dbos" not in request.fixturenames:
         from django_ai_sdk.durable.testing import run_inline
 

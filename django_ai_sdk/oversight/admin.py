@@ -1,5 +1,3 @@
-"""Read-only admin for the oversight record: metrics access only, so no content or who asked."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -24,9 +22,6 @@ class ReadOnlyAdmin(admin.ModelAdmin):
 
 
 class ScopedAdmin(ReadOnlyAdmin):
-    """Rows of the turns the reader's METRICS scope keeps, on top of Django's view permission."""
-
-    # The path from a row to its turn; "" for the turn itself.
     turn_path = "turn"
 
     def may_read(self, request: Any) -> bool:
@@ -56,7 +51,6 @@ class TurnAdmin(ScopedAdmin):
     turn_path = ""
     list_display = ("created_at", "channel", "agent_name", "outcome", "report_outcome", "severity")
     list_filter = ("outcome", "report_outcome", "severity", "channel", "policy")
-    # The review API shows these ids only with VIEW_OVERSIGHT_CONTENT.
     exclude = ("content", "actor_id", "thread_id", "user_message_id", "message_id")
 
 
@@ -76,5 +70,4 @@ class RuleMatchAdmin(ScopedAdmin):
 class ReviewItemAdmin(ScopedAdmin):
     list_display = ("created_at", "queue", "rule", "status", "agree")
     list_filter = ("queue", "status")
-    # The note is content, and who closed it is kept out like who asked.
     exclude = ("note", "resolved_by_id")

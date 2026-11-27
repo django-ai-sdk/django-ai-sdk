@@ -14,13 +14,6 @@ if TYPE_CHECKING:
 
 
 class VisionAgent(Agent):
-    """Answers every image question for the SDK (AI_SDK_VISION_AGENT).
-
-    It captions uploaded images (ImageCaptionProcessor) and answers the ask_image
-    tool. The image arrives attached to a user message; the text is the caption
-    prompt or the question.
-    """
-
     name = "Vision Agent"
     model = settings.AI_SDK_VISION_MODEL
     hidden = True

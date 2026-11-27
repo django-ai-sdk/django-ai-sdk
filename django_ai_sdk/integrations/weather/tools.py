@@ -6,12 +6,10 @@ from haystack.tools import tool
 _GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 _WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 
-# Arbitrary valid point (Amsterdam), only used to probe the endpoint.
 _HEALTH_CHECK_COORDS = {"latitude": 52.37, "longitude": 4.9, "current_weather": "true"}
 
 
 def fetch_current_weather(location: str) -> dict:
-    """Geocode ``location`` and return its current weather, or an error dict."""
     with httpx.Client(timeout=5) as client:
         geo = client.get(_GEOCODE_URL, params={"name": location, "count": 1}).json()
         results = geo.get("results") or []
@@ -39,7 +37,6 @@ def fetch_current_weather(location: str) -> dict:
 
 
 async def check_weather_api() -> None:
-    """Health probe: confirm the forecast endpoint responds; raises on failure."""
     async with httpx.AsyncClient(timeout=5) as client:
         response = await client.get(_WEATHER_URL, params=_HEALTH_CHECK_COORDS)
         response.raise_for_status()

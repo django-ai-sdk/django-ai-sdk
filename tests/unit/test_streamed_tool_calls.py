@@ -1,6 +1,4 @@
-"""A tool call streamed in fragments is stored and emitted once, with its whole input.
-
-Shapes follow Haystack's generators: both send a first delta with the name and no
+"""Shapes follow Haystack's generators: both send a first delta with the name and no
 arguments, then argument fragments without a name. The Responses API repeats the
 call id on every fragment; Chat Completions only sends it on the first.
 """

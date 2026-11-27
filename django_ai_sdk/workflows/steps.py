@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.workflows.listeners import RunListener
 
 
-# Roles allowed in a step's history. Only the agent writes system turns.
 HISTORY_ROLES = frozenset({"user", "assistant"})
 
 
@@ -38,48 +37,34 @@ class RunSuperseded(Exception):
 
 
 class StepRecorded(Exception):
-    """The step's row already holds this attempt's outcome (worker died before DBOS checkpoint)."""
-
     def __init__(self, outcome: StepOutcome) -> None:
         super().__init__(outcome.detail)
         self.outcome = outcome
 
 
 class OnError(StrEnum):
-    """What a step's failure does to the rest of the run."""
-
     STOP = "stop"
-    # Record it, skip this step's dependents, run the rest.
     CONTINUE = "continue"
 
 
 @dataclass
 class StepOutcome:
-    """What a step reports back, filed under the step's own name."""
-
     output: Any = None
-    # "waiting" only while an approval step waits for a decision.
     status: Literal["completed", "failed", "skipped", "waiting"] = "completed"
     detail: str = ""
-    # Filled in by the runner.
     turn_id: str = ""
 
 
 @dataclass
 class WorkflowContext:
-    """The run's state: caller `inputs` and `steps` so far, as separate namespaces."""
-
     inputs: Mapping[str, Any] = field(default_factory=dict)
     steps: Mapping[str, StepOutcome] = field(default_factory=dict)
     user: AbstractBaseUser | AnonymousUser | None = None
-    # The run's workflow key (slug, registered name or "adhoc").
     workflow: str = ""
     run_id: str = ""
-    # So `approval` knows which step is an approval step.
     declared: Mapping[str, Step] = field(default_factory=dict, repr=False)
 
     def input(self, name: str, default: Any = None) -> Any:
-        """One of the run's declared inputs."""
         return self.inputs.get(name, default)
 
     def step(self, name: str, default: Any = None) -> Any:
@@ -90,10 +75,7 @@ class WorkflowContext:
         return outcome.output
 
     def approval(self, name: str) -> dict[str, Any] | None:
-        """The approval `{approved, by, note}` step `name` completed with, or None.
-
-        Use this, not `step(name)`: only an `ApprovalStep` is decided by a person.
-        """
+        """The approval `{approved, by, note}` step `name` completed with, or None."""
         outcome = self.steps.get(name)
         if not isinstance(self.declared.get(name), ApprovalStep) or outcome is None:
             return None
@@ -104,10 +86,7 @@ class WorkflowContext:
 
 
 class Step:
-    """One unit of work in a workflow.
-
-    At least once, not exactly once: external side effects must use `idempotency_key(ctx)`.
-    """
+    """At least once, not exactly once: external side effects must use `idempotency_key(ctx)`."""
 
     name: str = ""
 
@@ -117,27 +96,21 @@ class Step:
 
     listeners: tuple[RunListener, ...] = ()
 
-    # The StepDefinition's `config`; empty for a step written in code.
     config: Mapping[str, Any] = MappingProxyType({})
 
-    # True for a step that waits for a person (ApprovalStep). Only a durable run waits.
     waits: bool = False
 
     @classmethod
     def validate_config(cls, config: Mapping[str, Any]) -> None:
-        """Raise ValueError unless this step type accepts `config` (default: none).
-
-        Runs on store/register, so a bad config fails early instead of in the worker.
-        """
+        """Raise ValueError unless this step type accepts `config` (default: none)."""
         if config:
             raise ValueError(f"{cls.__name__} takes no config, got keys {sorted(config)}.")
 
     async def skip_if(self, ctx: WorkflowContext) -> str:
-        """A reason to skip, or "" to run. For preconditions on a required step's value."""
+        """A reason to skip, or "" to run."""
         return ""
 
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
-        """Do the work and report the outcome. It may run more than once (see the class)."""
         raise NotImplementedError
 
     def idempotency_key(self, ctx: WorkflowContext) -> str:
@@ -146,14 +119,10 @@ class Step:
             raise RuntimeError("Only a step of a recorded run has an idempotency key.")
         return f"{ctx.run_id}:{self.name}"
 
-    # A waiting step (`waits = True`) implements these three instead of doing work in run().
-
     def waiting_for(self) -> str:
-        """One line on what the step waits for, shown while it waits."""
         return ""
 
     def wait_seconds(self) -> float:
-        """How long the step waits for its decision before it fails."""
         return 0.0
 
     def decide(self, decision: Any) -> StepOutcome:
@@ -172,17 +141,10 @@ class Step:
         input: str | None = None,
         messages: list[ChatMessage] | None = None,
     ) -> AbstractAsyncContextManager[OpenTurn]:
-        """Open a turn for a model this step calls directly, as the run's user.
-
-        Every model call in a step needs a turn; `agent.run()` opens its own::
-
-            async with self.turn(ctx, "translation", input=chunk) as t:
-                text = await t.finish(await translate(await t.gate()))
-        """
+        """Open a turn for a model this step calls directly, as the run's user."""
         from django_ai_sdk.oversight.policy import Policy
         from django_ai_sdk.oversight.turns import turn
 
-        # A policy given without an agent judges the turn as this step.
         policy_only = (
             isinstance(agent, str) or isinstance(agent, type) and issubclass(agent, Policy)
         )
@@ -198,23 +160,16 @@ class Step:
 
 
 class AgentStep(Step):
-    """One structured agent call, as one step among others."""
-
-    # Exactly one: `agent` for code steps, `agent_id` for JSON definitions.
     agent: type[Agent] | None = None
     agent_id: str = ""
 
-    # Declared output_fields, compiled. None means the agent's own response format.
     schema: type[BaseModel] | None = None
 
-    # A system prompt replacing the agent's own; "" keeps the agent's.
     instructions: str = ""
 
-    # Inputs sent as the conversation before this step's own turn.
     history: tuple[str, ...] = ()
 
     async def get_agent(self) -> Agent:
-        """The agent this step calls, from the class or the id."""
         if self.agent is not None:
             return self.agent()
         from django_ai_sdk.agents.services import AgentService
@@ -226,7 +181,7 @@ class AgentStep(Step):
         return self.instructions or None
 
     async def user_message(self, ctx: WorkflowContext) -> str:
-        """The turn this step asks. By default, what the steps it requires produced."""
+        """By default, what the steps it requires produced."""
         parts = [
             f"[{name}]\n{_as_text(ctx.step(name))}"
             for name in self.requires
@@ -235,10 +190,7 @@ class AgentStep(Step):
         return "\n\n".join(parts)
 
     def transcript(self, ctx: WorkflowContext) -> list[ChatMessage]:
-        """The inputs named in `history`, as ChatMessages.
-
-        User and assistant turns only: inputs must not speak with system authority.
-        """
+        """The inputs named in `history`, as ChatMessages. User and assistant turns only."""
         transcript: list[ChatMessage] = []
         for name in self.history:
             value = ctx.input(name)
@@ -257,19 +209,15 @@ class AgentStep(Step):
         return transcript
 
     async def messages(self, ctx: WorkflowContext) -> list[ChatMessage]:
-        """The run's transcript, then this step's own turn."""
         turn = await self.user_message(ctx)
         history = self.transcript(ctx)
         return [*history, ChatMessage(role="user", content=turn)] if turn else history
 
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
-        """Call the agent with this step's prompt and messages."""
         from django_ai_sdk.permissions import Operation, check_permissions, get_agent_permissions
 
         agent = await self.get_agent()
-        # SECURITY: composing an agent is not permission to run it.
         await check_permissions(ctx.user, Operation.CHAT, get_agent_permissions(agent), agent=agent)
-        # Omitted, not None: an explicit None would strip the agent's own structured output.
         response_format = {"response_format": self.schema} if self.schema else {}
         messages = await self.messages(ctx)
 
@@ -298,11 +246,8 @@ class AgentStep(Step):
 
 
 class ApprovalConfig(BaseModel):
-    """An approval step's `config`."""
-
     model_config = ConfigDict(extra="forbid")
 
-    # Shown to the approver while the step waits.
     prompt: str = Field(default="", max_length=255)
     timeout_seconds: int = Field(default=7 * 24 * 3600, ge=60, le=90 * 24 * 3600)
 
@@ -333,7 +278,6 @@ class ApprovalStep(Step):
         return float(self.settings.timeout_seconds)
 
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
-        # Reached only by a run that cannot wait: an in-process one.
         return StepOutcome(
             status="failed", detail="an approval step waits only in a durable run (DBOS)"
         )
@@ -354,7 +298,6 @@ class ApprovalStep(Step):
 
 
 def _as_message(item: Any) -> ChatMessage:
-    """One history item as a ChatMessage, whatever it crossed the queue as."""
     if isinstance(item, ChatMessage):
         return item
     if isinstance(item, str):
@@ -363,7 +306,6 @@ def _as_message(item: Any) -> ChatMessage:
 
 
 def _as_text(value: Any) -> str:
-    """A step's output as prompt text, JSON rather than a Python repr."""
     if isinstance(value, str):
         return value
     return json.dumps(value, default=str, indent=2)

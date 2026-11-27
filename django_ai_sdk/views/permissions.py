@@ -1,10 +1,3 @@
-"""Per-object permission flags (can_read/can_write/can_manage) for API responses.
-
-Framework-neutral: the contrib Ninja and DRF layers attach these to thread, agent and
-memory payloads so a client knows which actions to offer. A missing or unreadable
-object yields all-False rather than an error.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -19,6 +12,7 @@ if TYPE_CHECKING:
 
 
 async def athread_permissions(user: UserType, thread_id: str) -> ObjectPermissions:
+    """All-False for a missing or unreadable object, never an error."""
     from django_ai_sdk.storage.services import ThreadService
 
     try:
@@ -31,6 +25,7 @@ async def athread_permissions(user: UserType, thread_id: str) -> ObjectPermissio
 
 
 async def aagent_permissions(user: UserType, agent_id: str) -> ObjectPermissions:
+    """All-False for a missing or unreadable object, never an error."""
     from django_ai_sdk.agents.models import AgentSettings
     from django_ai_sdk.agents.services import AgentService
 
@@ -45,6 +40,7 @@ async def aagent_permissions(user: UserType, agent_id: str) -> ObjectPermissions
 
 
 async def amemory_permissions(user: UserType, memory_id: str) -> ObjectPermissions:
+    """All-False for a missing or unreadable object, never an error."""
     from django_ai_sdk.memories.models import Memory
     from django_ai_sdk.memories.services import MemoryService
 

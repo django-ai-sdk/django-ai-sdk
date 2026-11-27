@@ -11,8 +11,6 @@ logger = get_logger(__name__)
 
 
 class BaseStorageConfig(BaseModel):
-    """Base configuration for vector store persistence."""
-
     model_config = ConfigDict(extra="allow")
 
     persist_path: str | None = Field(default=None)
@@ -29,7 +27,6 @@ class BaseStorageConfig(BaseModel):
 
     @classmethod
     def _build_path(cls, backend: str, memory_id: str | None) -> str | None:
-        """Build the persistence path for a given backend and memory_id."""
         persist_path = resolve_setting("AI_SDK_VECTOR_STORE_PATH")
         if not persist_path:
             return None
@@ -38,12 +35,9 @@ class BaseStorageConfig(BaseModel):
 
     @classmethod
     def from_settings(cls, memory_id: str | None = None, **kwargs: Any) -> BaseStorageConfig:
-        """Create config from Django settings.
-
+        """
         Args:
-            memory_id: The memory ID determines the storage path.
-            **kwargs: Additional keyword arguments forwarded to the document store
-                     constructor (e.g. prefer_grpc, api_key, timeout for Qdrant).
+            **kwargs: Additional keyword arguments forwarded to the document store constructor.
         """
         path = cls._build_path("base", memory_id)
         if path:
@@ -52,12 +46,9 @@ class BaseStorageConfig(BaseModel):
 
 
 class QdrantStorageConfig(BaseStorageConfig):
-    """Configuration for Qdrant vector store persistence."""
-
     backend: Literal[":memory:", "persistent", "server"] = Field(default=":memory:")  # ty: ignore[incompatible-attribute-override]
     location: str | None = Field(default=None)
     similarity: Literal["cosine", "dot", "euclidean"] = Field(default="cosine")
-    # Seconds to wait for another process to release a "persistent" store's lock.
     lock_timeout: float = Field(default=10.0, ge=0)
 
     @property
@@ -66,13 +57,9 @@ class QdrantStorageConfig(BaseStorageConfig):
 
     @classmethod
     def from_settings(cls, memory_id: str | None = None, **kwargs: Any) -> QdrantStorageConfig:
-        """Create config from Django settings.
-
+        """
         Args:
-            memory_id: The memory ID determines the storage path or collection name.
-            **kwargs: Additional keyword arguments forwarded to QdrantDocumentStore
-                     (e.g. prefer_grpc, https, api_key=Secret.from_token(...),
-                     grpc_port, index, timeout).
+            **kwargs: Additional keyword arguments forwarded to QdrantDocumentStore.
         """
         url = resolve_setting("AI_SDK_VECTOR_STORE_URL")
         if url:
@@ -90,16 +77,11 @@ class QdrantStorageConfig(BaseStorageConfig):
 
 
 class ChromaStorageConfig(BaseStorageConfig):
-    """Configuration for Chroma vector store persistence."""
-
     @classmethod
     def from_settings(cls, memory_id: str | None = None, **kwargs: Any) -> ChromaStorageConfig:
-        """Create config from Django settings.
-
+        """
         Args:
-            memory_id: The memory ID determines the storage path.
-            **kwargs: Additional keyword arguments forwarded to ChromaDocumentStore
-                     (e.g. distance_function, host, port).
+            **kwargs: Additional keyword arguments forwarded to ChromaDocumentStore.
         """
         path = cls._build_path("chroma", memory_id)
         if path:
@@ -108,14 +90,10 @@ class ChromaStorageConfig(BaseStorageConfig):
 
 
 class BM25StorageConfig(BaseStorageConfig):
-    """Configuration for BM25 (plain) persistence."""
-
     @classmethod
     def from_settings(cls, memory_id: str | None = None, **kwargs: Any) -> BM25StorageConfig:
-        """Create config from Django settings.
-
+        """
         Args:
-            memory_id: The memory ID determines the storage path.
             **kwargs: Additional keyword arguments forwarded to the constructor.
         """
         path = cls._build_path("bm25", memory_id)

@@ -1,5 +1,3 @@
-"""Runs inside a turn: joining it, child turns, and subagents."""
-
 from __future__ import annotations
 
 import asyncio
@@ -52,7 +50,7 @@ def secret_subagent(ran: list[str], *responses: Any) -> type[Agent]:
         _skip_auto_register = True
         permissions = [AllowAll]
         name = "sub"
-        oversight = "test-guard"  # refuses tool calls that carry a secret
+        oversight = "test-guard"
         tools = [lambda **kw: tool]  # noqa: RUF012
 
         def get_llm(self, **kwargs: Any) -> Any:
@@ -77,7 +75,7 @@ class TestNestedRuns:
         with guarding(outer), pytest.raises(Blocked):
             await agent.run([ChatMessage(role="user", content=INJECTION)], oversight=RunPolicy)
         assert not model.asked
-        assert await Turn.objects.acount() == 1  # the child's own record
+        assert await Turn.objects.acount() == 1
 
     async def test_a_nested_agent_with_a_policy_of_its_own_opens_a_child_turn(self):
         agent, model = agent_with("Sure.", policy=RunPolicy)
@@ -132,12 +130,11 @@ class TestNestedRuns:
         agent, _ = agent_with("Sure.", policy=False)
         injection = [ChatMessage(role="user", content=INJECTION)]
         with override_settings(AI_SDK_OVERSIGHT={"DEFAULT_POLICY": "test-run"}):
-            assert await agent.run(list(injection), oversight=None) == "Sure."  # opts out
+            assert await agent.run(list(injection), oversight=None) == "Sure."
             with pytest.raises(Blocked):
                 await agent.run(list(injection), oversight="test-run")
 
     async def test_a_closed_turn_is_never_joined(self):
-        """A task started inside a turn outlives it: its runs open turns of their own."""
         agent, model = agent_with("Sure.")
         outer = await TurnGuard.start(agent, channel="chat", input="hi")
         go = asyncio.Event()
@@ -211,13 +208,11 @@ class TestSubagents:
         context = [HaystackChatMessage.from_user(f"my key is {SECRET}")]
         await component.run_async(messages=context, task="who")
         guard = await TurnGuard.start(make_agent([], None), channel="chat", input="x")
-        with guarding(guard):  # joined: the coordinator's turn judged that context
+        with guarding(guard):
             await component.run_async(messages=context, task="who")
         assert handed == [[], context]
 
     async def test_a_child_turns_tool_calls_stay_in_the_child_turn(self):
-        # Its own policy judged them. The coordinator's turn gets only what came back:
-        # its tool hooks check the delegation call and mask the answer at the hand-off.
         ran: list[str] = []
         lenient = await TurnGuard.start(
             make_agent([], None, policy="test-lenient"), channel="chat", input="x"
@@ -231,8 +226,6 @@ class TestSubagents:
         assert child.policy == "test-guard"
 
     async def test_its_streamed_tool_results_are_masked_by_its_own_policy(self):
-        # The coordinator's policy masks nothing, so the card and the stored thread
-        # would show what the subagent's policy hid from its own model.
         tool = Tool(
             name="patient",
             description="patient",
@@ -287,14 +280,10 @@ class TestSubagents:
             tool_calls=[HaystackToolCall(tool_name=tools[0].name, arguments={"task": "go"}, id="d1")]
         )
         storage = Storage()
-        # The subagent's policy refuses the call, in its own turn, the coordinator's, or with
-        # no coordinator policy at all.
         parts = await chat(make_agent([delegate, "Done."], storage, tools=tools, policy=policy), "go")
         assert ran == []
         assert SECRET not in json.dumps([m.tool_calls for m in storage.stored], default=str)
-        # Nor does the stream show them before the subagent's tool stage refused the call.
         assert SECRET not in json.dumps(parts)
-        # With no coordinator policy, the stub comes back as the run's own error result.
         shown = "tool-output-available" if policy else "tool-output-error"
         outputs = [p["toolCallId"] for p in parts if p.get("type") == shown]
         assert outputs.count("s1") == 1
@@ -335,7 +324,7 @@ class TestSubagents:
         with guarding(guard):
             await component.run_async(messages=[HaystackChatMessage.from_user("x")], task="send")
         assert ran == []
-        assert await Turn.objects.acount() == 0  # joined: the coordinator's turn records it
+        assert await Turn.objects.acount() == 0
 
     def test_a_sync_delegation_that_needs_a_turn_is_refused(self):
         from django_ai_sdk.agents.subagent import UNGUARDABLE, subagent_response

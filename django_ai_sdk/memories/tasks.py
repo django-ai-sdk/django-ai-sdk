@@ -16,7 +16,7 @@ PIPELINE_TIMEOUT_SECONDS = resolve_setting("AI_SDK_FILE_PIPELINE_TIMEOUT", 900)
 
 
 class _Cancelled(Exception):
-    """Raised internally when a step boundary notices cancelled_at is set."""
+    pass
 
 
 @task(queue_name="default")
@@ -25,22 +25,13 @@ def process_document_upload(
     memory_id: str,
     agent_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """Sync task entry point for background file pipeline processing.
-
-    The return value becomes ``DBTaskResult.return_value``, retrievable via
+    """The return value becomes ``DBTaskResult.return_value``, retrievable via
     ``aget_task_status`` on success.
     """
     return async_to_sync(run_file_pipeline)(entry_doc_id, memory_id, agent_id)
 
 
 def thread_file_task() -> Any:
-    """``process_document_upload`` at ``AI_SDK_THREAD_FILE_PRIORITY``.
-
-    A user waits on a thread upload in chat, so a higher priority lets it jump
-    bulk memory imports queued at the default 0. Only reorders the queue: a
-    worker already busy with a memory document finishes it first.
-    """
-    # priority only; a separate queue + worker if running jobs still block
     return process_document_upload.using(
         priority=resolve_setting("AI_SDK_THREAD_FILE_PRIORITY", 10)
     )
@@ -59,16 +50,12 @@ async def run_file_pipeline(
     from django_ai_sdk.files.processors import TextFileProcessor
     from django_ai_sdk.memories.models import Entry, EntryDocument, Memory
 
-    # The document may have been deleted (user cancelled an in-flight upload) or
-    # its memory removed before the worker picked up the task — treat as a no-op.
     try:
         entry_doc = await EntryDocument.objects.aget(id=entry_doc_id)
         memory = await Memory.objects.aget(id=memory_id)
     except (EntryDocument.DoesNotExist, Memory.DoesNotExist):
         return
 
-    # Only writes if still PROCESSING, so a concurrent cancel/finish wins
-    # instead of being clobbered. Returns whether the write applied.
     async def _transition(*, status: str, error: str, code: str = "") -> bool:
         updated = await EntryDocument.objects.filter(
             id=entry_doc.id, processing_status=EntryDocument.ProcessingStatus.PROCESSING
@@ -87,7 +74,6 @@ async def run_file_pipeline(
         )
 
     if entry_doc.cancelled_at is not None:
-        # Cancelled while still queued
         return
 
     entry_doc.processing_status = EntryDocument.ProcessingStatus.PROCESSING
@@ -109,8 +95,6 @@ async def run_file_pipeline(
         if not pipelines:
             pipelines = [FilePipeline(TextFileProcessor())]
 
-        # A processor returning None passes on the file.
-        # One timeout budget covers all attempts.
         async def _run_pipelines() -> PipelineResult | None:
             for pipeline in pipelines:
                 result = await pipeline.run(entry_doc.file, on_step=_on_step)
@@ -145,16 +129,13 @@ async def run_file_pipeline(
             updated_at=timezone.now(),
         )
         if not updated:
-            return  # cancelled after the last checkpoint; leave that status alone
-        # Entry post_save signal fires RAG indexing automatically
+            return
         return {"entry_id": str(entry.id), "extracted": extracted}
 
     except _Cancelled:
         await _mark_cancelled()
         return
     except TimeoutError as exc:
-        # asyncio.wait_for's own TimeoutError has no message; prefer that over
-        # an inner one's message if there is one.
         if not await _transition(
             status=EntryDocument.ProcessingStatus.FAILED,
             error=str(exc) or f"Processing timed out after {PIPELINE_TIMEOUT_SECONDS} seconds",

@@ -1,5 +1,3 @@
-"""What a turn tells the person: block messages, `data-oversight` notices and Notify events."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -21,7 +19,6 @@ if TYPE_CHECKING:
 
 TOO_LONG_MESSAGE = _("This message is too long to check. Shorten it and try again.")
 UNCHECKED_TEXT = _("[withheld: could not be checked]")
-# Keep the wording: clients and stored threads already show it.
 BLOCKED_TEXT = _("[withheld: blocked by oversight]")
 TOOL_UNAVAILABLE_MESSAGE = _("This tool is not available for this request.")
 
@@ -31,11 +28,6 @@ def notice_base(turn_id: Any, stage: Stage, outcome: Outcome) -> dict[str, Any]:
 
 
 def rule_notes(matched: list[Matched], told: set[str]) -> list[dict[str, Any]]:
-    """Notes for rules that acted, each rule once per turn.
-
-    `kind` is the first USER_FACING action; a rule that acted only out of sight
-    gets "notice", so the client never learns it queued, alerted or notified.
-    """
     notes: list[dict[str, Any]] = []
     for match in matched:
         rule = match.rule
@@ -58,9 +50,7 @@ def rule_notes(matched: list[Matched], told: set[str]) -> list[dict[str, Any]]:
 class TurnNotices:
     def __init__(self, guard: TurnGuard) -> None:
         self.guard = guard
-        # data-oversight payloads waiting to be streamed.
         self.pending: list[dict[str, Any]] = []
-        # Rules whose notice was already sent this turn.
         self.told: set[str] = set()
 
     def stage_notice(
@@ -74,9 +64,7 @@ class TurnNotices:
         acted = [m for m in matched if m.acted]
         level = setting("CLIENT_DETAIL")
         detail = level == "full"
-        # Tool calls send no notice of their own, so the answer's notice covers them.
         notes = rule_notes([*acted, *self._tool_matches(stage, matched)], self.told)
-        # Hide invisible actions (queue, alert, notify) so the client cannot probe the policy.
         shown = [
             m
             for m in acted
@@ -93,21 +81,15 @@ class TurnNotices:
             notice["message"] = message
         if finished is not None and finished.changed:
             notice["replace"] = finished.text
-        # Never echo a blocked question, even masked, since parts may be unsafe.
         masked = any(a.kind == "mask" for m in acted for a in m.acted)
         if stage is Stage.GATE and masked and not blocked:
             notice["input"] = self.guard.context.input
         if detail:
-            # Rule names reveal what the policy tests, so only send them in full detail.
             notice["rules"] = [m.rule.name for m in acted]
             notice["detail"] = self._detail(stage, matched)
         return notice
 
     def _detail(self, stage: Stage, matched: list[Matched]) -> dict[str, Any]:
-        """Answers and matches of `stage` for a developer view, valued as stored.
-
-        Entity names become "[found]", so the client never sees what a mask removed.
-        """
         policy = self.guard.resolved
         matches = [*matched, *self._tool_matches(stage, matched)]
         return {
@@ -176,14 +158,12 @@ def restricted_tools(matched: Iterable[Matched], restrict: list[str] | None) -> 
 
 
 def merge_restrict(restrict: list[str] | None, names: list[str]) -> list[str]:
-    """`restrict` None means none removed, [] means all."""
     if not names or restrict == []:
         return []
     return sorted({*(restrict or []), *names})
 
 
 def block_message(match: Matched, block: Block) -> str:
-    """A match caused only by a failure gets the generic message."""
     if match.failed:
         return str(Block.DEFAULT_MESSAGE)
     return str(match.rule.message or block.message)

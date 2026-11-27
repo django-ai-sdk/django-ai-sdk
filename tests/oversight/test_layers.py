@@ -1,13 +1,3 @@
-"""How the SDK and oversight's layers may import each other.
-
-Core oversight is a layer of its own: it imports no workflows and no routes. The review layer
-and authoring sit on it as opt-in parts, and each can be removed without touching the layers
-below. The rest of the SDK reaches oversight only through the seams below.
-
-Every import is read from the source, including lazy imports inside functions and imports
-under `TYPE_CHECKING`, so a layer cannot lean on another one without it showing here.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -20,7 +10,6 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "django_ai_sdk"
 OVERSIGHT = "django_ai_sdk.oversight"
 
-# The only core modules the rest of the SDK may import, and why it needs each one.
 SEAMS = {
     f"{OVERSIGHT}.turns": "a workflow step opens its own turn through it",
     f"{OVERSIGHT}.agents": "an agent checks the policy it declares in code",
@@ -40,24 +29,17 @@ SEAMS = {
 @dataclass(frozen=True)
 class Layer:
     modules: tuple[str, ...]
-    """The packages and modules the layer is made of, with everything under them."""
     may_import: tuple[str, ...]
-    """The other layers it may import. Every layer may import the rest of the SDK, and a layer
-    that may import core may import its seams."""
     why: str
     avoids: tuple[str, ...] = ()
-    """Packages outside every layer that it must not import either."""
 
 
-# A module belongs to the first layer that names it, so core and the SDK, which are named by
-# their whole package, take whatever the layers before them leave.
 LAYERS = {
     "review": Layer(
         modules=(
             f"{OVERSIGHT}.services",
             f"{OVERSIGHT}.schemas",
             f"{OVERSIGHT}.permissions",
-            # It narrows turns with the review layer's scope hooks.
             f"{OVERSIGHT}.admin",
         ),
         may_import=("core",),
@@ -97,7 +79,6 @@ def is_under(module: str, package: str) -> bool:
 
 
 def layer_of(module: str) -> str | None:
-    """The layer `module` belongs to, or None when it is not part of the SDK."""
     for name, layer in LAYERS.items():
         if any(is_under(module, part) for part in layer.modules):
             return name
@@ -105,7 +86,6 @@ def layer_of(module: str) -> str | None:
 
 
 def target_layer(module: str) -> str | None:
-    """The layer an import of `module` reaches into, with the seams apart from the rest of core."""
     return "seams" if module in SEAMS else layer_of(module)
 
 
@@ -124,8 +104,6 @@ def module_exists(module: str) -> bool:
 
 
 def imported_modules(path: Path) -> set[str]:
-    """Every module `path` imports, with relative imports resolved. A `from x import y` counts
-    as importing `x`, and `x.y` too when `y` is a submodule."""
     module = module_name(path)
     package = module if path.name == "__init__.py" else module.rpartition(".")[0]
     found: set[str] = set()
@@ -181,7 +159,6 @@ def test_every_module_the_table_names_exists():
 def test_the_scan_sees_lazy_and_relative_imports(tmp_path, monkeypatch):
     fake = tmp_path / "django_ai_sdk" / "oversight"
     fake.mkdir(parents=True)
-    # Core must avoid workflows and contrib on every branch, so they make stable examples.
     (fake / "guard.py").write_text(
         "def f():\n    from django_ai_sdk.workflows import x\n    from ..contrib import y\n"
     )

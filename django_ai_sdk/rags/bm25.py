@@ -23,14 +23,10 @@ logger = get_logger(__name__)
 
 
 class BM25QueryExpanderRAGConfig(RAGConfig):
-    """Configuration for BM25 Query Expander RAG."""
-
     pass
 
 
 class BM25QueryExpanderRAG(RAGBase):
-    """RAG implementation using BM25 with optional query expansion."""
-
     def __init__(
         self,
         documents: list[RagDocument],
@@ -43,19 +39,15 @@ class BM25QueryExpanderRAG(RAGBase):
         logger.debug(f"BM25QueryExpanderRAG initialized with {len(documents)} documents")
 
     def _convert_documents(self) -> list[HaystackDocument]:
-        """Convert RagDocuments to HaystackDocuments for internal use."""
         return [to_document(doc) for doc in self.documents]
 
     def _create_document_store(self) -> InMemoryDocumentStore:
-        """Create an in-memory document store."""
         return InMemoryDocumentStore()
 
     def _has_existing_index(self, document_store: InMemoryDocumentStore) -> bool:
-        """Check if document store already has indexed documents."""
         return document_store.count_documents() > 0
 
     async def add_documents(self, documents: list[RagDocument]) -> None:
-        """Add documents to the existing BM25 index."""
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot add documents")
             return
@@ -65,7 +57,6 @@ class BM25QueryExpanderRAG(RAGBase):
         logger.info(f"Added {len(documents)} documents to BM25 index")
 
     async def remove_documents(self, document_ids: list[str]) -> None:
-        """Remove documents from the BM25 index."""
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot remove documents")
             return
@@ -82,18 +73,10 @@ class BM25QueryExpanderRAG(RAGBase):
     def _write_documents(
         self, documents: list[HaystackDocument], document_store: InMemoryDocumentStore
     ) -> None:
-        """Write documents to the store (no chunking for BM25)."""
-        # An Entry save re-adds its id on every edit: replace, don't fail.
         writer = DocumentWriter(document_store, policy=DuplicatePolicy.OVERWRITE)
         writer.run(documents=documents)
 
     async def warmup(self, force_rebuild: bool = False) -> None:
-        """
-        Build or load indexed document store.
-
-        Args:
-            force_rebuild: If True, clears existing index and rebuilds from scratch.
-        """
         if self._is_warmed_up and not force_rebuild:
             logger.debug("BM25QueryExpanderRAG already warmed up, skipping")
             return
@@ -130,7 +113,6 @@ class BM25QueryExpanderRAG(RAGBase):
         )
 
     async def build_pipeline(self) -> Pipeline:
-        """Build the RAG pipeline with BM25."""
         logger.debug("Building BM25 RAG query pipeline")
 
         if self._cached_document_store is not None:
@@ -158,12 +140,6 @@ class BM25QueryExpanderRAG(RAGBase):
         return pipeline
 
     async def refresh_documents(self, documents: list[RagDocument]) -> None:
-        """
-        Update the indexed documents in-place.
-
-        Replaces self.documents with the new list and re-indexes all of them
-        into the already-open document store.
-        """
         self.documents = documents
         logger.info(f"[refresh_documents] Refreshing BM25 index with {len(documents)} documents")
 
@@ -186,7 +162,6 @@ class BM25QueryExpanderRAG(RAGBase):
         )
 
     async def as_tool(self) -> ComponentTool:
-        """Return the RAG pipeline as a ComponentTool."""
         if self.needs_warmup:
             logger.debug("RAG needs warmup before creating tool, warming up now")
             await self.warmup()

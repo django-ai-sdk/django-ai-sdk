@@ -1,9 +1,3 @@
-"""Every recipe in docs/content/serving/overriding-views.md, run for real.
-
-This module is its own URLconf (see the `urls` marker), so each recipe is mounted
-exactly as the docs show it.
-"""
-
 import json
 
 import pytest
@@ -34,9 +28,6 @@ from django_ai_sdk.views.chat import ChatView
 pytestmark = pytest.mark.urls(__name__)
 
 
-# --- Ninja -----------------------------------------------------------------
-
-# Replace one endpoint: exclude it, then wrap the SDK's own function.
 threads_router = ai_sdk_routers.get_threads_router(exclude={"list_threads"})
 
 
@@ -47,7 +38,6 @@ async def list_threads(request, limit: int = 100, offset: int = 0):
     return response
 
 
-# Add an endpoint next to the SDK's.
 @threads_router.get("/threads/{thread_id}/export/")
 async def export_thread(request, thread_id: str):
     return {"thread_id": thread_id, "format": "markdown"}
@@ -56,44 +46,34 @@ async def export_thread(request, thread_id: str):
 api = NinjaAPI(auth=SessionAuth(), urls_namespace="overrides")
 ai_sdk_routers.register_error_handlers(api)
 api.add_router("/", threads_router)
-# Stricter auth for one group of endpoints.
 api.add_router("/", ai_sdk_routers.get_agents_router(), auth=django_auth_superuser)
-# Throttling per mount.
 api.add_router("/", ai_sdk_routers.get_workflows_router(), throttle=AuthRateThrottle("100/h"))
 
 
-# Your own error shape for one exception, after the SDK's handlers.
 @api.exception_handler(NotFound)
 def not_found(request, exc):
     return api.create_response(request, {"error": "gone"}, status=404)
 
 
-# --- DRF -------------------------------------------------------------------
-
-
 class MyThreadViewSet(ThreadViewSet):
-    # Change one action, keep the SDK's logic.
     def list(self, request):
         response = super().list(request)
         response.data = [t for t in response.data if t["message_count"] > 0]
         return response
 
-    # Add an action.
     @action(detail=True, methods=["get"])
     def export(self, request, thread_id=None):
         return Response({"thread_id": thread_id, "format": "markdown"})
 
-    # Remove an extra action: its route disappears.
     delete_all = None
 
-    # Refuse a standard method.
     def destroy(self, request, thread_id=None):
         raise MethodNotAllowed("DELETE")
 
 
 def my_handler(exc, context):
     response = exception_handler(exc, context)
-    if "ref" in response.data:  # an SDK error body, not one of DRF's own
+    if "ref" in response.data:
         response["X-Error-Ref"] = response.data["ref"]
     return response
 
@@ -103,7 +83,6 @@ class ErrorShapeThreadViewSet(ThreadViewSet):
         return my_handler
 
 
-# Swap a request serializer.
 class StrictMemorySerializer(MemorySerializer):
     name = drf_serializers.CharField(min_length=3, max_length=80)
 
@@ -115,7 +94,6 @@ class SmallPages(ApiPagination):
 
 class MyMemoryViewSet(MemoryViewSet):
     serializer_classes = {**MemoryViewSet.serializer_classes, "create": StrictMemorySerializer}
-    # Change paging.
     pagination_class = SmallPages
 
 
@@ -124,9 +102,6 @@ router.register("memories", MyMemoryViewSet, basename="memory")
 router.register("shaped-threads", ErrorShapeThreadViewSet, basename="shaped-thread")
 router.register("threads", MyThreadViewSet, basename="thread")
 router.register("workflows", WorkflowViewSet, basename="workflow")
-
-
-# --- ChatView --------------------------------------------------------------
 
 
 class MyChatView(ChatView):
@@ -199,7 +174,7 @@ class TestDrfRecipes:
 
     def test_a_removed_action_has_no_route(self):
         patterns = [str(url.pattern) for url in router.urls]
-        assert any(p.startswith("^shaped-threads/all") for p in patterns)  # still there
+        assert any(p.startswith("^shaped-threads/all") for p in patterns)
         assert not any(p.startswith("^threads/all") for p in patterns)
 
     def test_a_refused_method_is_not_allowed(self, client, user, empty_thread):

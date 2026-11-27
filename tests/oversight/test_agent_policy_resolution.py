@@ -1,5 +1,3 @@
-"""Which policy a turn runs under, and what happens when it cannot be chosen."""
-
 from __future__ import annotations
 
 import inspect
@@ -39,9 +37,6 @@ def _guarded_runtime_class() -> type:
 
 @pytest.mark.django_db(transaction=True)
 class TestOpeningATurn:
-    """What start does when a read fails."""
-
-
     async def test_an_unknown_policy_blocks_by_default_and_is_recorded(self):
         agent = make_agent([], None, policy="fx-no-such-policy")
         with log_lines() as lines:
@@ -54,7 +49,6 @@ class TestOpeningATurn:
         assert turn.outcome == "blocked"
         assert turn.policy == "fx-no-such-policy"
         assert turn.error == "policy could not be loaded"
-        # Refused with the generic message: the log, not the person, says why.
         assert any("blocks" in line and "fx-no-such-policy" not in str(gate.message) for line in lines)
 
     async def test_an_unknown_policy_runs_unguarded_when_open_and_logs(self):
@@ -70,7 +64,7 @@ class TestOpeningATurn:
         async def get_oversight(*, channel, user):
             raise RuntimeError("no database")
 
-        agent.get_oversight = get_oversight  # type: ignore[method-assign]
+        agent.get_oversight = get_oversight
         with opened():
             assert not (await TurnGuard.start(agent, channel="api", input="x")).active
         with closed():
@@ -85,7 +79,7 @@ class TestOpeningATurn:
         async def get_oversight(*, channel, user):
             return ""
 
-        agent.get_oversight = get_oversight  # type: ignore[method-assign]
+        agent.get_oversight = get_oversight
         with closed():
             guard = await TurnGuard.start(agent, channel="api", input="x")
             assert (await guard.gate()).blocked
@@ -95,7 +89,7 @@ class TestOpeningATurn:
 @pytest.mark.django_db(transaction=True)
 class TestGetOversight:
     async def test_the_hook_may_read_the_database(self):
-        async def choose(self, *, channel="", user=None, **kwargs):  # noqa: ANN001, ANN202
+        async def choose(self, *, channel="", user=None, **kwargs):
             from django.contrib.auth import get_user_model
 
             await get_user_model().objects.acount()
@@ -111,7 +105,7 @@ class TestGetOversight:
 
         seen = []
 
-        async def choose(self, *, channel=None, user=None, **kwargs):  # noqa: ANN001, ANN202
+        async def choose(self, *, channel=None, user=None, **kwargs):
             seen.append(channel)
             return RunPolicy
 
@@ -142,7 +136,7 @@ class TestOversightValue:
         from django_ai_sdk.oversight.checks import agent_checks
 
         cls = type("Later", (Agent,), {"_skip_auto_register": True, "permissions": [AllowAll]})
-        cls.oversight = RunPolicy()  # ty: ignore[invalid-assignment]
+        cls.oversight = RunPolicy()
         with patch("django_ai_sdk.agents.registry.registry.all", lambda: {"a": cls()}):
             found = agent_checks()
         assert [m.id for m in found] == ["ai_sdk.oversight.E011"]

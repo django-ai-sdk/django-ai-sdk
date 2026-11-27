@@ -19,7 +19,6 @@ class TestMemoryToolName:
             ("HR / Legal", "search_hr_legal"),
             ("  spaced  out  ", "search_spaced_out"),
             ("--dashes--", "search_dashes"),
-            # Truncation must not leave a trailing separator behind.
             ("abcdefghijklmnopqrs tuv", "search_abcdefghijklmnopqrs"),
         ],
     )

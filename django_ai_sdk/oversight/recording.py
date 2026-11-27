@@ -1,5 +1,3 @@
-"""Write a turn's row, answers, matches and content (anything that can quote the turn)."""
-
 from __future__ import annotations
 
 import time
@@ -45,12 +43,6 @@ if TYPE_CHECKING:
 
 
 def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
-    """Write the turn row and any answers and matches not written yet, in one transaction.
-
-    Called after the gate (`closing=False`, row OPEN) and at close, which writes the
-    content. A turn forgotten while open stores no content and no judge text.
-    """
-    # Imported here: tasks imports reflection, which imports this module.
     from django_ai_sdk.oversight import tasks
     from django_ai_sdk.oversight.models import Turn, TurnContent
 
@@ -65,7 +57,6 @@ def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
         keep = capture_masker(policy.capture, found)
         # PostgreSQL rejects NUL characters in text, so strip them.
         content = without_nul(capture_content(guard, policy.capture, keep))
-    # Rows written earlier keep their ids.
     answer_rows, texts = _build_answers(guard.answered, keep=keep, ids=guard.record.answer_ids)
     texts = without_nul(texts)
     added = answer_rows[saved_answered:]
@@ -73,8 +64,6 @@ def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
     columns = _turn_columns(guard, closing=closing, created=created)
 
     with transaction.atomic():
-        # Lock first: a forget then waits for this close, or has flagged the row. The
-        # row is read here, since reflect may have changed labels or severity since.
         turn = (
             Turn.objects.select_for_update().filter(pk=guard.id).first()
             if guard.record.row_written
@@ -82,7 +71,6 @@ def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
         )
         row = None
         if content is not None and not (turn is not None and turn.content_forgotten):
-            # Judge text is stored only inside the content, never on its own.
             row = TurnContent.objects.create(
                 stored={**content, "texts": texts} if texts else content,
                 capture=str(policy.capture),
@@ -91,7 +79,6 @@ def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
         if closing:
             columns["content"] = row
         if turn is not None:
-            # The actor is written once, so a forget while the turn was open stays done.
             updated = {key: value for key, value in columns.items() if key != "actor_id"}
             Turn.objects.filter(pk=guard.id).update(**updated)
         else:
@@ -143,7 +130,6 @@ def _turn_columns(guard: TurnGuard, *, closing: bool, created: Any) -> dict[str,
         "error": fit_column(Turn, "error", guard.error),
     }
     columns["outcome"], columns["report_outcome"] = _outcome_columns(guard, closing=closing)
-    # Reflect asks again lenses that missed the deadline or found their service down.
     unfinished = any(item.needs_retry for item in guard.answered)
     if closing and (unfinished or policy.has_stage(Stage.REFLECT)):
         columns["reflect_state"] = Turn.ReflectState.PENDING
@@ -151,7 +137,6 @@ def _turn_columns(guard: TurnGuard, *, closing: bool, created: Any) -> dict[str,
 
 
 def _outcome_columns(guard: TurnGuard, *, closing: bool) -> tuple[str, str]:
-    """ "allowed" is stored blank while open or when the run failed: nothing got through."""
     ended = closing and not guard.run_error
 
     def column(outcome: Outcome) -> str:
@@ -166,7 +151,6 @@ def _build_answers(
     keep: Masker | None,
     ids: list[str] | None = None,
 ) -> tuple[list[LensAnswer], dict[str, dict[str, Any]]]:
-    """Unsaved LensAnswer rows and their content texts by row id. `keep` None keeps no texts."""
     from django_ai_sdk.oversight.models import LensAnswer
 
     ids = ids or []
@@ -186,10 +170,6 @@ def _build_answers(
 def split_answer(
     lens: Lens, stage: Stage | str, answer: Answer, *, keep: Masker | None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Split an answer into LensAnswer columns and the parts that can quote the turn.
-
-    The quoting parts (rationale, entity names, item scores, trail) go through `keep`.
-    """
     from django_ai_sdk.oversight.models import LensAnswer
 
     value = stored_value(lens, answer)
@@ -248,12 +228,6 @@ def record_answers(
     context: TurnContext | None = None,
     found: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Add later answers and matches to a written turn and update its labels.
-
-    Returns the texts by answer id as stored. Rules that already matched are removed
-    from `matched` in place: a retried reflect may record twice, and a rule matches
-    a turn once (PROD-9).
-    """
     from django_ai_sdk.oversight.models import RuleMatch, Turn
 
     if context is not None:
@@ -262,7 +236,6 @@ def record_answers(
     answer_rows, texts = _build_answers(answered, keep=keep)
     texts = without_nul(texts)
     with transaction.atomic():
-        # Lock before reading, since a retried reflect may record at the same time.
         current = Turn.objects.select_for_update().only("labels", "severity").get(pk=turn.pk)
         if matched:
             done = set(RuleMatch.objects.filter(turn=turn).values_list("rule", flat=True))
@@ -284,10 +257,6 @@ def _record_judgments(
     *,
     floor: str = "",
 ) -> None:
-    """Save answers, matches and reviews; merge labels and severity into `locked`.
-
-    Run inside a transaction. Aside findings are recorded but never relabel the turn.
-    """
     from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
 
     for row in rows:
@@ -307,7 +276,6 @@ def _record_judgments(
     )
     acted = [(match, action) for match in matched for action in match.acted]
     reviews = {(a.queue, m.rule.name) for m, a in acted if isinstance(a, Queue)}
-    # A retried reflect may request a review that already exists.
     ReviewItem.objects.bulk_create(
         [ReviewItem(turn=turn, queue=queue, rule=rule) for queue, rule in sorted(reviews)],
         ignore_conflicts=True,

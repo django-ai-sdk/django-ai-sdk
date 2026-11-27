@@ -29,8 +29,6 @@ logger = get_logger(__name__)
 
 
 class ChromaDBQueryExpanderRAGConfig(RAGConfig):
-    """Configuration for ChromaDB Query Expander RAG."""
-
     embedder_model: str = Field(
         default="sentence-transformers/all-MiniLM-L6-v2",
         description="Sentence transformer model for document/query embeddings",
@@ -42,8 +40,6 @@ class ChromaDBQueryExpanderRAGConfig(RAGConfig):
 
 
 class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
-    """RAG implementation using ChromaDB with query expansion."""
-
     def __init__(
         self,
         documents: list[RagDocument],
@@ -56,11 +52,9 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         logger.debug(f"ChromaDBQueryExpanderRAG initialized with {len(documents)} documents")
 
     def _convert_documents(self) -> list[HaystackDocument]:
-        """Convert RagDocuments to HaystackDocuments for internal use."""
         return [to_document(doc) for doc in self.documents]
 
     def _create_document_store(self, recreate: bool = False) -> ChromaDocumentStore:
-        """Create document store based on persistence configuration."""
         import os
         import shutil
 
@@ -79,11 +73,9 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
             return ChromaDocumentStore(**storage.extra)
 
     def _has_existing_index(self, document_store: ChromaDocumentStore) -> bool:
-        """Check if document store already has indexed documents."""
         return document_store.count_documents() > 0
 
     async def add_documents(self, documents: list[RagDocument]) -> None:
-        """Add documents to the existing Chroma index."""
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot add documents")
             return
@@ -93,9 +85,6 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         logger.info(f"Added {len(documents)} documents to Chroma index")
 
     async def _index_documents(self, documents: list, document_store: ChromaDocumentStore) -> None:
-        """Index documents with chunking and embedding."""
-
-        # Add original doc_id to metadata so we can delete by it later
         for doc in documents:
             if "doc_id" not in doc.meta:
                 doc.meta["doc_id"] = doc.id
@@ -127,24 +116,19 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         indexing_pipeline.connect("splitter", "doc_embedder")
         indexing_pipeline.connect("doc_embedder", "writer")
 
-        # Run sync pipeline in thread pool so embeddings don't block the event loop
         await asyncio.to_thread(indexing_pipeline.run, {"documents": documents})
 
     async def remove_documents(self, document_ids: list[str]) -> None:
-        """Remove documents from the Chroma index."""
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot remove documents")
             return
 
         try:
-            # Use filter_documents to find documents, then delete by IDs
-            # Haystack filter format for Chroma
             if len(document_ids) == 1:
                 filters = {"field": "meta.doc_id", "operator": "==", "value": document_ids[0]}
             else:
                 filters = {"field": "meta.doc_id", "operator": "in", "value": document_ids}
 
-            # Get matching documents
             matching_docs = self._cached_document_store.filter_documents(filters=filters)
             doc_ids_to_delete = [doc.id for doc in matching_docs]
 
@@ -156,12 +140,6 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
             logger.error(f"Failed to remove documents: {e}")
 
     async def warmup(self, force_rebuild: bool = False) -> None:
-        """
-        Build or load indexed document store.
-
-        Args:
-            force_rebuild: If True, clears existing index and rebuilds from scratch.
-        """
         if self._is_warmed_up and not force_rebuild:
             logger.debug("ChromaDBQueryExpanderRAG already warmed up, skipping")
             return
@@ -212,7 +190,6 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         )
 
     async def build_pipeline(self) -> Pipeline:
-        """Build the RAG pipeline with ChromaDB and query expansion."""
         logger.debug("Building ChromaDB RAG query pipeline")
 
         if self._cached_document_store is not None:
@@ -241,13 +218,7 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         return pipeline
 
     async def refresh_documents(self, documents: list[RagDocument]) -> None:
-        """
-        Update the indexed documents without releasing the Chroma file lock.
-
-        Replaces self.documents with the new list and re-indexes all of them
-        into the already-open document store using OVERWRITE policy.
-        Safe to call on a warmed-up instance.
-        """
+        """Safe to call on a warmed-up instance."""
         self.documents = documents
         logger.info(f"[refresh_documents] Refreshing Chroma index with {len(documents)} documents")
 
@@ -270,7 +241,6 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         )
 
     async def as_tool(self) -> ComponentTool:
-        """Return the RAG pipeline as a ComponentTool."""
         if self.needs_warmup:
             logger.debug("RAG needs warmup before creating tool, warming up now")
             await self.warmup()
@@ -305,20 +275,6 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
 
 @component
 class MultiQueryChromaRetriever(BaseMultiQueryRetriever):
-    """
-    Retriever that runs multiple queries and deduplicates results for ChromaDB.
-
-    Uses BaseMultiQueryRetriever to handle multi-query logic.
-    Just implements retrieve() with ChromaQueryTextRetriever.
-
-    Example:
-        retriever = MultiQueryChromaRetriever(
-            document_store=chroma_store,
-            top_k=3
-        )
-        result = retriever.run(queries=["query1", "query2", "query3"])
-    """
-
     def __init__(
         self,
         document_store: Any,
@@ -332,5 +288,4 @@ class MultiQueryChromaRetriever(BaseMultiQueryRetriever):
         )
 
     def retrieve(self, query: str, top_k: int) -> dict[str, list[HaystackDocument]]:
-        """Retrieve documents for a single query using ChromaDB."""
         return self._retriever.run(query=query, top_k=top_k)

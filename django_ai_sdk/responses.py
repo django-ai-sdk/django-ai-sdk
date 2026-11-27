@@ -27,8 +27,6 @@ logger = get_logger(__name__)
 
 
 class _FailedStream:
-    """Streams a single error, so a failed adapter build is formatted by the protocol handler."""
-
     model: str | None = None
     instructions: str | None = None
     suggestion_generator: SuggestionGenerator | None = None
@@ -61,7 +59,6 @@ async def _ensure_adapter(
             factory = cast("Callable[[], Coroutine[None, None, Streamable]]", adapter)
             adapter = await factory()
     except Exception as exc:
-        # Imported here: adapters.base imports agents, which imports this module.
         from django_ai_sdk.adapters.base import get_error_chunk, get_error_event
 
         info = describe_error(exc)
@@ -74,7 +71,6 @@ async def _ensure_adapter(
         )
         message_id = str(uuid.uuid4())
         if storage_adapter:
-            # No pipeline ran to store the reply, so a reload would show no error.
             writer = StreamWriter(
                 message_id=message_id, storage_callback=storage_adapter.storage_callback
             )
@@ -100,43 +96,27 @@ async def stream_response(
     storage_adapter: BaseStorageAdapter | None = None,
     warmup: AsyncGenerator[dict[str, Any], None] | None = None,
 ) -> StreamingHttpResponse:
-    """
-    Generic streaming chat view that works with any pipeline adapter and protocol handler.
-
-    Args:
-        adapter: Pipeline adapter instance or async factory function
-        messages: List of chat messages to process
-        protocol_handler: Protocol handler instance for formatting output
-        extra_headers: Optional additional headers to include in response
-        storage_adapter: Stores an errored reply if the adapter factory itself fails
-        warmup: Parts to stream, as they arrive, before the adapter factory runs
-
-    Returns:
-        StreamingHttpResponse with SSE-formatted AI responses
-    """
+    """storage_adapter: Stores an errored reply if the adapter factory itself fails
+    warmup: Parts to stream, as they arrive, before the adapter factory runs"""
     logger.debug(
         f"Stream response initiated: adapter={type(adapter).__name__ if not callable(adapter) else 'factory'}, messages={len(messages)}, protocol={type(protocol_handler).__name__}"
     )
 
     sse_stream = _ensure_adapter(adapter, messages, protocol_handler, storage_adapter, warmup)
 
-    # Build streaming HTTP response
-    response = StreamingHttpResponse(  # type: ignore[arg-type]
+    response = StreamingHttpResponse(
         sse_stream,
         content_type="text/event-stream",
     )
 
-    # Default SSE headers
     response["Cache-Control"] = "no-cache"
     cors_origin = resolve_setting("AI_SDK_STREAM_CORS_ORIGIN")
     if cors_origin:
         response["Access-Control-Allow-Origin"] = cors_origin
     response["Access-Control-Allow-Headers"] = "Cache-Control"
 
-    # TODO: Vercel AI UI message stream version, needs to be optional
     response["x-vercel-ai-ui-message-stream"] = "v1"
 
-    # Add any extra headers, this might be useful for CORS or other custom headers
     if extra_headers:
         logger.debug(f"Adding {len(extra_headers)} extra headers")
         for key, value in extra_headers.items():

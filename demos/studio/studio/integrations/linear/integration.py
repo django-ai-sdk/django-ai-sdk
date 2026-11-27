@@ -1,5 +1,3 @@
-"""Linear, with what the studio's own Linear workspace actually contains."""
-
 from __future__ import annotations
 
 from django_ai_sdk.integrations.linear.integration import LinearIntegration as _LinearIntegration

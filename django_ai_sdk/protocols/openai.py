@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     )
 
 
-# OpenAI chunk schemas
 class OpenAIDelta(BaseModel):
     """Delta object for streaming chunks."""
 
@@ -54,8 +53,6 @@ class OpenAIStreamChunk(BaseModel):
 
 
 class OpenAIProtocolHandler(BaseProtocolHandler):
-    """Convert StreamEvent to OpenAI-compatible SSE format."""
-
     def __init__(self, model: str = "gpt-4") -> None:
         self.model = model
         self.id: str | None = None
@@ -67,7 +64,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         self,
         protocol_messages: list[Any],
     ) -> list[ChatMessage]:
-        """Convert OpenAI format messages to internal ChatMessage."""
         messages = []
         for msg in protocol_messages:
             if isinstance(msg, dict) and "role" in msg and "content" in msg:
@@ -80,7 +76,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         return messages
 
     def from_chat_messages(self, chat_messages: list[ChatMessage]) -> list[dict]:
-        """Convert ChatMessage back to OpenAI format."""
         return [{"role": msg.role, "content": msg.content} for msg in chat_messages]
 
     def _create_chunk(
@@ -88,7 +83,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         delta: OpenAIDelta,
         finish_reason: str | None = None,
     ) -> OpenAIStreamChunk:
-        """Create an OpenAI stream chunk."""
         return OpenAIStreamChunk(
             id=self.id or f"chatcmpl-{uuid.uuid4().hex[:24]}",
             created=int(time.time()),
@@ -101,8 +95,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         adapter: Streamable,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[bytes, None]:
-        """Generate an SSE streaming response in OpenAI format."""
-        # The agent shares one handler across requests: each stream gets its own state.
         state = copy.copy(self)
         state.id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         state.tool_calls_buffer = []
@@ -117,7 +109,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
             async for event in events:
                 match event.event_type:
                     case "message_start":
-                        # Message already started, continue
                         pass
 
                     case "text_chunk":
@@ -126,7 +117,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                         yield format_sse(chunk.model_dump())
 
                     case "reasoning_chunk":
-                        # Reasoning is internal, skip in OpenAI format
                         pass
 
                     case "tool_call_start":
@@ -142,8 +132,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
 
                     case "tool_input_complete":
                         tool_input = cast("ToolInputCompleteEvent", event)
-                        # TODO: move into a utils, there should be a single way for
-                        # formatting tool input arguments
                         args = (
                             json.dumps(tool_input.tool_input)
                             if isinstance(tool_input.tool_input, dict)
@@ -154,23 +142,18 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                             state.tool_calls_buffer.append(state.current_tool_call)
                             state.current_tool_call = None
                         else:
-                            # Oversight sends a call's arguments again once the call was let
-                            # through, or a held answer passed: the later ones stand.
                             for call in state.tool_calls_buffer:
                                 if call["id"] == tool_input.tool_call_id:
                                     call["function"]["arguments"] = args
 
                     case "tool_output":
-                        # Tool output happens after the assistant message
                         pass
 
                     case "data":
-                        # Custom data events
                         pass
 
                     case "message_end":
                         end_event = cast("MessageEndEvent", event)
-                        # Emit final chunk with finish_reason and any buffered tool calls
                         delta = OpenAIDelta()
 
                         if state.tool_calls_buffer:
@@ -202,5 +185,4 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                         yield format_sse("[DONE]")
 
         finally:
-            # Cleanup if needed
             pass

@@ -27,7 +27,6 @@ async def forget_index_signature(memory_id: str) -> None:
 async def on_entry_saved(
     sender: type[Model], instance: Entry, created: bool, **kwargs: object
 ) -> None:
-    """Add or update document in RAG index when Entry is saved."""
     memory_id = str(instance.memory_id)
     logger.info(f"Entry saved for memory_id={memory_id}")
 
@@ -44,13 +43,12 @@ async def on_entry_saved(
             raise
         if added:
             logger.info(f"Added/updated document in RAG for {memory_id}")
-        else:  # no index in this process to write to
+        else:
             await forget_index_signature(memory_id)
 
 
 @receiver(post_delete, sender=Entry)
 async def on_entry_deleted(sender: type[Model], instance: Entry, **kwargs: object) -> None:
-    """Remove document from RAG index when Entry is deleted."""
     memory_id = str(instance.memory_id)
     logger.info(f"Entry deleted for memory_id={memory_id}")
 

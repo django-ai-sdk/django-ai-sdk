@@ -1,9 +1,3 @@
-"""The registry of Policy classes, building one by name, and the cache.
-
-An invalid policy is left out and reported by the system check, so one app's
-typo does not stop the site from booting.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +33,6 @@ logger = get_logger(__name__)
 
 _registry: dict[str, type[Policy]] = {}
 
-# Rejected policies by name, with the reason. Read by the system check.
 _invalid: dict[str, str] = {}
 _duplicates: dict[str, list[str]] = {}
 
@@ -49,7 +42,6 @@ def _path(cls: type) -> str:
 
 
 def _declaration(cls: type) -> tuple[str, str]:
-    """So a file imported under two module names counts once."""
     try:
         where = inspect.getfile(cls)
     except (TypeError, OSError):
@@ -68,14 +60,11 @@ def register_policy[T: type[Policy]](cls: T) -> T:
     _invalid.pop(cls.name, None)
     existing = _registry.get(cls.name)
     if existing is not None and _declaration(existing) != _declaration(cls):
-        # An agent using this name could run either policy. The first keeps the
-        # name, and check ai_sdk.oversight.E010 fails until one is renamed.
         clash = _duplicates.setdefault(cls.name, [_path(existing)])
         if _path(cls) not in clash:
             clash.append(_path(cls))
         logger.error("Oversight policy {!r} is declared by both {} and {}", cls.name, *clash[:2])
         return cls
-    # A re-import of the same declaration replaces the old class.
     _registry[cls.name] = cls
     invalidate_policy(cls.name)
     return cls
@@ -93,7 +82,6 @@ def get_policy_class(name: str) -> type[Policy] | None:
 
 
 def policy_name(policy: type[Policy] | str) -> str:
-    """An unregistered subclass is registered here, so `oversight = SupportPolicy` is enough."""
     if isinstance(policy, str):
         return policy
     if not (isinstance(policy, type) and issubclass(policy, Policy)):
@@ -102,10 +90,8 @@ def policy_name(policy: type[Policy] | str) -> str:
     if known is None and policy.name not in _invalid:
         register_policy(policy)
     elif known is not None and known is not policy and _declaration(known) == _declaration(policy):
-        # Same declaration imported again. The copy in use wins.
         register_policy(policy)
     elif known is not None and known.origin != policy.origin == "code":
-        # Code takes its name back from a policy authored under it before it was registered.
         unregister_policy(policy.name)
         register_policy(policy)
     return policy.name
@@ -124,7 +110,6 @@ def get_duplicate_policies() -> dict[str, list[str]]:
 
 
 def reset_registry() -> None:
-    """For tests."""
     _registry.clear()
     _invalid.clear()
     _duplicates.clear()
@@ -148,7 +133,6 @@ def _inherit(resolved: ResolvedPolicy, parent: ResolvedPolicy) -> None:
     resolved.lenses.update(parent.lenses)
     resolved.rules.update(parent.rules)
     resolved.sources.update(parent.sources)
-    # Only carry over values the parent set itself. Values from settings already match.
     for key in ("capture", "stream_mode", "fail_mode"):
         if parent.sources.get(f"policy.{key}"):
             setattr(resolved, key, getattr(parent, key))
@@ -185,7 +169,6 @@ def _from_code(
         resolved.rules[rule.name] = copy.copy(rule)
         resolved.sources[f"rule:{rule.name}"] = name
     for rule in resolved.rules.values():
-        # Check again with inherited lenses, which registration could not see.
         masked = {
             lens for action in rule.then if isinstance(action, Mask) for lens in action.lenses
         }
@@ -214,12 +197,8 @@ def _from_code(
     return resolved
 
 
-# The system check does not stop a turn, so _from_code checks every value again.
-
-# name -> (ResolvedPolicy or None if it failed, ancestor names)
 _cache: dict[str, tuple[ResolvedPolicy | None, frozenset[str]]] = {}
 _broken: dict[str, str] = {}
-# Each loader registers or unregisters its app's policies when awaited.
 _loaders: list[Callable[[], Awaitable[None]]] = []
 _loaded_at = -math.inf
 # One lock per event loop: async_to_sync runs each call in a loop of its own, and a lock
@@ -238,7 +217,6 @@ def add_policy_loader(loader: Callable[[], Awaitable[None]]) -> None:
 
 
 async def run_policy_loaders() -> None:
-    """At most once per RUNTIME_CACHE_SECONDS; concurrent lookups wait, so a burst reads once."""
     global _loaded_at
     if not _loaders or time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS")):
         return
@@ -255,13 +233,11 @@ async def run_policy_loaders() -> None:
 
 
 async def get_resolved_policy(name: str) -> ResolvedPolicy | None:
-    """The effective policy, cached. None for an unknown or broken one: the caller decides."""
     await run_policy_loaders()
     cached = _cache.get(name)
     if cached:
         return cached[0]
     resolved = _load_policy(name)
-    # Cache failures too, so a broken policy logs once, not once per turn.
     _cache[name] = (resolved, frozenset(ancestors(name)))
     return resolved
 
@@ -272,7 +248,6 @@ def _load_policy(name: str) -> ResolvedPolicy | None:
     except Exception as exc:
         _broken[name] = str(exc) or type(exc).__name__
         if isinstance(exc, LookupError) and get_policy_class(name) is None:
-            # Unknown; a missing parent instead means the policy is broken.
             logger.info("Oversight policy {!r} is unknown", name)
         else:
             logger.exception("Oversight policy {!r} cannot be loaded: {}", name, exc)
@@ -286,7 +261,6 @@ def broken_reason(name: str) -> str:
 
 
 def ancestors(name: str) -> list[str]:
-    """Nearest first. build_policy() reports cycles."""
     found: list[str] = []
     todo = list(getattr(get_policy_class(name), "extends", []) or [])
     while todo:

@@ -1,5 +1,3 @@
-"""Each package's `__all__` is what it binds, what its docs import from it and what they describe."""
-
 from __future__ import annotations
 
 import ast
@@ -11,7 +9,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-# Each package, and the pages that import it and describe every export.
 PAGES = {
     "django_ai_sdk.oversight": ["oversight/oversight.md", "manual/oversight.md"],
     "django_ai_sdk.workflows": [
@@ -30,7 +27,6 @@ def pages(package: str) -> list[str]:
 
 
 def doc_imports(package: str) -> list[tuple[str, str]]:
-    """(module, name) for every import in the pages, the README and the package docstring."""
     texts = [*pages(package), (ROOT / "README.md").read_text(encoding="utf-8")]
     texts.append(importlib.import_module(package).__doc__ or "")
     found = []
@@ -67,7 +63,6 @@ def test_all_is_what_the_package_binds_and_the_docs_describe(package):
         if not name.startswith("_") and name != "annotations" and not inspect.ismodule(value)
     }
     assert len(module.__all__) == len(set(module.__all__))
-    # A package may load some of its exports on first use (a module __getattr__).
     assert set(module.__all__) == bound | set(getattr(module, "_LAZY", {}))
     assert all(hasattr(module, name) for name in module.__all__)
     text = "\n".join(pages(package))

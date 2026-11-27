@@ -10,7 +10,6 @@ from django_ai_sdk.oversight.calls import watched_factory
 
 @watched_factory
 def transformers_chat(**kwargs: Any) -> TransformersChatGenerator:
-    """Local Hugging Face transformers generator wired to Django settings."""
     return TransformersChatGenerator(
         **build_kwargs(
             {"token": resolve_secret("HUGGINGFACE_API_KEY")},

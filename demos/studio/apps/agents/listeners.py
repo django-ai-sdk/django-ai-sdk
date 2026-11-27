@@ -1,9 +1,3 @@
-"""Workflow listeners for the demo, named by `AI_SDK_WORKFLOWS["LISTENERS"]`.
-
-The package ships no listeners a definition can name — delivering a result somewhere
-is the host's business, not the SDK's. These two are this host's.
-"""
-
 from __future__ import annotations
 
 import json
@@ -17,28 +11,16 @@ if TYPE_CHECKING:
 
 
 class ConsoleLogListener(RunListener):
-    """Print every step's outcome as it settles (dev/debug).
-
-    On the workflow it prints every step; on one step it prints that one.
-    """
-
     description = "Print step outcomes to the console"
 
     async def on_step_end(self, ctx: WorkflowContext, step: Step, outcome: StepOutcome) -> None:
-        print(  # noqa: T201
+        print(
             f"[{ctx.workflow or ctx.run_id}] {step.name}: {outcome.status} "
             f"{json.dumps(outcome.output, indent=2, default=str)}"
         )
 
 
 class ThreadMessageListener(RunListener):
-    """Post a step's output into a new chat thread owned by the run's user.
-
-    Config: `agent_id` — whose storage adapter opens the thread — and `step`, the
-    step whose output is posted. Costs an extra model call when that agent has
-    `title_generation` on, since the thread is retitled from its content.
-    """
-
     description = "Post a step's result into a new chat thread for the run's user"
 
     @classmethod
@@ -70,14 +52,12 @@ class ThreadMessageListener(RunListener):
         )
         storage = await ThreadService.storage_for_thread(thread_id, user=ctx.user)
         await storage.store_chat_message(
-            # Adapters take an id rather than minting one.
             ChatMessage(id=str(uuid.uuid4()), role="assistant", content=content)
         )
         await _retitle(thread_id, content, agent_id, ctx)
 
 
 async def _retitle(thread_id: str, content: str, agent_id: str, ctx: WorkflowContext) -> None:
-    """Replace the fallback title with a generated one, when the agent wants titles."""
     from django_ai_sdk.agents.services import AgentService
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.conversation.utils import generate_thread_title
@@ -101,7 +81,6 @@ async def _retitle(thread_id: str, content: str, agent_id: str, ctx: WorkflowCon
 
 
 def _as_text(payload: Any) -> str:
-    """Render a step's output as message text, JSON rather than a Python repr."""
     if isinstance(payload, str):
         return payload
     return json.dumps(payload, default=str, indent=2)

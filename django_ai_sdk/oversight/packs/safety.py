@@ -1,9 +1,3 @@
-"""The safety pack: harmful questions, harmful answers, and people at risk.
-
-A message suggesting someone is at risk is never blocked; it goes to the front of
-a person's queue.
-"""
-
 from __future__ import annotations
 
 from django_ai_sdk.oversight.judges.base import Maybe

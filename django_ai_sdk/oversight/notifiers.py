@@ -1,9 +1,3 @@
-"""Notifiers send rule matches somewhere besides the oversight record.
-
-They never fail a turn and run on the task worker, so a slow receiver never holds a
-stream open. Each event has a stable `id`, so receivers can drop retried repeats.
-"""
-
 from __future__ import annotations
 
 import base64
@@ -25,7 +19,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Event ids are derived from their content, so a repeat gets the same id.
 EVENT_NAMESPACE = uuid.UUID("5b0f6f2e-3c1d-4f43-9a55-7d3c0e0f1a11")
 
 
@@ -34,11 +27,6 @@ def event_id(turn_id: Any, rule: str, stage: str) -> str:
 
 
 def not_yet_raised(turn_id: Any, thread_id: str, matched: Iterable[Matched]) -> list[Matched]:
-    """`matched` without rules whose every review is still open on another turn of the thread.
-
-    Someone is already on it, so the rule is not sent to notifiers again; its review
-    still lists this turn.
-    """
     from django_ai_sdk.oversight.models import ReviewItem
 
     matched = list(matched)
@@ -71,7 +59,6 @@ def notify_events(
     stage: str = "",
     outcome: str | None = None,
 ) -> list[tuple[dict[str, Any], list[str]]]:
-    """(the "oversight.match" event, notifier names) for each Notify that acted."""
     notifying = [m for m in matched if any(isinstance(a, Notify) for a in m.acted)]
     events = []
     for match in not_yet_raised(turn_id, thread_id, notifying):
@@ -98,8 +85,7 @@ def notify_events(
 class Notifier:
     """Subclass and implement `send`, which may raise (errors are logged).
 
-    `Notify(to=[...])` selects by `name`, default the lowercased class name without
-    "Notifier" ("log", "webhook").
+    `Notify(to=[...])` selects by `name`, default the lowercased class name without "Notifier".
     """
 
     name: str = ""
@@ -112,7 +98,7 @@ class Notifier:
 
 
 class LogNotifier(Notifier):
-    """Write events to the SDK log at WARNING, for shipping logs into a SIEM."""
+    """Write events to the SDK log at WARNING."""
 
     async def send(self, event: dict[str, Any]) -> None:
         logger.warning("oversight {}", json.dumps(event, default=str, sort_keys=True))
@@ -121,8 +107,7 @@ class LogNotifier(Notifier):
 class WebhookNotifier(Notifier):
     """POST events as JSON, signed per Standard Webhooks when `secret` is set.
 
-    The timestamp lets receivers reject replays as well as forgeries. A secret
-    starting with "whsec_" is base64.
+    A secret starting with "whsec_" is base64.
     """
 
     def __init__(self, url: str, *, secret: str = "", timeout: float = 5.0, **kwargs: Any) -> None:

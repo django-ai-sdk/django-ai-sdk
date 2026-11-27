@@ -1,5 +1,3 @@
-"""Listeners: the run recorder's row lifecycle, and the registry that gates the rest."""
-
 import pytest
 from django.test import override_settings
 from pydantic import BaseModel
@@ -16,10 +14,7 @@ CTX = WorkflowContext()
 
 @pytest.mark.django_db(transaction=True)
 class TestRunRecorder:
-    """The run's own record, which every queued run walks with."""
-
     async def _recorder(self, *names):
-        """A recorder over a pipeline of `names`, which fixes each row's sequence."""
         run = await WorkflowRun.objects.acreate(status=WorkflowRun.Status.RUNNING, attempt=1)
         steps = [FakeStep(name) for name in names]
         return run, RunRecorder(run, steps), steps
@@ -52,7 +47,6 @@ class TestRunRecorder:
         assert row.error == "nothing readable"
 
     async def test_a_skipped_outcome_is_a_row_carrying_its_reason(self):
-        """A step that never ran is visible, not absent."""
         run, recorder, (extract,) = await self._recorder("extract")
 
         await recorder.on_step_end(
@@ -104,7 +98,6 @@ class TestRunRecorder:
         assert run.heartbeat_at >= started
 
     async def test_the_recorder_writes_the_runs_ending(self):
-        """It runs before the listeners, so they hear of a run whose row already ended."""
         run, recorder, _steps = await self._recorder("ocr")
         await WorkflowRun.objects.filter(pk=run.pk).aupdate(status=WorkflowRun.Status.RUNNING)
 
@@ -128,31 +121,27 @@ class TestRunRecorder:
 
 @pytest.mark.django_db(transaction=True)
 class TestTheRecorderHoldsTheRun:
-    """It writes only while its attempt is the run's latest and the run is running."""
-
     async def _recorder(self, *names, attempt=1):
         run = await WorkflowRun.objects.acreate(status=WorkflowRun.Status.RUNNING, attempt=attempt)
         steps = [FakeStep(name) for name in names]
         return run, RunRecorder(run, steps), steps
 
     async def test_a_step_row_an_earlier_attempt_left_running_is_taken_over(self):
-        """The run's own claim keeps a second worker out, so the row is this attempt's."""
         run, recorder, (ocr,) = await self._recorder("ocr")
         await StepRun.objects.acreate(
             run=run, sequence=0, step_name="ocr", status=StepRun.Status.RUNNING
         )
 
-        await recorder.on_step_start(CTX, ocr)  # does not raise
+        await recorder.on_step_start(CTX, ocr)
 
         assert await run.steps.acount() == 1
 
     async def test_two_independent_runs_do_not_contend(self):
-        """The claim is per-run: a step name repeated across runs is not a race."""
         run_a, recorder_a, (ocr_a,) = await self._recorder("ocr")
         run_b, recorder_b, (ocr_b,) = await self._recorder("ocr")
 
         await recorder_a.on_step_start(CTX, ocr_a)
-        await recorder_b.on_step_start(CTX, ocr_b)  # does not raise
+        await recorder_b.on_step_start(CTX, ocr_b)
 
         assert await run_a.steps.acount() == 1
         assert await run_b.steps.acount() == 1
@@ -163,13 +152,12 @@ class TestTheRecorderHoldsTheRun:
         await recorder.on_step_start(CTX, ocr)
         await recorder.on_step_end(CTX, ocr, StepOutcome(status="failed", detail="503"))
 
-        await recorder.on_step_start(CTX, ocr)  # does not raise
+        await recorder.on_step_start(CTX, ocr)
 
         row = await run.steps.aget(step_name="ocr")
         assert row.status == StepRun.Status.RUNNING
 
     async def test_a_completed_step_is_never_reclaimed(self):
-        """A completed row is this attempt's outcome: the step does not run again."""
         run, recorder, (ocr,) = await self._recorder("ocr")
 
         await recorder.on_step_start(CTX, ocr)
@@ -246,8 +234,6 @@ class NotAnListener:
 
 
 class TestTheListenerRegistry:
-    """The gate on what a JSON definition may name."""
-
     @override_settings(AI_SDK_WORKFLOWS={"LISTENERS": {"loud": "tests.unit.test_workflow_listeners.Loud"}})
     def test_a_declared_listener_is_composable(self):
         # By name, not identity: import_string reaches this module under its own
@@ -256,7 +242,6 @@ class TestTheListenerRegistry:
 
     @override_settings(AI_SDK_WORKFLOWS={"LISTENERS": {}})
     def test_the_package_ships_none(self):
-        """Delivering a result somewhere is the host's business, not the SDK's."""
         assert get_listener_registry() == {}
 
     @override_settings(AI_SDK_WORKFLOWS={"LISTENERS": {"gone": "nowhere.NoSuchListener"}})
@@ -269,8 +254,6 @@ class TestTheListenerRegistry:
 
 
 class TestConfig:
-    """One registered class serves every definition that names it."""
-
     def test_a_listener_is_built_from_the_config_its_spec_carries(self):
         from django_ai_sdk.workflows.definitions import compile_listeners
         from django_ai_sdk.workflows.schemas import ListenerDefinition

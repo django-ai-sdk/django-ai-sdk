@@ -1,5 +1,3 @@
-"""Regex per line over memory text, decided in the database (SQLite here)."""
-
 import pytest
 from django_ai_sdk.memories.expressions import LineRegex, agrep, get_pattern
 from django_ai_sdk.memories.models import Entry, Memory
@@ -45,4 +43,4 @@ class TestLineRegex:
 
 def test_an_invalid_regex_is_literal_text():
     assert get_pattern("INC-2024(").search("see INC-2024( here")
-    assert get_pattern("a.c").search("abc")  # a valid one stays a regex
+    assert get_pattern("a.c").search("abc")

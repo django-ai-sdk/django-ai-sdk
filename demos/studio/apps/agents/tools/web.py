@@ -18,7 +18,7 @@ web_search = DDGSWebSearch(top_k=5)
 
 
 class WebSearchError(Exception):
-    """Raised when web search fails after retries."""
+    pass
 
 
 @retry(
@@ -27,12 +27,10 @@ class WebSearchError(Exception):
     reraise=True,
 )
 def _search(query: str) -> list[Document]:
-    """Run the search engine."""
     return cast("list[Document]", web_search.run(query=query)["documents"])
 
 
 def search_web(query: Annotated[str, "The research query"]) -> list[dict[str, str]]:
-    """Search the web for the given query and return structured results."""
     try:
         docs = _search(query)
     except Exception as exc:
@@ -50,7 +48,6 @@ def search_web(query: Annotated[str, "The research query"]) -> list[dict[str, st
 
 
 def fetch_page(url: Annotated[str, "The full URL to fetch"]) -> str:
-    """Fetch and extract the main text content of a webpage."""
     try:
         downloaded = trafilatura.fetch_url(url)
     except Exception:
@@ -64,7 +61,6 @@ def fetch_page(url: Annotated[str, "The full URL to fetch"]) -> str:
 
 
 def search_web_tool(**kwargs: object) -> Tool:
-    """Web search tool factory."""
     tool = Tool(
         name="search_web",
         description="Search the web for information on a topic. Returns summarized search results.",
@@ -84,7 +80,6 @@ def search_web_tool(**kwargs: object) -> Tool:
 
 
 def fetch_page_tool(**kwargs: object) -> Tool:
-    """Webpage fetch tool factory."""
     return Tool(
         name="fetch_page",
         description="Fetch and extract the main text content of a webpage URL.",

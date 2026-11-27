@@ -22,10 +22,6 @@ _BLOCKED_HOSTNAME_SUFFIXES = (".local", ".internal", ".localhost")
 
 
 def _validate_public_url(url: str) -> None:
-    """SECURITY: reject literal internal IPs and internal hostnames (SSRF).
-
-    No DNS resolution: a hostname resolving to a private address passes.
-    """
     host = (urlparse(url).hostname or "").lower()
     if host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_HOSTNAME_SUFFIXES):
         raise UserError(f"{url!r} points at a local/internal hostname ({host!r})")
@@ -38,7 +34,6 @@ def _validate_public_url(url: str) -> None:
 
 
 def _get_fernet() -> Fernet:
-    """Credential encryption key, derived from SECRET_KEY."""
     secret = settings.SECRET_KEY
     if isinstance(secret, str):
         secret = secret.encode()
@@ -83,7 +78,6 @@ class MCPOAuthToken(models.Model):
             if isinstance(ts, (int, float)):
                 self.expires_at = datetime.fromtimestamp(ts, tz=UTC)
         else:
-            # A token without an expiry must not inherit the old one's past date.
             self.expires_at = None
 
     def get_access_token(self) -> str:
@@ -105,13 +99,10 @@ class MCPOAuthToken(models.Model):
             return ""
 
     def is_expired(self) -> bool:
-        # A minute early: a token expiring mid-request would fail that request.
         return bool(self.expires_at and self.expires_at <= tz.now() + timedelta(seconds=60))
 
 
 class MCPOAuthClient(models.Model):
-    """Dynamically registered OAuth client credentials per MCP server."""
-
     server_name = models.CharField(max_length=100, primary_key=True)
     client_id = models.CharField(max_length=500)
     client_secret = models.TextField(blank=True)

@@ -20,7 +20,6 @@ _LAZY = {
 
 
 def __getattr__(name: str) -> Any:
-    """Import a vendor's factory on first use (PEP 562)."""
     if module := _LAZY.get(name):
         return getattr(import_module(module), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

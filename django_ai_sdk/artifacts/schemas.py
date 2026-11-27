@@ -21,8 +21,6 @@ def _to_snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
-# Ids of artifacts written during the current answer. The chat stream sets this
-# so it can delete them if oversight withholds the answer.
 turn_artifacts: ContextVar[list[str] | None] = ContextVar(
     "django_ai_sdk_turn_artifacts", default=None
 )
@@ -50,21 +48,14 @@ class ArtifactType(StrEnum):
 
 
 class ArtifactModel(BaseModel):
-    """Shared base for all artifact data models.
-
-    Allows construction by both snake_case field names and camelCase aliases
-    so Python code uses PEP 8 names while LLM tool schemas expose camelCase.
-    """
+    """Allows construction by both snake_case field names and camelCase aliases."""
 
     model_config = ConfigDict(populate_by_name=True)
 
 
 class ArtifactSchema(ArtifactModel):
-    """Base class for structured artifacts."""
-
     artifact_type: ClassVar[ArtifactType]
     system_prompt_hint: ClassVar[str] = ""
-    #: What the model should do once the artifact is stored.
     reply_hint: ClassVar[str] = (
         "Once it returns artifact_id, respond with exactly one sentence that briefly "
         "describes what the data shows, do NOT repeat the data as text or markdown."
@@ -73,15 +64,11 @@ class ArtifactSchema(ArtifactModel):
 
     @classmethod
     async def resolve(cls, data: dict[str, Any], thread_id: str) -> dict[str, Any]:
-        """Server-side fill-in of validated tool input before it is stored.
-
-        Raise ValueError to hand the model an error to fix and retry.
-        """
+        """Raise ValueError to hand the model an error to fix and retry."""
         return data
 
     @classmethod
     def tool_name(cls) -> str:
-        """The name of this artifact's tool, e.g. ``artifact_file_artifact``."""
         return f"artifact_{_to_snake(cls.__name__)}"
 
     @classmethod
@@ -122,7 +109,6 @@ class ArtifactSchema(ArtifactModel):
                 payload = await cls.store(kwargs, thread_id, user)
             except (ValidationError, ValueError) as e:
                 return json.dumps({"error": str(e)})
-            # Track the row so a withheld answer can delete it.
             if (written := turn_artifacts.get()) is not None:
                 written.append(str(payload["artifact_id"]))
             return json.dumps(payload)
@@ -141,9 +127,6 @@ class ArtifactSchema(ArtifactModel):
             parameters=schema,
             async_function=submit,
         )
-
-
-# ── QuestionFlow ─────────────────────────────────────────────────────────────
 
 
 class QuestionFlowOption(ArtifactModel):
@@ -179,9 +162,6 @@ class QuestionFlowArtifact(ArtifactSchema):
     data: QuestionFlowData
 
 
-# ── OptionList ───────────────────────────────────────────────────────────────
-
-
 class OptionListOption(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     label: str
@@ -211,9 +191,6 @@ class OptionListArtifact(ArtifactSchema):
     data: OptionListData
 
 
-# ── DataTable ────────────────────────────────────────────────────────────────
-
-
 class DataTableColumn(ArtifactModel):
     key: str
     label: str
@@ -233,9 +210,6 @@ class DataTableArtifact(ArtifactSchema):
         Call it when the user requests a table, comparison, or ranked list.
     """)
     data: DataTableData
-
-
-# ── ApprovalCard ─────────────────────────────────────────────────────────────
 
 
 class ApprovalCardMetadataItem(ArtifactModel):
@@ -267,9 +241,6 @@ class ApprovalCardArtifact(ArtifactSchema):
     data: ApprovalCardData
 
 
-# ── Plan ─────────────────────────────────────────────────────────────────────
-
-
 class PlanTodo(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     label: str
@@ -298,9 +269,6 @@ class PlanArtifact(ArtifactSchema):
         Call it to present a plan before execution, or to show final state after.
     """)
     data: PlanData
-
-
-# ── ProgressTracker ───────────────────────────────────────────────────────────
 
 
 class ProgressStep(ArtifactModel):
@@ -341,9 +309,6 @@ class ProgressTrackerArtifact(ArtifactSchema):
     data: ProgressTrackerData
 
 
-# ── Terminal ──────────────────────────────────────────────────────────────────
-
-
 class TerminalData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     command: str
@@ -371,9 +336,6 @@ class TerminalArtifact(ArtifactSchema):
     data: TerminalData
 
 
-# ── Confirmation ──────────────────────────────────────────────────────────────
-
-
 class ConfirmationData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     message: str
@@ -389,9 +351,6 @@ class ConfirmationArtifact(ArtifactSchema):
         Use this for lightweight yes/no prompts; for complex approvals with metadata use ApprovalCard.
     """)
     data: ConfirmationData
-
-
-# ── ChainOfThought ────────────────────────────────────────────────────────────
 
 
 class ChainOfThoughtStep(ArtifactModel):
@@ -419,9 +378,6 @@ class ChainOfThoughtArtifact(ArtifactSchema):
     data: ChainOfThoughtData
 
 
-# ── CodeBlock ─────────────────────────────────────────────────────────────────
-
-
 class CodeBlockData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     code: str
@@ -443,9 +399,6 @@ class CodeBlockArtifact(ArtifactSchema):
     data: CodeBlockData
 
 
-# ── Snippet ───────────────────────────────────────────────────────────────────
-
-
 class SnippetData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     code: str
@@ -464,9 +417,6 @@ class SnippetArtifact(ArtifactSchema):
     data: SnippetData
 
 
-# ── StackTrace ────────────────────────────────────────────────────────────────
-
-
 class StackTraceData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     trace: str
@@ -483,9 +433,6 @@ class StackTraceArtifact(ArtifactSchema):
         Call it when showing an error or exception that the user needs to inspect.
     """)
     data: StackTraceData
-
-
-# ── SchemaDisplay ─────────────────────────────────────────────────────────────
 
 
 class SchemaParameter(ArtifactModel):
@@ -533,9 +480,6 @@ class SchemaDisplayArtifact(ArtifactSchema):
         Call it when documenting or explaining an API endpoint.
     """)
     data: SchemaDisplayData
-
-
-# ── TestResults ───────────────────────────────────────────────────────────────
 
 
 class TestCase(ArtifactModel):
@@ -587,9 +531,6 @@ class TestResultsArtifact(ArtifactSchema):
     data: TestResultsData
 
 
-# ── Task ─────────────────────────────────────────────────────────────────────
-
-
 class TaskItem(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     text: str
@@ -617,9 +558,6 @@ class TaskArtifact(ArtifactSchema):
     data: TaskData
 
 
-# ── Image ─────────────────────────────────────────────────────────────────────
-
-
 class ImageData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     url: str
@@ -641,9 +579,6 @@ class ImageArtifact(ArtifactSchema):
     data: ImageData
 
 
-# ── File ──────────────────────────────────────────────────────────────────────
-
-
 class FileItem(ArtifactModel):
     document_id: str = Field(alias="documentId")
     filename: str | None = None
@@ -656,8 +591,6 @@ class FileData(ArtifactModel):
 
 
 class FileArtifact(ArtifactSchema):
-    """Files (images or documents) uploaded to this thread, shown to the user."""
-
     artifact_type: ClassVar[ArtifactType] = ArtifactType.FILE
 
     system_prompt_hint: ClassVar[str] = prompt("""
@@ -671,9 +604,6 @@ class FileArtifact(ArtifactSchema):
         "answer as normal, without repeating file names or links."
     )
     data: FileData
-
-
-# ── Citations ─────────────────────────────────────────────────────────────────
 
 
 class CitedSource(ArtifactModel):
@@ -691,8 +621,6 @@ class CitedSource(ArtifactModel):
 
 
 class Evidence(ArtifactModel):
-    """Where in one source a part of the answer is supported."""
-
     key: str
     start: int | None = None
     end: int | None = None
@@ -701,8 +629,6 @@ class Evidence(ArtifactModel):
 
 
 class Citation(ArtifactModel):
-    """A part of the answer and, per supporting source, the passage that supports it."""
-
     start: int
     end: int
     quote: str
@@ -715,10 +641,5 @@ class CitationsData(ArtifactModel):
 
 
 class CitationsArtifact(ArtifactSchema):
-    """Which parts of an answer which sources support.
-
-    Built after the answer by the citation agent and python basded grounding
-    """
-
     artifact_type: ClassVar[ArtifactType] = ArtifactType.CITATIONS
     data: CitationsData

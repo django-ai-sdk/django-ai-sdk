@@ -1,9 +1,3 @@
-"""Tests for the shipped Slack integration.
-
-Only the chat.postMessage call is faked; signatures are real HMACs over real bytes,
-because a verifier that passes a stubbed signature proves nothing.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -71,8 +65,6 @@ def slack():
 
 
 class TestSignatureVerification:
-    """A request is answered only if Slack signed it recently."""
-
     def test_a_real_signature_passes(self, slack, rf):
         assert slack.verify(_request(rf, _mention())) is True
 
@@ -96,8 +88,6 @@ class TestSignatureVerification:
 
 
 class TestParse:
-    """parse answers a mention, ignores noise, and replies inline to the handshake."""
-
     def test_the_handshake_returns_the_challenge(self, slack, rf):
         payload = {"type": "url_verification", "challenge": "3eZbrw1a"}
         response = slack.parse(_request(rf, payload))
@@ -121,12 +111,9 @@ class TestParse:
         assert slack.parse(_request(rf, _mention())).thread_ref == "1700000000.000100"
 
     def test_the_agents_own_reply_is_ignored(self, slack, rf):
-        # Without this the bot answers itself for as long as the workspace exists.
         assert slack.parse(_request(rf, _mention(bot_id="B024BE7LH"))) is None
 
     def test_a_bare_mention_leaves_no_text(self, slack, rf):
-        # The mention is an address, not a question; the view drops an event
-        # without text, so the agent never runs on an empty prompt.
         assert slack.parse(_request(rf, _mention(text="<@U0LAN0Z89>"))).text == ""
 
     def test_an_edit_is_ignored(self, slack, rf):
@@ -148,8 +135,6 @@ class TestParse:
 
 
 class TestReply:
-    """The answer is posted back into the conversation it came from."""
-
     @staticmethod
     def _event():
         return InboundEvent(
@@ -183,8 +168,6 @@ class TestReply:
 
 
 class TestConfiguration:
-    """A half-configured Slack app degrades instead of breaking the site."""
-
     def test_a_fully_configured_integration_has_no_detail(self, slack):
         assert slack.detail is None
 

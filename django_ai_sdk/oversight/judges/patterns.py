@@ -1,5 +1,3 @@
-"""Regexes and keywords as a judge: deterministic, free, and fast enough for the gate."""
-
 from __future__ import annotations
 
 import asyncio
@@ -18,18 +16,13 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.types import TurnContext
 
 PATTERNS_TIMEOUT = 2.0
-# How far before a match `not_after` reads.
 NOT_AFTER_CHARS = 40
-# Unsure, so a judge after it is asked.
 MISS_CONFIDENCE = 0.5
 
 
 class PatternJudge(Judge):
-    """Finds labelled spans with regexes and whole-word keywords.
-
-    A hit is sure; a miss has `miss_confidence`, below `min_confidence` by default,
-    so the next judge is asked. The first pattern to match a stretch of text keeps
-    it, since a card number can also look like a phone number.
+    """A hit is sure; a miss has `miss_confidence`, below `min_confidence` by default,
+    so the next judge is asked.
     """
 
     timeout = PATTERNS_TIMEOUT
@@ -63,7 +56,6 @@ class PatternJudge(Judge):
 
     def find(self, text: str, default_label: str = "") -> list[TextSpan]:
         spans: list[TextSpan] = []
-        # Sorted and never overlapping, so only the neighbours can overlap.
         taken: list[tuple[int, int]] = []
         for label, pattern in self.patterns:
             before = self.not_after.get(label)

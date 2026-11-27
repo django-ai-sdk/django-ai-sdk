@@ -10,25 +10,19 @@ from pydantic_core import PydanticUndefined
 if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
-# `object` is a typed record of `fields`; `dict` is open JSON the host shapes.
 FieldType = Literal["str", "int", "float", "bool", "list", "dict", "object"]
 
-# Bounds so a declared schema cannot be a pathology the compiler has to walk.
 MAX_DEPTH = 8
 MAX_FIELDS = 32
 MAX_ENUM = 64
-# A run walks every step in one worker, so definitions stay small.
 MAX_STEPS = 50
-# The workflow's listeners plus every step's.
 MAX_LISTENERS = 20
 MAX_DEFINITION_BYTES = 256 * 1024
 MAX_TRIGGERS = 10
-# Part of its schedule's name and of the runs it starts.
 TRIGGER_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,49}$")
 
 _SCALARS = ("str", "int", "float", "bool")
 
-# `object` compiles to a model of its own.
 PY_TYPES: dict[FieldType, type] = {
     "str": str,
     "int": int,
@@ -39,7 +33,6 @@ PY_TYPES: dict[FieldType, type] = {
 }
 _TYPE_OF_ANNOTATION: dict[Any, FieldType] = {py: name for name, py in PY_TYPES.items()}
 
-# Built-in step types; AI_SDK_WORKFLOWS['STEPS'] may not reuse them.
 AGENT_STEP = "agent"
 APPROVAL_STEP = "approval"
 
@@ -50,13 +43,9 @@ class FieldDefinition(BaseModel):
     type: FieldType = "str"
     description: str = ""
     required: bool = True
-    # `None` means no default: the field compiles to `type | None`.
     default: Any = None
-    # Scalar fields only; compiles to Literal[...].
     enum: list[str | int | float | bool] | None = None
-    # A `list`'s element type; `None` leaves the list open.
     items: FieldDefinition | None = None
-    # An `object`'s members.
     fields: dict[str, FieldDefinition] | None = None
 
     @model_validator(mode="after")
@@ -115,7 +104,6 @@ def _check_default_matches_type(where: str, value: Any, field: FieldDefinition) 
 
 
 def _check_bounds(where: str, field: FieldDefinition, depth: int = 1) -> None:
-    """A declared schema cannot be a pathology the compiler has to walk."""
     if field.enum is not None and len(field.enum) > MAX_ENUM:
         raise ValueError(f"{where} declares more than {MAX_ENUM} enum values.")
     if depth > MAX_DEPTH:
@@ -139,25 +127,19 @@ class ListenerDefinition(BaseModel):
 class StepDefinition(BaseModel):
     """One step of a definition: an agent call, or a registered Step class."""
 
-    # AGENT_STEP, APPROVAL_STEP, or a key of AI_SDK_WORKFLOWS['STEPS'].
     type: str = AGENT_STEP
     name: str
-    # Earlier steps this one reads (run inputs are always available).
     requires: list[str] = []
     on_error: Literal["stop", "continue"] = "stop"
     agent_id: str = ""
-    # Structured output; agent steps only.
     output_fields: dict[str, FieldDefinition] = {}
-    # Inputs sent as the step's conversation, in order; never inferred from a value's shape.
     history: list[str] = []
     listeners: list[ListenerDefinition] = []
-    # `Step.config` for a registered step; checked by `validate_config` on store.
     config: dict[str, Any] = {}
 
     @model_validator(mode="before")
     @classmethod
     def _refuse_a_system_prompt(cls, data: Any) -> Any:
-        """Refuse `system_prompt_override`: a definition cannot replace an agent's prompt."""
         if isinstance(data, dict) and data.get("system_prompt_override"):
             raise ValueError(
                 "system_prompt_override is not accepted: a definition cannot replace an "
@@ -185,13 +167,8 @@ class StepDefinition(BaseModel):
 class _Trigger(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Runs it starts record "<kind>:<name>" as their trigger.
     name: str
-    # USERNAME_FIELD of the account runs act as. Code-declared workflows only; stored
-    # workflows' runs act as their creator.
     run_as: str = ""
-    # "{word}" placeholders are filled (cron: name, workflow, scheduled_at, last_run_at;
-    # event: payload). A bare "{word}" keeps the value's type.
     inputs: dict[str, Any] = {}
     enabled: bool = True
 
@@ -209,7 +186,6 @@ class CronTrigger(_Trigger):
 
     kind: Literal["cron"] = "cron"
     cron: str
-    # An IANA zone, so "0 9 * * mon-fri" stays 9:00 across daylight saving.
     timezone: str = "UTC"
 
 
@@ -224,13 +200,10 @@ Trigger = Annotated[CronTrigger | EventTrigger, Field(discriminator="kind")]
 
 
 class WorkflowDefinition(BaseModel):
-    # Stored JSON format, so a future revision can gate on it.
     version: Literal[1] = 1
     name: str = ""
-    # Validated once, before the first step runs.
     input_fields: dict[str, FieldDefinition] = {}
     steps: list[StepDefinition]
-    # Fire for the run and every step in it.
     listeners: list[ListenerDefinition] = []
     triggers: list[Trigger] = []
 
@@ -259,7 +232,6 @@ class WorkflowDefinition(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize_a_pydantic_inputs_model(cls, data: Any) -> Any:
-        """Turn `inputs=SomeBaseModel` into `input_fields`, so code and stored share one format."""
         if not isinstance(data, dict) or "inputs" not in data:
             return data
         data = {**data}
@@ -275,10 +247,6 @@ class WorkflowDefinition(BaseModel):
 
 
 def fields_from_model(model: type[BaseModel]) -> dict[str, FieldDefinition]:
-    """A pydantic model's fields as FieldDefinitions.
-
-    Models with validators are refused: they would be silently skipped after a dump.
-    """
     decorators = model.__pydantic_decorators__
     if decorators.field_validators or decorators.model_validators:
         raise ValueError(
@@ -289,7 +257,6 @@ def fields_from_model(model: type[BaseModel]) -> dict[str, FieldDefinition]:
 
 
 def _field_from_info(model: type[BaseModel], name: str, info: FieldInfo) -> FieldDefinition:
-    """One model field as a FieldDefinition, or a refusal naming the field."""
     where = f"{model.__name__}.{name}"
     if info.metadata:
         raise ValueError(
@@ -303,7 +270,6 @@ def _field_from_info(model: type[BaseModel], name: str, info: FieldInfo) -> Fiel
     annotation, optional = _split_optional(info.annotation)
     return FieldDefinition(
         description=info.description or "",
-        # `X | None` reads as optional, though pydantic would still require the key.
         required=info.is_required() and not optional,
         default=None if info.default is PydanticUndefined else info.default,
         **_type_kwargs(annotation, where),
@@ -311,7 +277,6 @@ def _field_from_info(model: type[BaseModel], name: str, info: FieldInfo) -> Fiel
 
 
 def _split_optional(annotation: Any) -> tuple[Any, bool]:
-    """(the annotation without None, whether it accepted None)."""
     if get_origin(annotation) in (Union, UnionType) and type(None) in get_args(annotation):
         without = [arg for arg in get_args(annotation) if arg is not type(None)]
         if len(without) == 1:
@@ -320,7 +285,6 @@ def _split_optional(annotation: Any) -> tuple[Any, bool]:
 
 
 def _type_kwargs(annotation: Any, where: str) -> dict[str, Any]:
-    """A python annotation as the parts of a FieldDefinition."""
     origin = get_origin(annotation)
     args = get_args(annotation)
     if origin is Literal:
@@ -353,9 +317,6 @@ def _type_kwargs(annotation: Any, where: str) -> dict[str, Any]:
             f"the field types it has, or read the value in a step."
         )
     return {"type": field_type}
-
-
-# HTTP request payloads for the contrib Ninja layer. DRF's serializers mirror them.
 
 
 class WorkflowCreateRequest(BaseModel):

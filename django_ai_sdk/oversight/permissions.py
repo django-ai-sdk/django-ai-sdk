@@ -1,5 +1,3 @@
-"""Who may read the oversight record, read its content, and answer its review queues."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -77,7 +75,6 @@ class OversightAccess(PermissionsMixin):
 
     @classmethod
     def get_default_permissions(cls) -> list[Any]:
-        """An empty setting falls back; a record open to everyone says `[AllowAll]`."""
         return super().get_default_permissions() or [
             import_string(path) for path in DOMAIN_PERMISSION_DEFAULTS[cls.domain]
         ]
@@ -86,11 +83,6 @@ class OversightAccess(PermissionsMixin):
     async def content_ids(
         cls, user: UserType, turn_ids: Iterable[Any], *, allowed: bool
     ) -> set[Any]:
-        """The ids whose content `user` may see: the one content gate of every read.
-
-        `allowed` is whether the caller may see CONTENT at all, so the permission
-        chain runs once per read.
-        """
         from django_ai_sdk.oversight.models import Turn
 
         ids = list(turn_ids)

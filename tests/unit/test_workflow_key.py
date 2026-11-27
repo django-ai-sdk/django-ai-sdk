@@ -1,5 +1,3 @@
-"""The workflow_key a run carries: set by the server, and the channel its steps run on."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -23,9 +21,6 @@ from django_ai_sdk.workflows.steps import AgentStep, WorkflowContext
 
 @pytest.mark.django_db(transaction=True)
 class TestTheWorkflowKey:
-    """A step's channel is keyed by what the server set on the run, never by the name a
-    definition gives itself."""
-
     def payroll(self):
         return WorkflowDefinition(name="payroll", steps=[StepDefinition(name="pay", agent_id="a")])
 
@@ -55,7 +50,6 @@ class TestTheWorkflowKey:
         assert await self.run_with(definition_of(record), record=record) == "intake"
 
     async def test_the_key_outlives_the_stored_workflow(self):
-
         record = await Workflow.objects.acreate(
             name="Intake", definition=self.payroll().model_dump()
         )

@@ -34,24 +34,17 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-# Namespace inside the metadata
 AGENT_METADATA_NAMESPACE = "sdk"
 
 
 def agent_provider_metadata(
     agent: str | None = None, handoff: str | None = None
 ) -> dict[str, Any] | None:
-    """Wrap call attribution in provider metadata."""
     marks = {key: value for key, value in (("agent", agent), ("handoff", handoff)) if value}
     return {AGENT_METADATA_NAMESPACE: marks} if marks else None
 
 
 def get_attachment(part: Any) -> Attachment | None:
-    """Read the thread document reference from a file part.
-
-    The part's url is never used: it is client-supplied, the document id is
-    validated against the thread's files before use.
-    """
     if part.type != "file":
         return None
     meta = (getattr(part, "provider_metadata", None) or {}).get(AGENT_METADATA_NAMESPACE) or {}
@@ -65,16 +58,10 @@ def get_attachment(part: Any) -> Attachment | None:
     )
 
 
-# === Base Schema Classes ===
-
-
 class Schema(BaseModel):
     """Base schema class with populate_by_name configuration."""
 
     model_config = {"populate_by_name": True}
-
-
-# === Core Protocol Parts ===
 
 
 class MessageStartPart(Schema):
@@ -85,9 +72,6 @@ class MessageStartPart(Schema):
         validation_alias="message_id",
         serialization_alias="messageId",
     )
-
-
-# === Text Parts ===
 
 
 class TextStartPart(Schema):
@@ -112,9 +96,6 @@ class TextEndPart(Schema):
     id: str
 
 
-# === Reasoning Parts ===
-
-
 class ReasoningStartPart(Schema):
     """Indicates the beginning of a reasoning block."""
 
@@ -137,9 +118,6 @@ class ReasoningEndPart(Schema):
     id: str
 
 
-# === Source Parts ===
-
-
 class SourceUrlPart(Schema):
     """References to external URLs."""
 
@@ -155,16 +133,11 @@ class SourceDocumentPart(Schema):
     source_id: str = Field(validation_alias="source_id", serialization_alias="sourceId")
     media_type: str = Field(validation_alias="media_type", serialization_alias="mediaType")
     title: str
-    # Carries the citation index so the client can map an inline citation to
-    # the right source by index rather than emission order (which is retrieval,
-    # not index, order). providerMetadata is the only extra channel the Vercel
-    # AI SDK preserves on a source-document part.
+    # providerMetadata is the only extra channel the Vercel AI SDK preserves on
+    # a source-document part.
     provider_metadata: dict[str, Any] | None = Field(
         default=None, serialization_alias="providerMetadata"
     )
-
-
-# === File Part ===
 
 
 class FilePart(Schema):
@@ -175,17 +148,11 @@ class FilePart(Schema):
     media_type: str = Field(validation_alias="media_type", serialization_alias="mediaType")
 
 
-# === Data Parts ===
-
-
 class DataPart(Schema):
     """Custom data parts for streaming arbitrary structured data."""
 
-    type: str  # Must start with "data-" (e.g., "data-weather")
+    type: str  # Must start with "data-"
     data: dict[str, Any]
-
-
-# === Error Part ===
 
 
 class ErrorPart(Schema):
@@ -193,9 +160,6 @@ class ErrorPart(Schema):
 
     type: Literal["error"] = "error"
     error_text: str = Field(validation_alias="error_text", serialization_alias="errorText")
-
-
-# === Tool Parts ===
 
 
 class ToolInputStartPart(Schema):
@@ -253,10 +217,6 @@ class ToolOutputErrorPart(Schema):
 
 
 def unwrap_tool_output(raw: Any) -> tuple[bool, dict[str, Any]]:
-    """Unwrap Haystack's `{result, origin, error}` tool result into `(failed, output)`.
-
-    On failure the output is dropped: it is the invocation's error text.
-    """
     if isinstance(raw, dict) and raw.get("error"):
         return True, {}
     output = raw.get("result", raw) if isinstance(raw, dict) else raw
@@ -266,17 +226,12 @@ def unwrap_tool_output(raw: Any) -> tuple[bool, dict[str, Any]]:
 
 
 def tool_error_text(raw: Any) -> str:
-    """Return the error text for a failed tool call: oversight's reason, or the error code.
-
-    A tool's own error may contain sensitive data, so it never leaves the server.
-    """
     result = raw.get("result") if isinstance(raw, dict) else None
     if isinstance(result, str):
         try:
             result = json.loads(result)
         except ValueError:
             result = None
-    # Oversight stubs are exactly {"refused": reason} or {"skipped": reason}.
     if isinstance(result, dict) and len(result) == 1:
         reason = result.get("refused") or result.get("skipped")
         if isinstance(reason, str) and reason:
@@ -285,7 +240,6 @@ def tool_error_text(raw: Any) -> str:
 
 
 def public_tool_call(tool_call: dict[str, Any]) -> dict[str, Any]:
-    """Return a stored tool call for the client, with a failed result replaced by its reason."""
     raw = tool_call.get("result") or {}
     failed, _ = unwrap_tool_output(raw)
     if not failed:
@@ -303,9 +257,6 @@ def error_data(code: str, ref: str) -> dict[str, Any]:
     }
 
 
-# === Step Parts ===
-
-
 class StartStepPart(Schema):
     """Indicates the start of a step."""
 
@@ -316,9 +267,6 @@ class FinishStepPart(Schema):
     """Indicates that a step has been completed."""
 
     type: Literal["finish-step"] = "finish-step"
-
-
-# === Completion Parts ===
 
 
 class FinishPart(Schema):
@@ -340,8 +288,6 @@ class DonePart(Schema):
 
     type: Literal["done"] = "done"
 
-
-# === Union Type for All Stream Chunks ===
 
 StreamChunk = (
     MessageStartPart
@@ -370,13 +316,10 @@ StreamChunk = (
 
 
 class VercelProtocolHandler(BaseProtocolHandler):
-    """Converts normalized events to Vercel AI SDK Data Stream Protocol."""
-
     def __init__(self) -> None:
         self.message_id: str | None = None
         self.text_id: str | None = None
         self.text_started: bool = False
-        # Reasoning state tracking
         self.reasoning_id: str | None = None
         self.reasoning_started: bool = False
 
@@ -384,10 +327,8 @@ class VercelProtocolHandler(BaseProtocolHandler):
         self,
         protocol_messages: list[Any],
     ) -> list[ChatMessage]:
-        """Convert Vercel Message objects to internal ChatMessage format."""
         messages = []
         for msg in protocol_messages:
-            # Extract text content from parts using list comprehension
             content = " ".join(part.text for part in msg.parts if part.type == "text" and part.text)
             attachments = [a for a in map(get_attachment, msg.parts) if a]
 
@@ -399,7 +340,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
         return messages
 
     def from_chat_messages(self, chat_messages: list[ChatMessage]) -> list[dict]:
-        """Convert ChatMessage objects to Vercel AI SDK message format."""
         result = []
         for chat_message in chat_messages:
             parts = []
@@ -450,14 +390,12 @@ class VercelProtocolHandler(BaseProtocolHandler):
                         part["state"] = "output-available"
                         part["output"] = output
 
-                    # add metadata about the agent that made the call
                     if who := agent_provider_metadata(
                         tool_call.get("agent"), tool_call.get("handoff")
                     ):
                         part["callProviderMetadata"] = who
                     parts.append(part)
 
-            # Replay the oversight notices sent while this answer streamed.
             for notice in chat_message.metadata.get("oversight") or []:
                 parts.append({"type": "data-oversight", "data": notice})
 
@@ -489,9 +427,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
         adapter: Streamable,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[bytes, None]:
-        """Generate SSE-formatted streaming response from normalized events."""
-
-        # The agent shares one handler across requests: each stream gets its own state.
         state = copy.copy(self)
         state.text_started = False
         state.text_id = None
@@ -504,14 +439,12 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
         try:
             async for chunk in protocol_stream:
-                # TODO: needs better handling for DONE termination
                 if isinstance(chunk, DonePart):
                     yield format_sse("[DONE]")
                 else:
                     yield format_sse(chunk.model_dump(exclude_none=True, by_alias=True))
         finally:
             await protocol_stream.aclose()
-            # Ensure any open blocks are closed if stream was interrupted
             cleanup_chunks = []
             reasoning_id = state.reasoning_id
             text_id = state.text_id
@@ -522,19 +455,15 @@ class VercelProtocolHandler(BaseProtocolHandler):
                 cleanup_chunks.append(TextEndPart(id=text_id))
                 state.text_started = False
 
-            # Yield cleanup chunks
             for chunk in cleanup_chunks:
                 yield format_sse(chunk.model_dump(exclude_none=True, by_alias=True))
 
     async def handle_stream(
         self, events: AsyncGenerator[StreamEvent, None]
     ) -> AsyncGenerator[StreamChunk, None]:
-        """Convert normalized events to Vercel StreamChunk objects."""
-
         async for event in events:
             match event.event_type:
                 case "message_start":
-                    # Use message_id from event (must be provided by adapter)
                     msg_event = cast("MessageStartEvent", event)
                     if not msg_event.message_id:
                         raise ValueError("message_id is required in MessageStartEvent")
@@ -543,7 +472,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "reasoning_chunk":
                     reasoning_event = cast("ReasoningChunkEvent", event)
-                    # Start reasoning block if not already started
                     if not self.reasoning_started:
                         self.reasoning_id = str(uuid.uuid4())
                         yield ReasoningStartPart(id=self.reasoning_id)
@@ -556,7 +484,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "text_chunk":
                     text_event = cast("TextChunkEvent", event)
-                    # Close reasoning block before starting text (if reasoning was open)
                     if self.reasoning_started and self.reasoning_id:
                         yield ReasoningEndPart(id=self.reasoning_id)
                         self.reasoning_started = False
@@ -611,7 +538,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
                         )
 
                 case "data":
-                    # Convert intermediate DataEvent to Vercel DataPart
                     data_event = cast("DataEvent", event)
                     yield DataPart(type=f"data-{data_event.data_type}", data=data_event.data)
 
@@ -629,7 +555,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     yield ErrorPart(error_text=data["code"])
 
                 case "text_end":
-                    # Citations may follow; the text shows as done meanwhile
                     for part in self._close_blocks():
                         yield part
 
@@ -637,7 +562,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     for part in self._close_blocks():
                         yield part
                     end_event = cast("MessageEndEvent", event)
-                    # Default to "stop" if no finish_reason provided
                     finish_reason = end_event.finish_reason or "stop"
                     yield FinishPart(finishReason=finish_reason)
 
@@ -645,7 +569,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     yield DonePart()
 
     def _close_blocks(self) -> list[StreamChunk]:
-        """End the open reasoning and text blocks, if any."""
         parts: list[StreamChunk] = []
         if self.reasoning_started and self.reasoning_id:
             parts.append(ReasoningEndPart(id=self.reasoning_id))

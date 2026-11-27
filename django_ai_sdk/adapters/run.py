@@ -1,5 +1,3 @@
-"""The Run adapter: one-off model calls and headless tool loops, as Haystack Agent runs."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, overload
@@ -18,27 +16,22 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# On a user message: where its attachment context starts, 0 when it can't be told apart.
 ATTACHMENT_CONTEXT_META_KEY = "django_ai_sdk.attachment_context_at"
 
 
 def get_user_text(message: ChatMessage) -> str:
-    """User text followed by the context line of each attachment."""
     hints = [a.context for a in message.attachments if a.context]
     return "\n\n".join([message.content, *hints]) if hints else message.content
 
 
 def user_content(message: ChatMessage, text: str) -> str | None:
-    """The content part of `text`, joined as `get_user_text` joins it. None if it no longer splits."""
     hints = [a for a in message.attachments if a.context]
     parts = text.rsplit("\n\n", len(hints)) if hints else [text]
     return parts[0] if len(parts) == len(hints) + 1 else None
 
 
 def get_user_message(message: ChatMessage) -> HaystackChatMessage:
-    """Haystack user message, multimodal when images were inlined for a vision model."""
     text = get_user_text(message)
-    # The gate judges attachment context apart: a stored thread never vouches for it.
     meta = {ATTACHMENT_CONTEXT_META_KEY: len(message.content)} if text != message.content else None
     images = [
         ImageContent(base64_image=a.data, mime_type=a.media_type)
@@ -53,8 +46,6 @@ def get_user_message(message: ChatMessage) -> HaystackChatMessage:
 
 
 class Run:
-    """Runnable Haystack adapter."""
-
     model: str | None = None
     instructions: str | None = None
 
@@ -70,14 +61,13 @@ class Run:
         self.instructions = instructions
 
     def get_messages(self, messages: list[ChatMessage]) -> list[HaystackChatMessage]:
-        """Quick conversion."""
         conversation = [m for m in messages if m.role in ("user", "assistant")]
         converted: list[HaystackChatMessage] = []
         for msg in conversation:
             if msg.role == "user":
                 converted.append(get_user_message(msg))
             elif msg.role == "assistant":
-                converted.append(HaystackChatMessage.from_assistant(msg.content))  # type: ignore[arg-type]
+                converted.append(HaystackChatMessage.from_assistant(msg.content))
         return converted
 
     @overload
@@ -116,10 +106,7 @@ class Run:
         hooks: dict[str, list[Any]] | None = None,
         request: TurnRequest | None = None,
     ) -> T | str | None:
-        """Run the generator as a Haystack Agent: once, or as a tool loop with `tools`.
-
-        Raises `Blocked` when the gate blocked the question or finish withheld the answer.
-        """
+        """Raises `Blocked` when the gate blocked the question or finish withheld the answer."""
         from django_ai_sdk.oversight.plugin import TurnRequest, run_with_oversight
 
         request = request or TurnRequest()
@@ -144,7 +131,6 @@ class Run:
         if not response_format:
             return text
         if not text:
-            # no answer to validate
             logger.warning(
                 "No {} in the reply (finish_reason={})",
                 response_format.__name__,

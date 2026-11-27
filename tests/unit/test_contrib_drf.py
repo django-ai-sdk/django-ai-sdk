@@ -1,9 +1,3 @@
-"""The contrib DRF viewsets through real URLs (tests/urls.py mounts them at /drf/).
-
-The workflow endpoints are tested on both mounts, in test_contrib_ninja and
-test_workflow_http.
-"""
-
 import pytest
 
 JSON = "application/json"
@@ -15,7 +9,6 @@ class TestThreads:
         assert client.get("/drf/threads/").status_code == 403
 
     def test_an_unknown_thread_is_not_found_with_a_code(self, client, users):
-        # tests.settings sets no EXCEPTION_HANDLER: the viewsets bring their own.
         client.force_login(users[0])
         response = client.delete("/drf/threads/00000000-0000-0000-0000-000000000000/")
         assert response.status_code == 404
@@ -34,7 +27,6 @@ class TestThreads:
         assert client.get("/drf/threads/").json() == []
 
     def test_paging_follows_limit_offset_pagination(self, client, users):
-        """DRF's own rules: a bad limit falls back to the default, a big one is capped."""
         from unittest.mock import patch
 
         client.force_login(users[0])
@@ -127,7 +119,6 @@ def _pairs():
     from django_ai_sdk.workflows import schemas as w
 
     return [
-        # Responses: the services' own models.
         (s.ThreadSerializer, ThreadInfo),
         (s.MemoryOutSerializer, m.MemoryOut),
         (s.DocumentSerializer, m.DocumentOut),
@@ -142,7 +133,6 @@ def _pairs():
         (s.AgentIntegrationStatusSerializer, AgentIntegrationStatus),
         (s.ObjectPermissionsSerializer, ObjectPermissions),
         (s.AgentSummarySerializer, AgentSummary),
-        # Requests: the payloads the Ninja layer validates with.
         (s.ChatRequestSerializer, v.ChatRequest),
         (s.MessagePartSerializer, v.MessagePart),
         (s.RateMessageSerializer, v.RateMessagePayload),
@@ -164,9 +154,7 @@ def _pairs():
 
 @pytest.mark.parametrize(("serializer", "model"), _pairs(), ids=lambda x: x.__name__)
 def test_serializers_mirror_the_sdk_models(serializer, model):
-    """The DRF layer spells the fields out again; this is what keeps it from drifting."""
     fields = getattr(model, "model_fields", None) or model.__annotations__
     assert set(serializer().fields) == set(fields)
-    # Wire names (camelCase keys the client sends) must match the pydantic aliases.
     for field, wire in getattr(serializer, "WIRE_NAMES", {}).items():
         assert model.model_fields[field].alias == wire

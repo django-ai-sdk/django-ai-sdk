@@ -1,8 +1,3 @@
-"""Delete expired oversight rows (`oversight.retention.prune`). Schedule it daily:
-
-manage.py oversight_prune [--batch-size 500]
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

@@ -81,7 +81,6 @@ class PirateBasicAgent(FileLookupMixin, Agent):
     storage_adapter = DbStorageAdapter
     max_history = 20
 
-    # Enable file upload UI for this agent
     file_upload = True
 
     file_pipelines = [
@@ -97,8 +96,6 @@ class PirateBasicAgent(FileLookupMixin, Agent):
                 DocumentExtractionTransform(PirateExtractionAgent()),
             ],
         ),
-        # Images become a searchable caption, which is also what agents
-        # without vision get to see.
         FilePipeline(
             ImageCaptionProcessor(),
             transforms=[
@@ -107,18 +104,15 @@ class PirateBasicAgent(FileLookupMixin, Agent):
         ),
     ]
 
-    # Use the new RAG provider pattern for Haystack
     rag_provider = RAGProvider()
 
     tools: list = [get_today, get_memory_files, get_memory_file]
 
-    # Registry keys of installed integration apps.
     integrations: list[str] = ["linear", "weather"]
 
     suggestion_generator = DefaultSuggestionGenerator
 
     async def get_rag_queryset(self, memory_id: str | None = None) -> QuerySet[Entry]:
-        """Return queryset of documents for RAG."""
         if memory_id:
             return Entry.objects.filter(memory_id=memory_id)
         return Entry.objects.all()
@@ -126,7 +120,6 @@ class PirateBasicAgent(FileLookupMixin, Agent):
     async def get_rag_pipeline_bm25(
         self, memory_id: str | None = None
     ) -> BM25QueryExpanderRAG | None:
-        """Build BM25 RAG pipeline for document retrieval."""
         documents = await self.get_rag_documents(memory_id)
         if not documents:
             return None
@@ -142,7 +135,6 @@ class PirateBasicAgent(FileLookupMixin, Agent):
     async def get_rag_pipeline_qdrant(
         self, memory_id: str | None = None
     ) -> QdrantBM25HybridRAG | None:
-        """Build Qdrant Hybrid RAG pipeline (SPLADE + BGE embeddings with RRF)."""
         documents = await self.get_rag_documents(memory_id)
         if not documents:
             return None
@@ -159,7 +151,6 @@ class PirateBasicAgent(FileLookupMixin, Agent):
         )
 
     async def get_rag_pipeline(self, memory_id: str | None = None) -> QdrantBM25HybridRAG | None:
-        """Build RAG pipeline for document retrieval."""
         return await self.get_rag_pipeline_qdrant(memory_id)
 
     async def get_run_adapter(
@@ -175,25 +166,18 @@ class PirateBasicAgent(FileLookupMixin, Agent):
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Stream:
-        """Create Haystack pipeline adapter with multi-memory RAG tools."""
-
         generator = self.get_llm()
 
-        # Get storage adapter
         storage_adapter = await self.get_storage_adapter(thread_id)
 
-        # One registry/formatter per request: indices stay cumulative across
-        # multiple RAG tool calls in a turn, and reset between turns.
         citation_registry = self.get_citation_registry()
         citation_formatter = self.get_citation_formatter()
 
-        # Get tools
         tools = await self.get_tools(
             thread_id=thread_id or "",
             user=user,
         )
 
-        # Add RAG tools for each active memory link
         if self.rag_provider and thread_id:
             rag_tools = await self.get_rag_tools(
                 thread_id=thread_id,
@@ -202,12 +186,10 @@ class PirateBasicAgent(FileLookupMixin, Agent):
                 user=user,
             )
             if any(tool.name == "get_files" for tool in tools):
-                # Read where the tool is picked: search alone can't answer "all X"
                 for rag_tool in rag_tools:
                     rag_tool.description += SEARCH_IS_NOT_A_LIST
             tools.extend(rag_tools)
 
-        # Build tool agent with all tools
         tool_agent = ToolAgent(
             config=ToolAgentConfig(
                 model=self.get_model(),

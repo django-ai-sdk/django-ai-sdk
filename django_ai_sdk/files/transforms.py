@@ -14,8 +14,6 @@ class BaseTransform:
 
 
 class CSVTransform(BaseTransform):
-    """CSV to list transform"""
-
     async def run(self, data: Any, **kwargs: Any) -> list[dict] | Any:
         if not isinstance(data, str):
             return data
@@ -24,8 +22,6 @@ class CSVTransform(BaseTransform):
 
 
 class JSONTransform(BaseTransform):
-    """JSON to dict tranform"""
-
     async def run(self, data: Any, **kwargs: Any) -> dict | list | Any:
         if not isinstance(data, str):
             return data
@@ -33,8 +29,6 @@ class JSONTransform(BaseTransform):
 
 
 class TextTransform(BaseTransform):
-    """Text to dict transform"""
-
     async def run(self, data: Any, **kwargs: Any) -> dict:
         if isinstance(data, str):
             return {"data": data}

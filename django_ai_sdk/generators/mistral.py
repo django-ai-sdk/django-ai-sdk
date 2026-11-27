@@ -11,7 +11,6 @@ from django_ai_sdk.utils import resolve_setting
 
 @watched_factory
 def mistral_chat(**kwargs: Any) -> MistralChatGenerator:
-    """Mistral chat generator wired to Django settings."""
     return MistralChatGenerator(
         **build_kwargs(
             {

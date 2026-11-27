@@ -1,5 +1,3 @@
-"""The oversight system checks and the settings schema."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -49,8 +47,6 @@ def keys(**configured: Any) -> str:
 
 
 class TestSettingsSchema:
-    """E012 names the key and what is wrong."""
-
     def test_a_valid_configuration_has_no_problems(self):
         assert not keys(
             FAIL_MODE="open",
@@ -94,7 +90,6 @@ class TestSettingsSchema:
         assert list(ACCEPTS) == list(DEFAULTS)
 
     def test_validators_are_registered_in_code_not_settings(self):
-        # register_validator is the one way to name a validator.
         assert "VALIDATORS" in keys(VALIDATORS={"even": "tests.oversight.test_checks.keys"})
 
     def test_a_key_that_is_not_a_setting_names_it_and_the_keys(self):
@@ -137,11 +132,9 @@ class TestPolicyAndDeployChecks:
             [Rule("r", when=L("j").is_true, then=Block(), mode=ENFORCE)],
         )
         assert "ai_sdk.oversight.E013" in self._deploy_ids(name)
-        # A deadline the judge can meet is fine.
         assert "ai_sdk.oversight.E013" not in self._deploy_ids(name, DEADLINE_MS={"gate": 60_000})
 
     def test_a_slow_judge_behind_an_unsure_pattern_miss_is_a_deploy_warning(self):
-        # A miss below min_confidence is unsure, so the judge is asked on every miss.
         name = self._chain("fc-judge-behind-patterns", miss_confidence=0.5)
         assert "ai_sdk.oversight.E013" in self._deploy_ids(name)
 
@@ -232,7 +225,6 @@ class TestChecks:
     def test_a_live_stream_with_an_enforced_finish_mask_warns(self):
         live = check_ids(AI_SDK_OVERSIGHT={"DEFAULT_POLICY": "test-guard", "STREAM_MODE": "live"})
         assert "ai_sdk.oversight.W011" in live
-        # The default holds the answer exactly while such a rule is enforced.
         assert "ai_sdk.oversight.W011" not in check_ids(
             AI_SDK_OVERSIGHT={"DEFAULT_POLICY": "test-guard"}
         )
@@ -255,7 +247,6 @@ class TestChecks:
                 if m.id.endswith((".E007", ".W008")) and repr(name) in m.msg
             ]
 
-        # Optional aliases left undefined are a choice: a warning. A required one is not.
         assert level(Maybe("fc-nobody")) == [("W008", WARNING)]
         assert level("fc-nobody") == [("E007", ERROR)]
 
@@ -264,8 +255,6 @@ class TestChecks:
         from django_ai_sdk.oversight.checks import lens_checks
         from django_ai_sdk.oversight.registry import build_policy
 
-        # Undefined, the lens is off by choice (W008). Defined without its key, the lens is
-        # asked and fails on every turn, so the rule blocks: that is not a warning.
         name = policy(
             "fc-maybe-defined",
             [JudgeLens(name="risky", question="Risky?", judges=[Maybe("classifier")])],
@@ -312,8 +301,6 @@ class TestChecks:
         assert not found(".W015", {loud}, **notifiers)
 
     def test_a_block_that_waits_for_a_reflect_lens_warns(self):
-        # When the gate lens fails closed, the rule waits for the reflect lens, and by
-        # reflect the block can no longer act.
         from django_ai_sdk.oversight.checks import policy_checks
 
         gate = JudgeLens(name="g", stages=[Stage.GATE], judges=[PatternJudge([r"x"])])
@@ -340,7 +327,6 @@ class TestChecks:
         assert not any(repr(reported) in msg or repr(alone) in msg for msg in warned)
 
     def test_a_mask_that_waits_past_the_gate_warns(self):
-        # The rule waits for the finish lens, so the model reads the question unmasked.
         from django_ai_sdk.oversight.checks import policy_checks
 
         asked = PIILens(name="asked", stages=[Stage.GATE], kinds=["email"])
@@ -364,13 +350,13 @@ class TestChecks:
     def test_a_policy_name_declared_twice_is_an_error(self, registry_snapshot: Any):
         class First(Policy):
             name = "test-twice"
-            lenses = []  # noqa: RUF012
-            rules = []  # noqa: RUF012
+            lenses = []
+            rules = []
 
         class Second(Policy):
             name = "test-twice"
-            lenses = []  # noqa: RUF012
-            rules = []  # noqa: RUF012
+            lenses = []
+            rules = []
 
         register_policy(First)
         register_policy(Second)
@@ -382,7 +368,6 @@ class TestChecks:
 
 
 def test_the_manual_lists_every_check_id():
-    """Check ids are public: the manual's table is the ids the code raises."""
     import re
     from pathlib import Path
 

@@ -1,18 +1,9 @@
-"""
-Unit tests for MemoryService permission enforcement.
-"""
-
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 from django.core.files.base import ContentFile
 
 import pytest
-
-
-# ============================================================================
-# MemoryService — get_agent_memories
-# ============================================================================
 
 
 @pytest.mark.django_db
@@ -47,16 +38,9 @@ class TestMemoryServiceGetAgentMemories:
             assert result == []
 
 
-# ============================================================================
-# MemoryService — permission enforcement
-# ============================================================================
-
-
 @pytest.mark.asyncio
 @pytest.mark.django_db
 class TestMemoryServicePermissions:
-    """Integration tests: MemoryService methods enforce permissions."""
-
     async def _get_admin(self):
         from tests.factories.db import UserFactory
 
@@ -302,16 +286,9 @@ class TestMemoryServicePermissions:
         await mem.adelete()
 
 
-# ============================================================================
-# Open mode — AllowAll with user=None
-# ============================================================================
-
-
 @pytest.mark.asyncio
 @pytest.mark.django_db
 class TestOpenMode:
-    """Verify the SDK works without restriction under AllowAll + user=None."""
-
     async def test_thread_service_create_with_none_user(
         self, mock_agents_registry, mock_storage_adapter_registry
     ):
@@ -405,11 +382,6 @@ class TestOpenMode:
             assert isinstance(result, list)
 
 
-# ============================================================================
-# MemoryUser Management — RBAC enforcement
-# ============================================================================
-
-
 @pytest.mark.asyncio
 @pytest.mark.django_db
 class TestMemoryUserManagement:
@@ -419,7 +391,6 @@ class TestMemoryUserManagement:
         return await UserFactory.acreate()
 
     async def test_owner_can_add_user(self):
-        """Memory owner can add other users as viewers."""
         from django_ai_sdk.memories.models import Memory, MemoryUser
         from django_ai_sdk.memories.services import MemoryService
         from tests.mocks.permissions import memory_permissions
@@ -439,7 +410,6 @@ class TestMemoryUserManagement:
         assert await MemoryUser.objects.filter(memory=mem, user=viewer).aexists()
 
     async def test_owner_can_promote_user_to_manager(self):
-        """Memory owner can promote viewer to manager."""
         from django_ai_sdk.memories.models import Memory, MemoryUser
         from django_ai_sdk.memories.services import MemoryService
         from tests.mocks.permissions import memory_permissions
@@ -459,7 +429,6 @@ class TestMemoryUserManagement:
         assert result.can_manage is True
 
     async def test_non_owner_cannot_add_user(self):
-        """Stranger cannot add users to private memory."""
         from django_ai_sdk.memories.models import Memory, MemoryUser
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.permissions import PermissionDenied
@@ -479,7 +448,6 @@ class TestMemoryUserManagement:
                 )
 
     async def test_viewer_cannot_add_user(self):
-        """Non-manager member cannot add other users."""
         from django_ai_sdk.memories.models import Memory, MemoryUser
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.permissions import PermissionDenied
@@ -503,13 +471,6 @@ class TestMemoryUserManagement:
 @pytest.mark.asyncio
 @pytest.mark.django_db
 class TestMemoryServiceGetChunkContent:
-    """get_chunk_content checks permissions on the Entry's parent Memory.
-
-    MemoryDefaultPermission.has_object_permission expects a Memory (it reads
-    memory_users/memory_groups, relations Entry doesn't have), raising an
-    AttributeError instead of enforcing the permission.
-    """
-
     async def _get_user(self):
         from tests.factories.db import UserFactory
 
@@ -549,16 +510,9 @@ class TestMemoryServiceGetChunkContent:
                 await MemoryService.get_chunk_content(str(entry.id), None, user=stranger)
 
 
-# ============================================================================
-# MemoryService — list_thread_memories
-# ============================================================================
-
-
 @pytest.mark.asyncio
 @pytest.mark.django_db
 class TestMemoryServiceListThreadMemories:
-    """list_thread_memories enforces LIST_THREAD_MEMORIES permission."""
-
     async def _get_user(self):
         from tests.factories.db import UserFactory
 
@@ -635,12 +589,6 @@ class TestMemoryServiceListThreadMemories:
             await MemoryService.list_thread_memories(str(thread.id), user=None)
 
 
-# ============================================================================
-# MemoryService -- thread file upload gate
-# ============================================================================
-
-
-# transaction=True so the AgentSettings row is flushed afterwards.
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
 class TestUploadThreadFileRespectsAgentFileUpload:
@@ -690,13 +638,10 @@ class TestUploadThreadFileRespectsAgentFileUpload:
                 )
 
 
-
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestThreadFileMemory:
     async def test_upload_that_loses_the_race_uses_the_winning_memory(self):
-        # Parallel uploads each read the thread before any of them claims it.
-        # Replay that: a second call sees a stale thread without file_memory.
         from uuid import uuid4
 
         from django.contrib.auth import get_user_model
@@ -739,16 +684,9 @@ class TestThreadFileMemory:
         assert await Memory.objects.filter(name=f"thread_files_{thread.id}").acount() == 1
 
 
-# ============================================================================
-# MemoryService — a thread's memories belong to the thread's owner
-# ============================================================================
-
-
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestThreadMemoryOwnership:
-    """A public memory is readable by anyone; someone else's thread is not."""
-
     async def _setup(self):
         from django_ai_sdk.conversation.models import Thread
         from django_ai_sdk.memories.models import Memory, ThreadMemory
@@ -821,12 +759,9 @@ class TestThreadMemoryOwnership:
             )
 
 
-# Same flush reason as TestUploadThreadFileRespectsAgentFileUpload.
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
 class TestThreadFilesBelongToTheThreadOwner:
-    """A public agent lets anyone chat with it, not into someone else's thread."""
-
     async def _setup(self):
         from uuid import uuid4
 

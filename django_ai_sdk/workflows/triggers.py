@@ -1,8 +1,3 @@
-"""What starts a run besides a person: a cron schedule (one DBOS schedule per trigger), or an event.
-
-Run ids derive from what fired them, so firing twice opens one run.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -29,12 +24,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# The DBOS workflow every cron schedule fires.
 FIRE_CRON = "ai_sdk.trigger_cron"
-# Run ids derive from this namespace and what fired the run.
 NAMESPACE = uuid.UUID("4f3a8e52-8f0e-4c55-9d5e-2f6a1d0c7b91")
 
-# Bare `{word}` only: str.format would reach attributes and choke on prose.
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
 
@@ -43,8 +35,6 @@ def schedule_name(key: str, trigger: str) -> str:
 
 
 def fill(template: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
-    """`template` with each "{word}" filled from `values`. "{word}" alone keeps the value's type."""
-
     def one(value: Any) -> Any:
         if not isinstance(value, str):
             return value
@@ -57,14 +47,7 @@ def fill(template: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
     return {name: one(value) for name, value in template.items()}
 
 
-# --- who and what ----------------------------------------------------------------
-
-
 def declared_workflows() -> list[tuple[str, WorkflowDefinition, Workflow | None]]:
-    """(key, definition, row) for every workflow that can fire: code ones, then active rows.
-
-    Rows shadowed by a code workflow, or that cannot run, are left out.
-    """
     from django_ai_sdk.workflows.models import Workflow
 
     declared = get_declared_workflows()
@@ -84,7 +67,6 @@ def declared_workflows() -> list[tuple[str, WorkflowDefinition, Workflow | None]
 async def run_user(
     trigger: CronTrigger | EventTrigger, record: Workflow | None
 ) -> AbstractBaseUser | None:
-    """Who a triggered run acts as: `run_as` in code, or who last wrote a stored workflow's steps."""
     from django_ai_sdk.tasks import aget_principal
     from django_ai_sdk.utils import aget_active_user
 
@@ -101,7 +83,6 @@ async def run_user(
 
 
 def refuse_run_as(definition: WorkflowDefinition) -> None:
-    """Raise UserError when a definition someone submitted names an account to act as."""
     if named := sorted(trigger.name for trigger in definition.triggers if trigger.run_as):
         raise UserError(
             f"Triggers {named} set run_as. Only a workflow declared in code acts as another "
@@ -109,11 +90,7 @@ def refuse_run_as(definition: WorkflowDefinition) -> None:
         )
 
 
-# --- cron -------------------------------------------------------------------------
-
-
 def cron_schedules(only: str | None = None) -> dict[str, ClientScheduleInput]:
-    """The DBOS schedule each enabled cron trigger should have, by name (`only`: one workflow)."""
     from django_ai_sdk.workflows.durable import QUEUE
 
     schedules: dict[str, ClientScheduleInput] = {}
@@ -135,10 +112,6 @@ def cron_schedules(only: str | None = None) -> dict[str, ClientScheduleInput]:
 
 
 def sync_schedules(only: str | None = None) -> list[str]:
-    """Make the DBOS schedules match the declared cron triggers; paused ones stay paused.
-
-    `only` scopes it to one workflow, so concurrent saves cannot delete each other's.
-    """
     from django_ai_sdk.durable.runtime import client
 
     wanted = cron_schedules(only)
@@ -156,7 +129,6 @@ def sync_schedules(only: str | None = None) -> list[str]:
 
 
 async def async_schedules(only: str | None = None) -> list[str]:
-    """`sync_schedules`, from async code, after a stored workflow changed."""
     return await sync_to_async(sync_schedules)(only)
 
 
@@ -167,7 +139,6 @@ async def start_cron(
     *,
     started_by: AbstractBaseUser | AnonymousUser | None = None,
 ) -> str | None:
-    """Open and queue the run for one occurrence. Returns its id, or None when nothing runs."""
     from django_ai_sdk.workflows.models import WorkflowRun
     from django_ai_sdk.workflows.runs import queue_run
 
@@ -200,9 +171,6 @@ async def start_cron(
         started_by=started_by,
     )
     return str(run.pk)
-
-
-# --- events -----------------------------------------------------------------------
 
 
 async def start_for_event(
@@ -241,7 +209,6 @@ start_for_event_sync = async_to_sync(start_for_event)
 
 
 async def start_for_webhook(sender: Any, event: InboundEvent, **kwargs: Any) -> None:
-    """Report a webhook delivery as "<integration>.message". Never fails the webhook."""
     if not event.event_id:
         return
     try:

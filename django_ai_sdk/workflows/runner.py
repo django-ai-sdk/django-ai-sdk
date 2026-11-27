@@ -30,28 +30,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Runs one labelled unit of side effects. Under DBOS each unit is checkpointed,
-# so a recovered run replays a finished unit instead of redoing it.
 Perform = Callable[[str, Callable[[], Awaitable[Any]]], Awaitable[Any]]
-# Waits for a decision (topic, timeout seconds). None unless the run is durable.
 Wait = Callable[[str, float], Awaitable[Any]]
 
-# How long a step whose wait ran out waits again for a decision taken just then.
 DECISION_IN_FLIGHT_SECONDS = 60.0
 
 
 async def perform_now(label: str, unit: Callable[[], Awaitable[Any]]) -> Any:
-    """Do `unit` here and now: the in-process `Perform`."""
     return await unit()
 
 
 class _StepRunner:
-    """Walks the declared steps once, in order.
-
-    The walk only decides; every side effect goes through `perform`, so it is the
-    same in-process or under DBOS.
-    """
-
     def __init__(
         self,
         steps: Sequence[Step],
@@ -73,11 +62,9 @@ class _StepRunner:
         self.recorded = completed
         self.perform = perform
         self.wait = wait
-        # The exception the last step raised, so an in-process run raises it as is.
         self.raised: Exception | None = None
 
     async def run(self) -> dict[str, StepOutcome]:
-        """Run each step whose required steps have completed, in declared order."""
         ctx = self.ctx
         await self.perform(
             "run:start",
@@ -92,14 +79,12 @@ class _StepRunner:
         return self.outcomes
 
     async def _end(self, error: BaseException | None) -> None:
-        # A superseded attempt is not the run's end: the attempt that owns it tells them.
         listeners = [] if isinstance(error, RunSuperseded) else self.listeners
         await self._notify(listeners, lambda listener: listener.on_run_end(self.ctx, error))
 
     async def _notify(
         self, listeners: Sequence[RunListener], call: Callable[[RunListener], Awaitable[None]]
     ) -> None:
-        """Recorder first (its errors stop the run), then listeners (errors logged)."""
         if self.recorder is not None:
             await call(self.recorder)
         for listener in listeners:
@@ -109,10 +94,8 @@ class _StepRunner:
                 logger.exception("Workflow listener %s failed", type(listener).__name__)
 
     async def _walk(self) -> None:
-        """Run each step in turn, recording every one that will not run."""
         for index, step in enumerate(self.steps):
             if step.name in self.recorded:
-                # No listener call: closing the row again would re-date it.
                 self.outcomes[step.name] = StepOutcome(
                     status="completed", output=self.recorded[step.name]
                 )
@@ -133,9 +116,7 @@ class _StepRunner:
             self.raised = None
 
     async def _attempt(self, step: Step, *, waiting: bool = False) -> StepOutcome:
-        """One step: skip it, run it, or (`waiting`) set it waiting. Records the outcome."""
         ctx = self.ctx
-        # Completion, not a truthy value: a step that produced None still ran.
         missing = [
             name
             for name in step.requires
@@ -159,14 +140,12 @@ class _StepRunner:
             self.outcomes[step.name] = recorded.outcome
             return recorded.outcome
         if waiting:
-            # Only the recorder hears it: for the listeners the step has not ended.
             return await self._settle(
                 step, StepOutcome(status="waiting", detail=step.waiting_for()), listeners=False
             )
 
         opened: list[str] = []
         try:
-            # A step's model calls must come from a turn.
             with watching_turns() as opened, requires_turn(step.channel(ctx)):
                 outcome = await step.run(ctx)
         except Exception as exc:
@@ -178,14 +157,12 @@ class _StepRunner:
         return await self._settle(step, outcome)
 
     async def _decided(self, step: Step) -> StepOutcome:
-        """A waiting step: set it waiting, wait for the decision, then record it."""
         pending = await self.perform(f"step:{step.name}", lambda: self._attempt(step, waiting=True))
         if pending.status != "waiting":
             return pending
         assert self.wait is not None
         seconds = step.wait_seconds()
         while (decision := await self.wait(f"approval:{step.name}", seconds)) is None:
-            # Out of time, unless a decision was taken meanwhile and is on its way.
             if await self.perform(f"expire:{step.name}", lambda: self._expire(step)):
                 break
             seconds = DECISION_IN_FLIGHT_SECONDS
@@ -194,18 +171,15 @@ class _StepRunner:
         )
 
     async def _expire(self, step: Step) -> bool:
-        """End `step`'s wait. False when a decision was taken first: it is on its way."""
         expire = getattr(self.recorder, "expire", None)
         return True if expire is None else await expire(step)
 
     def _listeners_for(self, step: Step) -> list[RunListener]:
-        """Run-wide listeners fire for every step; a step's own fire for it alone."""
         return [*self.listeners, *step.listeners]
 
     async def _settle(
         self, step: Step, outcome: StepOutcome, *, listeners: bool = True
     ) -> StepOutcome:
-        """Put the outcome on the run's state and tell the recorder and listeners."""
         self.outcomes[step.name] = outcome
         await self._notify(
             self._listeners_for(step) if listeners else [],
@@ -214,7 +188,6 @@ class _StepRunner:
         return outcome
 
     async def _abandon(self, index: int, reason: str) -> None:
-        """Record every step after `index` as skipped, so none is merely absent."""
         for step in self.steps[index + 1 :]:
             if step.name not in self.recorded:
                 await self._settle(step, StepOutcome(status="skipped", detail=reason))

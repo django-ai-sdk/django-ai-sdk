@@ -1,9 +1,3 @@
-"""A turn around model calls of your own, outside a Haystack Agent run.
-
-It opens, joins or skips a turn as `run_with_oversight` does, and inside it the SDK's
-generators count as overseen.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -29,9 +23,7 @@ if TYPE_CHECKING:
 
 
 class OpenTurn:
-    """The turn that `turn()` yields.
-
-    Without a turn of its own (no policy, oversight off, or joined), `guard` is None and
+    """Without a turn of its own (no policy, oversight off, or joined), `guard` is None and
     `gate()`/`finish()` return their input; otherwise report findings via `guard`.
     """
 
@@ -43,15 +35,12 @@ class OpenTurn:
         input: str | None,
     ) -> None:
         self.guard = guard
-        # The history and question to send the model, masked by the gate.
         self.messages: list[ChatMessage] = list(messages or [])
         self.input = input if input is not None else last_user_text(self.messages)
         self._gated = False
 
     async def gate(self) -> str:
-        """Judge the history and the question before the model reads them.
-
-        Returns the question, masked if a rule said so. `messages` then holds the
+        """Returns the question, masked if a rule said so. `messages` then holds the
         history and question to send. Raises `Blocked`.
         """
         guard = self.guard
@@ -60,17 +49,14 @@ class OpenTurn:
         self._gated = True
         if guard is None:
             if (outer := current_guard()) is not None and self.input:
-                # Joined: no gate of its own, so the outer turn judges it like a tool result.
                 masked = await outer.mask_result(JOINED, self.input)
                 if masked != self.input and (asked := last_user_message(self.messages)):
                     asked.content = masked
                 self.input = masked
             return self.input
         if self.messages:
-            # Copies, but the question stays shared so masking reaches the caller.
             question = last_user_message(self.messages)
             self.messages = [m if m is question else m.model_copy(deep=True) for m in self.messages]
-            # Every other message, a reply after the question too, is history.
             history = [m for m in self.messages if m is not question]
             checked = await guard.gate_history(history, question)
             if checked.blocked:
@@ -86,8 +72,7 @@ class OpenTurn:
     async def finish(self, result: Any) -> Any:
         """The answer as the policy allows it; raises `Blocked`.
 
-        A Pydantic model comes back as the same model, rebuilt from its masked
-        JSON. Anything else comes back as its masked text.
+        A Pydantic model comes back as the same model, rebuilt from its masked JSON.
         """
         guard = self.guard
         if guard is None:
@@ -117,12 +102,9 @@ async def turn(
 ) -> AsyncGenerator[OpenTurn]:
     """Open a turn of `agent` around your own model calls. It closes when the block ends.
 
-    Pass `messages` (history, then the question) or `input` (just the question).
-    `oversight` works as in `Agent.run`. Inside the block, tool hooks see the turn.
     An exception other than `Blocked` is recorded as the run's error.
     """
     if oversight is False:
-        # As in Agent.run: this block opts out, without turning off agents run inside it.
         with guarding(None), settled():
             yield OpenTurn(None, messages=messages, input=input)
         return
@@ -140,7 +122,6 @@ async def turn(
             yield current
         return
     async with closing_turn(guard):
-        # Not settled: a model call counts as overseen once this turn's gate has run.
         with guarding(guard):
             yield current
 

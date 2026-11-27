@@ -1,5 +1,3 @@
-"""AgentService writes to AgentSettings: only the fields it declares, whatever it is handed."""
-
 from uuid import uuid4
 
 import pytest

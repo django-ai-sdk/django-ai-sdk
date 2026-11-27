@@ -1,9 +1,3 @@
-"""The quality pack: was the answer good, and did retrieval find the right things?
-
-Judge lenses run in reflect, adding no latency, and are skipped when no judge
-alias is defined; the plain checks run at finish.
-"""
-
 from __future__ import annotations
 
 from django_ai_sdk.oversight.judges.base import Maybe
@@ -62,9 +56,7 @@ class TakenFrom(JudgeLens):
     guidance = "Name each source a fact in the answer comes from; none when it rests on none."
     subject = Subject.ANSWER
     stages = (Stage.REFLECT,)
-    # The labels are the turn's sources. A classifier rates each one.
     per_source = True
-    # Asked for every answer, since one without sources can be taken from none.
     judges = [Maybe("classifier")]  # noqa: RUF012
 
 
@@ -118,7 +110,6 @@ class QualityPack(Policy):
         ),
         Rule(
             "unsourced_answer",
-            # No confidence gate. An unsure verdict is worth a look too.
             when=L("taken_from").present & ~L("taken_from").is_true,
             then=Queue("quality"),
             description="Answers taken from none of the sources, or no answer, go to a person.",

@@ -36,17 +36,16 @@ class Command(BaseCommand):
         for n, integration in integrations.items():
             try:
                 await integration.refresh()
-            except Exception as e:  # noqa: BLE001 — one integration must not stop the rest
+            except Exception as e:
                 self.stdout.write(self.style.ERROR(f"✗ Error refreshing {n!r}: {e}"))
                 logger.exception("Error refreshing integration %r", n)
                 failed += 1
                 continue
 
-            # Best-effort: a dead server must not fail the run like a credential error.
             try:
                 status = await integration.get_status()
                 self.stdout.write(self.style.SUCCESS(f"✓ Refreshed {n!r} (status: {status})"))
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 self.stdout.write(
                     self.style.WARNING(f"✓ Refreshed {n!r}, but could not warm it: {e}")
                 )

@@ -9,15 +9,11 @@ if TYPE_CHECKING:
 
 
 class RunListener:
-    """Receives a run's progress; callbacks default to no-ops.
-
-    Step listeners get only that step's callbacks; run start/end go to workflow listeners.
-    """
+    """Step listeners get only that step's callbacks; run start/end go to workflow listeners."""
 
     description: str = ""
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
-        """`config` comes from the ListenerDefinition. Code may pass nothing."""
         self.config = config or {}
 
     @classmethod
@@ -30,17 +26,16 @@ class RunListener:
         """Before the first step is considered."""
 
     async def on_step_start(self, ctx: WorkflowContext, step: Step) -> None:
-        """A step is about to run. Not called for a step that is skipped."""
+        """Not called for a step that is skipped."""
 
     async def on_step_end(self, ctx: WorkflowContext, step: Step, outcome: StepOutcome) -> None:
         """A step completed, failed or was skipped."""
 
     async def on_run_end(self, ctx: WorkflowContext, error: BaseException | None) -> None:
-        """The run is over. `error` is what ended it, or None."""
+        """`error` is what ended it, or None."""
 
 
 def get_listener_registry() -> dict[str, type[RunListener]]:
-    """Listeners a definition may name, by key, from `AI_SDK_WORKFLOWS['LISTENERS']`."""
     return registered("LISTENERS", RunListener)
 
 

@@ -36,11 +36,7 @@ logger.add(
 )
 
 
-# Create module loggers
 def get_logger(name: str) -> Logger:
-    """
-    Get a logger instance for a specific module.
-    """
     return logger.bind(name=name)
 
 

@@ -1,5 +1,3 @@
-"""What the contrib layers add for projects that used to override them."""
-
 from __future__ import annotations
 
 import json

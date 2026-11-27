@@ -1,5 +1,4 @@
-"""Workers racing for one run, each on its own connection. SQLite serialises every
-writer, so these need PostgreSQL: set `DATABASE_URL` (see tests/settings.py)."""
+"""SQLite serialises every writer, so these need PostgreSQL: set `DATABASE_URL`."""
 
 from __future__ import annotations
 
@@ -56,8 +55,6 @@ class TestRacesOnPostgres:
 
         user = UserFactory.create()
         run_id = opened()
-        # A registered workflow's run: resuming an ad-hoc run also takes MANAGE, and a
-        # run of a workflow that is gone or changed does not resume.
         payroll = two_steps().model_copy(update={"name": "payroll"})
         register_workflow(payroll)
         WorkflowRun.objects.filter(pk=run_id).update(

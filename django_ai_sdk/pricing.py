@@ -1,16 +1,3 @@
-"""Compute model call costs from AI_SDK_MODEL_PRICES.
-
-Prices are per million tokens, in any currency::
-
-    AI_SDK_MODEL_PRICES = {
-        "gpt-4.1-mini": {"input": 0.40, "output": 1.60},
-        "claude-": {"input": 3.00, "output": 15.00},   # every claude-* model
-    }
-
-A key matches a model exactly or as the longest prefix. Without a match the
-cost is None, never a guess.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -19,13 +6,11 @@ from django_ai_sdk.utils import resolve_setting
 
 
 def model_price(model: str | None) -> dict[str, float] | None:
-    """Return the price for `model` by exact key, else by longest prefix."""
     if not model:
         return None
     prices: dict[str, dict[str, float]] = resolve_setting("AI_SDK_MODEL_PRICES", {}) or {}
     if model in prices:
         return prices[model]
-    # Strip provider prefixes, so "openai:gpt-4.1" matches "gpt-4.1".
     bare = model.split(":", 1)[-1].split("/", 1)[-1]
     if bare in prices:
         return prices[bare]
@@ -36,7 +21,6 @@ def model_price(model: str | None) -> dict[str, float] | None:
 def cost_for(
     model: str | None, prompt_tokens: int | None, completion_tokens: int | None
 ) -> float | None:
-    """Return the cost of one call, or None without a price or usage."""
     price = model_price(model)
     if price is None or (prompt_tokens is None and completion_tokens is None):
         return None
@@ -47,10 +31,6 @@ def cost_for(
 
 
 def token_counts(usage: Any) -> tuple[int | None, int | None]:
-    """Read (prompt, completion) tokens from a usage dict, for any vendor.
-
-    The Responses API names them input/output tokens, Chat Completions prompt/completion.
-    """
     if not isinstance(usage, dict):
         return None, None
     # A key set to None (some vendors send both names) falls back to the other.

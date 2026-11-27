@@ -1,5 +1,3 @@
-"""auto and live: what the person sees while an answer may still be withheld."""
-
 from __future__ import annotations
 
 import contextlib
@@ -62,8 +60,6 @@ def held_policy(policy: str, withhold: bool) -> None:
 
 @pytest.mark.django_db(transaction=True)
 class TestAutoHoldsTheAnswer:
-    """What an answer carries besides its text waits for finish too."""
-
     async def test_a_withheld_answer_shows_and_stores_no_tool_output(self):
         held_policy("test-held-no", withhold=True)
         tool, call = lookup_tool()
@@ -74,7 +70,6 @@ class TestAutoHoldsTheAnswer:
         assert text_of(parts) == "Withheld."
         assert "NL91ABNA0417164300" not in json.dumps(parts)
         assert "NL91ABNA0417164300" not in json.dumps(storage.stored[0].tool_calls)
-        # The card that showed the tool running is closed, saying why it stays empty.
         outputs = [p["output"] for p in parts if p.get("type") == "tool-output-available"]
         assert outputs[-1] == {"result": str(WITHHELD_OUTPUT)}
 
@@ -91,10 +86,8 @@ class TestAutoHoldsTheAnswer:
             if p.get("type") == "tool-output-available" and p["output"] == {"result": str(HELD_OUTPUT)}
         )
         before, after = parts[: shown + 1], parts[shown + 1 :]
-        # While it works: the tool's name and progress, none of what it was given or found.
         assert [p["toolName"] for p in before if p.get("type") == "tool-input-start"] == ["lookup"]
         assert "NL91ABNA0417164300" not in json.dumps(before) and '"Jan"' not in json.dumps(before)
-        # Once it passed: the real input and output.
         assert any(
             p.get("type") == "tool-input-available" and p["input"] == {"name": "Jan"} for p in after
         )
@@ -118,7 +111,6 @@ class TestAutoHoldsTheAnswer:
             parts = await chat(
                 make_agent(["Write to jan@example.com."], storage, policy="test-held-mask"), "who?"
             )
-        # Held reasoning is never shown, so never judged: it is not stored either.
         assert not [p for p in parts if p["type"] == "reasoning-delta"]
         assert "jan@example.com" not in json.dumps(parts)
         assert storage.stored[0].content == "Write to [EMAIL]."
@@ -160,12 +152,11 @@ class TestAutoHoldsTheAnswer:
                     pass
 
             task = asyncio.create_task(consume())
-            await asyncio.sleep(0.25)  # the model is done, finish is still running
+            await asyncio.sleep(0.25)
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         assert [(m.content, m.finish_reason) for m in storage.stored] == [("", "cancelled")]
-        # The gate's notice reached the client before it left: a reload shows it again.
         assert [n["stage"] for n in storage.stored[0].metadata["oversight"]] == ["gate"]
 
 
@@ -194,12 +185,6 @@ class TestWithheldArtifactRows:
 
 @pytest.mark.django_db(transaction=True)
 class TestModelErrorWhileHeld:
-    """A model that fails mid-stream under auto: what it wrote was held, so none of it leaks.
-
-    The oversight record keeps the partial answer (masked as `CAPTURE` says): it is what
-    the model said, and the turn's error says it never finished.
-    """
-
     async def test_nothing_the_model_wrote_reaches_the_client_or_the_store(self):
         from haystack.dataclasses import StreamingChunk
 
@@ -208,7 +193,7 @@ class TestModelErrorWhileHeld:
             raise RuntimeError("model down")
 
         storage = Storage()
-        agent = make_agent(["unused"], storage)  # test-guard enforces finish rules: auto holds
+        agent = make_agent(["unused"], storage)
         with patch.object(MockChatGenerator, "_make_chunks", side_effect=half_then_fail):
             parts = await chat(agent, "plan?")
         assert "secret plan" not in json.dumps(parts)
@@ -220,8 +205,6 @@ class TestModelErrorWhileHeld:
 @pytest.mark.usefixtures("no_reflect_queue")
 @pytest.mark.django_db(transaction=True)
 class TestReceiptsOfAWithheldAnswer:
-    """A withheld answer keeps what a tool declared as its receipt, such as a run id."""
-
     @staticmethod
     def started(receipt: bool) -> tuple[Any, Any]:
         from django_ai_sdk import with_receipt

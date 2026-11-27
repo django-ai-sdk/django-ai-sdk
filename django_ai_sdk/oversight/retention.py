@@ -1,5 +1,3 @@
-"""Delete expired oversight data, one transaction per batch so a backlog never holds a long lock."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -26,7 +24,6 @@ def prune(*, now: datetime | None = None, batch_size: int = BATCH_SIZE) -> dict[
         "content": _in_batches(
             TurnContent.objects.filter(expires_at__lte=now), batch_size, _delete_content
         ),
-        # Retention wins over a waiting review; the record says how many went unreviewed.
         "open_reviews": ReviewItem.objects.filter(
             turn__expires_at__lte=now, status=ReviewItem.Status.OPEN
         ).count(),
@@ -49,7 +46,6 @@ def _in_batches(qs: QuerySet, size: int, delete: Callable[[list[Any]], int]) -> 
 def _delete_content(ids: list[Any]) -> int:
     from django_ai_sdk.oversight.models import ReviewItem, TurnContent
 
-    # The turns stay. Their content link is set to NULL, and reviewers' notes go with it.
     ReviewItem.objects.filter(turn__content__in=ids).exclude(note="").update(note="")
     return _delete_rows(TurnContent, ids)
 
@@ -60,13 +56,11 @@ def _delete_turns(ids: list[Any]) -> int:
     contents = list(
         Turn.objects.filter(pk__in=ids, content__isnull=False).values_list("content_id", flat=True)
     )
-    # Answers, matches and review items cascade with their turn.
     deleted = _delete_rows(Turn, ids)
     TurnContent.objects.filter(pk__in=contents).delete()
     return deleted
 
 
 def _delete_rows(model: Any, ids: list[Any]) -> int:
-    """Returns how many of `model` went, not counting cascades."""
     _, by_model = model.objects.filter(pk__in=ids).delete()
     return by_model.get(model._meta.label, 0)

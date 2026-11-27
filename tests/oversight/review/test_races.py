@@ -1,8 +1,4 @@
-"""Reviewers racing each other, each on its own connection.
-
-SQLite serialises every writer, so these need PostgreSQL: set `DATABASE_URL`
-(see tests/settings.py).
-"""
+"""SQLite serialises every writer, so these need PostgreSQL: set `DATABASE_URL`."""
 
 from __future__ import annotations
 

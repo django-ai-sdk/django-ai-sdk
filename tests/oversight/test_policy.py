@@ -1,5 +1,3 @@
-"""Conditions, rules and policies: one engine for code and settings, with sources."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -56,7 +54,6 @@ def ans(value, confidence=1.0, error=""):
 @register_policy
 class ParentPolicy(Policy):
     name = "test-parent"
-    # A Flag, not Entities: it never says where, so it cannot be masked.
     lenses = [JudgeLens(name="mentions_x", question="X?", judges=[PatternJudge(keywords={"x": ["x"]})])]
     rules = [Rule("block_x", when=L("mentions_x").is_true, then=Block("no x"))]
 
@@ -106,8 +103,6 @@ def down(lens, context):
 
 
 class Said(Judge):
-    """A judge that answers what `fn(lens, context)` returns."""
-
     def __init__(self, fn, name: str = "said") -> None:
         self.fn = fn
         self.name = name
@@ -138,7 +133,7 @@ class TestConditions:
             return Answer(value=value, model=model, trail=list(before))
 
         lean_no = Answer(value=False, confidence=0.3, model="a")
-        missed = Answer(value=False, confidence=0.5)  # a pattern miss names no model
+        missed = Answer(value=False, confidence=0.5)
         down = Answer(error="timeout", model="a")
         disputed = L("x").disputed
         assert disputed.matches({"x": said(True, lean_no)})
@@ -147,7 +142,6 @@ class TestConditions:
         assert not disputed.matches({"x": said(True, down)})
         assert not disputed.matches({"x": said(True)})
         assert not disputed.matches({})
-        # A person looks when in doubt; a stop needs the judges to agree.
         doubt = {"x": said(False, Answer(value=True, confidence=0.2, model="a"))}
         assert (L("x").is_true | disputed).matches(doubt)
         assert not (L("x").is_true & ~disputed).matches({"x": said(True, lean_no)})
@@ -198,7 +192,6 @@ class TestPolicies:
         resolved = build_policy("test-child")
         assert set(resolved.lenses) == {"mentions_x", "topic"}
         assert set(resolved.rules) == {"block_x", "note_b"}
-        # Each value names the policy that declared it.
         assert resolved.sources["rule:block_x"] == "test-parent"
         assert resolved.sources["lens:topic"] == "test-child"
         assert build_policy("default").sources["lens:injection_question"] == "security"
@@ -303,17 +296,14 @@ class TestRuleEvaluation:
         either = L("pii_question").is_true | (L("groundedness") < 0.5)
         [match] = at_gate(either, Block())
         assert [a.kind for a in match.acted] == ["block"]
-        # Not decided yet: an `all`, or a `missing` on the later lens. A mask waits anyway.
         assert not at_gate(L("pii_question").is_true & (L("groundedness") < 0.5), Block())
         assert not at_gate(L("pii_question").is_false | L("groundedness").missing, Block())
         assert not at_gate(either, Mask())
         assert at_gate(either, RestrictTools(["search"]))
-        # Restricting tools early would lose the mask at finish; blocking ends the turn.
         assert not at_gate(either, RestrictTools(["search"]), Mask())
         assert at_gate(either, Block(), Mask())
 
     def test_a_rule_cannot_read_a_tool_call_lens_next_to_a_later_lens(self):
-        # The call's answer is gone by finish: the rule could never see both.
         later = PIILens(name="later", subject=Subject.ANSWER)
         call = SecretsLens(name="call", subject=Subject.TOOL_CALL)
         asked = PIILens(name="asked")
@@ -324,7 +314,6 @@ class TestRuleEvaluation:
         validate_rule(Rule("r", when=L("call").is_true & L("asked").is_true, then=Block()), lenses)
 
     def test_a_tool_call_rule_decides_at_the_call(self):
-        # A gate lens that reflect asks again has no answer yet: the call is not let through.
         call = SecretsLens(name="call", subject=Subject.TOOL_CALL)
         asked = PIILens(name="asked", stages=[Stage.GATE, Stage.REFLECT])
         rule = Rule(
@@ -360,7 +349,6 @@ class TestRuleEvaluation:
                 resolved, broken, Stage.GATE, done=set(), errored={"mentions_x"}, fail_closed=True
             )
 
-        # In report mode, a slow answerer would only fill the record with false matches.
         assert not closed()
         resolved.rules["block_x"].mode = Mode.ENFORCE
         assert not match_rules(resolved, broken, Stage.GATE, done=set())
@@ -431,7 +419,6 @@ class TestPolicyFields:
         with patch.dict(registry._registry, {"test-typo": Typo, "test-hold": Hold}):
             with pytest.raises(ImproperlyConfigured, match="stream_mode 'held'"):
                 build_policy("test-typo")
-            # "hold" is gone: a client that needs the whole answer buffers it itself.
             with pytest.raises(ImproperlyConfigured, match="stream_mode 'hold'"):
                 build_policy("test-hold")
 
@@ -442,8 +429,6 @@ class TestPolicyFields:
 
 
 class TestDeclarationsThatCannotWork:
-    """What could never do what it says is refused where it is declared, not on a turn."""
-
     def test_a_mask_over_a_lens_that_never_says_where_is_refused(self):
         class FlagMask(Policy):
             name = "test-flag-mask"
@@ -529,10 +514,8 @@ class TestAnswerChains:
         judge = Said(down, name="judge")
         lens = JudgeLens(name="f", judges=[unsure, judge])
         [answered] = await answer_lenses([lens], TurnContext(input="x"), Stage.GATE)
-        # Kept for the record, failed for FAIL_MODE.
         assert (answered.answer.value, answered.answer.answerer) == (False, "quick")
         assert answered.failed and answered.errored
-        # Ending on an unsure answer is not failing: the last one to answer decides.
         lens = JudgeLens(name="g", judges=[judge, unsure])
         [answered] = await answer_lenses([lens], TurnContext(input="x"), Stage.GATE)
         assert answered.answer.answerer == "quick"
@@ -573,14 +556,12 @@ class TestAnswerChains:
             answer_lenses([lens], TurnContext(input="x"), Stage.GATE, deadline_ms=deadline_ms)
         )
         if deadline_ms is None:
-            # The stage itself is cancelled: the person went away mid-stream.
             await asyncio.sleep(0.05)
             stage.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await stage
         else:
             await stage
-        # Stopped by the time the stage is done, not some time later.
         assert stopped.is_set()
 
 

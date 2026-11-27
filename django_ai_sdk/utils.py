@@ -14,12 +14,10 @@ if TYPE_CHECKING:
 
 
 def resolve_setting(setting_name: str, default: Any = None) -> Any:
-    """Read a Django setting, falling back to `default` when it is unset."""
     return getattr(settings, setting_name, default)
 
 
 def serialize(value: Any) -> Any:
-    """JSON-safe form of a value, recursing into lists and dicts of pydantic models."""
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, list | tuple):
@@ -31,12 +29,10 @@ def serialize(value: Any) -> Any:
 
 
 def isoformat_or_none(value: Any) -> str | None:
-    """ISO 8601 text of a date or datetime, or None when there is none."""
     return value.isoformat() if value else None
 
 
 def as_uuid(value: Any) -> uuid.UUID | None:
-    """`value` as a UUID, or None when it is empty or not one."""
     if not value:
         return None
     try:
@@ -47,7 +43,6 @@ def as_uuid(value: Any) -> uuid.UUID | None:
 
 @contextlib.contextmanager
 def scoped[T](var: contextvars.ContextVar[T], value: T) -> Generator[None]:
-    """Set `var` to `value` for the block, then put the old value back."""
     token = var.set(value)
     try:
         yield
@@ -56,7 +51,6 @@ def scoped[T](var: contextvars.ContextVar[T], value: T) -> Generator[None]:
 
 
 def map_strings(value: Any, change: Callable[[str], str], *, keys: bool = False) -> Any:
-    """Apply `change` to every string in a JSON value, and to its keys when `keys` is set."""
     if isinstance(value, str):
         return change(value)
     if isinstance(value, dict):
@@ -70,10 +64,6 @@ def map_strings(value: Any, change: Callable[[str], str], *, keys: bool = False)
 
 
 async def aget_active_user(identifier: str) -> AbstractBaseUser | None:
-    """Return the active user whose USERNAME_FIELD is `identifier`, or None.
-
-    Also returns None when several users match a non-unique USERNAME_FIELD.
-    """
     from django.contrib.auth import get_user_model
 
     if not identifier:

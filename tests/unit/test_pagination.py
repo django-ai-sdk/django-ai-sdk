@@ -1,24 +1,7 @@
-"""
-Pagination tests for service-layer limit/offset support.
-
-Every paginated list accepts `limit=None` to return everything (offset still
-applies). Covers the distinct pagination paths:
-  - MemoryStore (in-memory dict)
-  - ThreadService.threads (multi-adapter merge then slice)
-  - MemoryService.list_memories (DB queryset slice)
-  - AgentService.list_agents (list slice on registry + DB)
-  - AgentService.list_runtime_agents (DB queryset iterated then sliced)
-"""
-
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-
-# ============================================================================
-# MemoryStore — in-memory pagination
-# ============================================================================
 
 
 class TestMemoryStorePagination:
@@ -89,11 +72,6 @@ class TestMemoryStorePagination:
         assert len(MemoryStore.list_threads(limit=None)) == 10
 
 
-# ============================================================================
-# ThreadService.threads — multi-adapter merge then slice
-# ============================================================================
-
-
 def _make_thread_info(thread_id: str, age_seconds: int = 0):
     from django_ai_sdk.storage.schemas import ThreadInfo
 
@@ -114,11 +92,10 @@ def _make_thread_info(thread_id: str, age_seconds: int = 0):
 @pytest.mark.asyncio
 class TestThreadServicePagination:
     async def _threads_via_mock_adapter(self, threads, limit=100, offset=0):
-        """Run ThreadService.threads with a single mocked adapter returning `threads`."""
         from django_ai_sdk.storage.services import ThreadService
 
         mock_adapter = MagicMock()
-        mock_adapter.__name__ = "MockAdapter"  # logger calls adapter_class.__name__
+        mock_adapter.__name__ = "MockAdapter"
         mock_adapter.list_threads = AsyncMock(return_value=threads)
 
         with (
@@ -146,7 +123,6 @@ class TestThreadServicePagination:
 
     async def test_offset_skips_items(self):
         threads = [_make_thread_info(f"t{i}", age_seconds=i) for i in range(10)]
-        # Sorted newest first: t0 (age=0) comes first
         result_page1 = await self._threads_via_mock_adapter(threads, limit=5, offset=0)
         result_page2 = await self._threads_via_mock_adapter(threads, limit=5, offset=5)
         ids_page1 = [t.id for t in result_page1]
@@ -155,7 +131,6 @@ class TestThreadServicePagination:
         assert len(ids_page1) + len(ids_page2) == 10
 
     async def test_pagination_applied_after_sort(self):
-        # Two adapters: merge + sort must happen before slice
         threads_a = [_make_thread_info("newest", age_seconds=0)]
         threads_b = [_make_thread_info("oldest", age_seconds=100)]
 
@@ -207,17 +182,11 @@ class TestThreadServicePagination:
         assert [t.id for t in result] == [t.id for t in all_results[50:]]
 
 
-# ============================================================================
-# MemoryService.list_memories — DB queryset slice
-# ============================================================================
-
-
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestMemoryServiceListMemoriesPagination:
     @pytest.fixture(autouse=True)
     def _anonymous_can_read_memories(self):
-        # These tests run as user=None; permissions are not what they test.
         from tests.mocks.permissions import memory_permissions
 
         with memory_permissions("django_ai_sdk.permissions.AllowAll"):
@@ -230,7 +199,6 @@ class TestMemoryServiceListMemoriesPagination:
 
         memories = []
         for i in range(n):
-            # Unique name per test run to avoid slug collisions across leaked rows
             m = await Memory.objects.acreate(name=f"PagTest {uuid.uuid4().hex[:8]}", is_public=True)
             memories.append(m)
         return memories
@@ -239,7 +207,6 @@ class TestMemoryServiceListMemoriesPagination:
         from django_ai_sdk.memories.services import MemoryService
 
         await self._create_memories(5)
-        # Use limit=2 — should always return exactly 2 regardless of other DB rows
         result = await MemoryService.list_memories(user=None, limit=2)
         assert len(result) == 2
 
@@ -247,13 +214,11 @@ class TestMemoryServiceListMemoriesPagination:
         from django_ai_sdk.memories.services import MemoryService
 
         await self._create_memories(5)
-        # Use a limit large enough to get all rows in the DB
         all_results = await MemoryService.list_memories(user=None, limit=10_000)
         total = len(all_results)
 
         page2 = await MemoryService.list_memories(user=None, limit=10_000, offset=2)
         assert len(page2) == total - 2
-        # First item after skip must match position [2] in the full list
         assert page2[0].id == all_results[2].id
 
     async def test_limit_none_returns_all(self):
@@ -272,18 +237,12 @@ class TestMemoryServiceListMemoriesPagination:
         assert result == []
 
 
-# ============================================================================
-# AgentService.list_agents — list slice (registry + DB)
-# ============================================================================
-
-# Sentinel: omit the `limit` kwarg entirely to exercise the service default.
 _UNSET = object()
 
 
 @pytest.mark.asyncio
 class TestAgentServiceListAgentsPagination:
     def _make_registry_with(self, n: int):
-        """Return a mock registry with n visible agents."""
         mock_registry = MagicMock()
         agents = {}
         for i in range(n):
@@ -359,7 +318,6 @@ class TestAgentServiceListAgentsPagination:
 @pytest.mark.asyncio
 class TestAgentServiceListRuntimeAgentsPagination:
     def _make_configs(self, n: int):
-        """Return n mock AgentSettings configs."""
         configs = []
         for i in range(n):
             c = MagicMock()
@@ -385,7 +343,6 @@ class TestAgentServiceListRuntimeAgentsPagination:
 
         with (
             patch.object(AgentSettings, "objects", objects),
-            # get_runtime_agent_class(agent_ref) -> agent class -> config -> agent
             patch(
                 "django_ai_sdk.agents.config.get_runtime_agent_class",
                 lambda agent_ref: lambda config: MagicMock(),
@@ -414,8 +371,6 @@ class TestAgentServiceListRuntimeAgentsPagination:
 
 
 def aiter(iterable):
-    """Tiny helper: sync iterable → async iterator for mocking `async for`."""
-
     class _AsyncIter:
         def __init__(self, it):
             self._it = iter(it)

@@ -1,5 +1,3 @@
-"""Agents: code-declared and runtime (DB-configured), their tools, users and groups."""
-
 from __future__ import annotations
 
 import contextlib
@@ -106,7 +104,6 @@ async def create_runtime_agent(request: HttpRequest, payload: AgentSettingsCreat
         payload.model_dump(exclude={"users", "groups"}),  # ty: ignore[invalid-argument-type]
         user=request.user,
     )
-    # Sharing is best effort: the agent exists either way, and the owner can retry.
     for entry in payload.users:
         with contextlib.suppress(PermissionDenied, ValueError):
             await AgentService.add_agent_user(
@@ -228,7 +225,6 @@ async def get_agent_tools(request: HttpRequest, agent_id: str) -> Any:
         obj=agent.config if agent.is_runtime else None,
         agent=agent,
     )
-    # A broken tool or integration must not hide the rest: log and show what loaded.
     integrations: list[IntegrationStatusOut] = []
     try:
         integrations = [
@@ -243,7 +239,6 @@ async def get_agent_tools(request: HttpRequest, agent_id: str) -> Any:
         ]
     except Exception:
         logger.exception("Failed to load integration status for agent %s", agent_id)
-    # get_tools() includes the integrations' tools; they are listed under integrations.
     integration_tools = {name for s in integrations for name in s.tool_names}
     tools: list[Tool] = []
     try:
@@ -275,7 +270,6 @@ async def reindex_agent(
     request: HttpRequest, agent_id: str, memory_id: str | None = None, force_rebuild: bool = False
 ) -> Any:
     agent = await AgentService.get(agent_id)
-    # Rebuilding an index is administering the agent, not using it.
     await AgentService.has_perms(
         request.user,
         Operation.UPDATE_AGENT,

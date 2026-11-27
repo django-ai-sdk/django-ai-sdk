@@ -14,20 +14,10 @@ logger = get_logger(__name__)
 
 
 class SuggestionGenerator(Protocol):
-    """Generate follow-up questions based on a response."""
-
     def __init__(self, agent: Agent) -> None: ...
 
     async def generate(self, messages: list[ChatMessage], response: str) -> list[str]:
-        """Generate 2-3 follow-up suggestions.
-
-        Args:
-            messages: Full conversation history
-            response: The agent's response to generate suggestions from
-
-        Returns:
-            List of suggested follow-up questions (max 3)
-        """
+        """Generate 2-3 follow-up suggestions."""
         ...
 
 
@@ -38,8 +28,6 @@ class FollowUpSuggestions(BaseModel):
 
 
 def format_conversation(messages: list[ChatMessage], response: str) -> str:
-    """Format conversation history into a string for the prompt."""
-    # One label per side: the prompt speaks of the user and the agent.
     label = {"user": "USER", "assistant": "AGENT"}
     lines = [
         f"{label[msg.role]}: {msg.content}" for msg in messages if msg.role in label and msg.content
@@ -49,12 +37,6 @@ def format_conversation(messages: list[ChatMessage], response: str) -> str:
 
 
 class DefaultSuggestionGenerator:
-    """Default implementation using LLM to generate contextual suggestions.
-
-    Customizable via prompt parameter. Suggestions are disabled (returns empty list) if:
-    - Agent.get_suggestion_generator() is not overridden (returns None by default)
-    """
-
     DEFAULT_PROMPT = prompt("""\
         You suggest what the user could say next in a conversation with an agent.
         Task: Write 2-3 short messages the USER might naturally send next, based on the
@@ -79,12 +61,8 @@ class DefaultSuggestionGenerator:
         self.prompt = prompt or self.DEFAULT_PROMPT
 
     async def generate(self, messages: list[ChatMessage], response: str) -> list[str]:
-        """Generate suggestions using LLM via the agent.
-
-        Returns empty list if:
-        - response is empty
-        - LLM call fails for any reason
-        """
+        """Returns empty list if:
+        - LLM call fails for any reason"""
         if not response:
             return []
 
@@ -114,9 +92,6 @@ class DefaultSuggestionGenerator:
 
             return result.follow_ups[:3] if isinstance(result, FollowUpSuggestions) else []
         except Exception as e:
-            # Don't f-string `e` in: its text can contain braces (e.g. malformed
-            # JSON from the model), which loguru's internal str.format() then
-            # chokes on, turning this already-handled failure into a crash.
             logger.opt(exception=e).error("Error generating suggestions: {}", e)
 
         return []

@@ -1,9 +1,3 @@
-"""WorkflowService CRUD, start and resume, as its own author sees them.
-
-Every door is gated on a principal, so these carry a real user throughout. Who is
-refused which door is `test_workflow_permissions.py`.
-"""
-
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -40,7 +34,6 @@ class TestWorkflowServiceCRUD:
         record = await WorkflowService.create("My Workflow", definition, user=author)
 
         assert record.name == "My Workflow"
-        # The slug names the stored definition, whatever name it was sent with.
         assert record.slug == "my-workflow"
         assert record.definition == {**definition.model_dump(), "name": "my-workflow"}
         assert definition_of(record).name == "my-workflow"
@@ -83,15 +76,13 @@ class TestWorkflowServiceCRUD:
         record = await WorkflowService.create("WF", make_definition(), user=author)
         other = await agrant(await UserFactory.acreate(), MANAGE_WORKFLOWS)
         renamed = await WorkflowService.update(str(record.id), user=other, name="Renamed")
-        assert renamed.created_by_id == author.pk  # a rename writes no steps
+        assert renamed.created_by_id == author.pk
         edited = await WorkflowService.update(
             str(record.id), user=other, workflow=make_definition(step_name="mine")
         )
         assert edited.created_by_id == other.pk
 
     async def test_whoever_switches_it_back_on_is_who_its_runs_act_as(self, author):
-        # Its triggers start again, so they must not act as an author who switched
-        # it off.
         from tests.factories.db import MANAGE_WORKFLOWS, UserFactory, agrant
 
         record = await WorkflowService.create("WF", make_definition(), user=author)
@@ -103,8 +94,6 @@ class TestWorkflowServiceCRUD:
         assert switched_on.created_by_id == other.pk
 
     async def test_two_workflows_with_one_name_get_two_slugs(self, author):
-        # The first slug lookup can find it free for both; the unique index then
-        # sends the second to the next one.
         from django_ai_sdk.workflows.models import Workflow
 
         first = await WorkflowService.create("Same", make_definition(), user=author)
@@ -156,7 +145,7 @@ class TestWorkflowServiceCRUD:
         for i in range(150):
             await WorkflowService.create(f"WF {i}", definition, user=author)
 
-        assert len(await WorkflowService.list_workflows(user=author)) == 100  # default cap
+        assert len(await WorkflowService.list_workflows(user=author)) == 100
         assert len(await WorkflowService.list_workflows(user=author, limit=None)) == baseline + 150
 
     async def test_list_runs_limit_none_returns_all(self, author):
@@ -279,7 +268,6 @@ class TestWorkflowServiceResume:
         enqueue.assert_called_once_with(str(run.id))
 
     async def test_a_resumed_run_waits_for_a_new_queue_entry(self, author):
-        """Its old DBOS workflow id is gone until the next attempt is queued."""
         from django_ai_sdk.workflows.models import WorkflowRun
 
         run = await self._run(author, "failed")
@@ -299,7 +287,6 @@ class TestWorkflowServiceResume:
         enqueue.assert_not_called()
 
     async def test_a_run_from_before_an_edit_does_not_resume(self, author):
-        # The edit may be the fix: an approval step added before a risky one.
         run = await self._run(author, "failed")
         await WorkflowService.update(
             str(run.workflow_id), user=author, workflow=make_definition(step_name="gated")
@@ -335,9 +322,6 @@ class TestWorkflowServiceResume:
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
 class TestWorkflowServiceInputsSchema:
-    """The JSON Schema a run is composed against, read from the same model the
-    worker validates with."""
-
     async def test_it_returns_the_declared_shape(self, author):
         definition = WorkflowDefinition(
             name="test-workflow",

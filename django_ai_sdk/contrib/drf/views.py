@@ -1,8 +1,3 @@
-"""DRF viewsets over the SDK services. Register them or include ``.urls``.
-
-DRF views are sync, so they call the services' sync wrappers.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -50,7 +45,6 @@ check_agent_perms = async_to_sync(AgentService.has_perms)
 
 
 def chat_messages(agent: Agent, validated: dict[str, Any]) -> list[Any]:
-    """Validated request messages in the agent's internal format."""
     return agent.protocol_handler.to_chat_messages(
         [Message.model_validate(m) for m in validated["messages"]]
     )
@@ -88,7 +82,6 @@ class ThreadViewSet(ApiViewSet):
 
     def retrieve(self, request: Request, thread_id: str) -> Response:
         data = thread_services.get_thread_history(thread_id, user=request.user)
-        # Each caller sees only their own feedback on a message.
         user_pk = str(request.user.pk) if request.user.is_authenticated else None
         for message in data.get("messages", []):
             feedbacks = message.pop("feedbacks", [])
@@ -316,13 +309,11 @@ class AgentViewSet(ApiViewSet):
     def tools(self, request: Request, agent_id: str) -> Response:
         agent = get_agent(agent_id)
         self._check(request, agent, Operation.VIEW_AGENT)
-        # A broken tool or integration must not hide the rest: log and show what loaded.
         integrations: list[Any] = []
         try:
             integrations = agent_services.get_integration_status(agent, user=request.user)
         except Exception:
             logger.exception("Failed to load integration status for agent %s", agent_id)
-        # get_tools() includes the integrations' tools; they are listed under integrations.
         integration_tools = {name for s in integrations for name in s.tool_names}
         tools: list[dict[str, str]] = []
         try:
@@ -354,7 +345,6 @@ class AgentViewSet(ApiViewSet):
         query = s.ReindexQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         agent = get_agent(agent_id)
-        # Rebuilding an index is administering the agent, not using it.
         self._check(request, agent, Operation.UPDATE_AGENT)
         result = async_to_sync(Agent.reindex)(
             agent,
@@ -397,7 +387,6 @@ class RuntimeAgentViewSet(ApiViewSet):
         config = agent_services.create_runtime_agent(
             cast("AgentCreateData", data), user=request.user
         )
-        # Sharing is best effort: the agent exists either way, and the owner can retry.
         for entry in users:
             with contextlib.suppress(PermissionDenied, ValueError):
                 agent_services.add_agent_user(
@@ -867,7 +856,6 @@ class WorkflowViewSet(ApiViewSet):
     def _run_detail(self, request: Request, run_id: str, workflow_id: str | None) -> Response:
         run = workflow_services.get_workflow_run(run_id, user=request.user, workflow_id=workflow_id)
         if run is None:
-            # Absent covers both "no such run" and "not yours", by design.
             raise NotFound("Run not found")
         return Response(s.WorkflowRunDetailSerializer(run).data)
 

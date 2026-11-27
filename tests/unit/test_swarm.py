@@ -60,8 +60,6 @@ def _tool_call_msg(tool_name: str, arguments: dict, call_id: str = "call_1") -> 
 
 
 def _completed_task(result: dict) -> asyncio.Task[Any]:
-    """Return an already-completed asyncio Task yielding ``result``."""
-
     async def _done() -> dict:
         return result
 
@@ -145,7 +143,6 @@ class TestToolAgentBuild:
         config = ToolAgentConfig(model=MOCK_MODEL, system_prompt="s", tools=[])
         pipeline = ToolAgent(config=config, generator=gen).pipeline()
         before = pipeline.get_component("agent").hooks.get("before_tool") or []
-        # Oversight adds its own when the agent runs.
         assert before == []
 
     def test_custom_hooks_are_merged_with_budget_hook(self):
@@ -250,8 +247,6 @@ class TestSubagentBuilders:
         assert "could not be completed" in subagent_response(None)
 
     def test_default_hooks_caps_tool_calls_when_configured(self):
-        """The exact hook assembly build_subagent relies on — extracted so
-        Agent.run(tools=True) can reuse it instead of a shadow set of limits."""
         from django_ai_sdk.agents.tool_agent import default_hooks
 
         class Capped(SubAgent):
@@ -334,7 +329,7 @@ class TestSubagentBuilders:
             model = MOCK_MODEL
             protocol = VercelProtocolHandler
             storage_adapter = MemoryStorageAdapter
-            agents = []  # filled after both classes exist
+            agents = []
 
             async def get_pipeline_adapter(self, thread_id=None, user=None):
                 pass
@@ -357,7 +352,6 @@ class TestSubagentBuilders:
             return_value=MockChatGenerator(responses=["ok"]),
         ):
             built = await build_subagent(CycleAgentA, thread_id="t1", user=None)
-        # The A -> B -> A back-edge must be skipped without infinite recursion.
         assert built is not None
 
 
@@ -498,9 +492,6 @@ class TestSubagentStreaming:
         from haystack import Pipeline
         from haystack.dataclasses import StreamingChunk, ToolCall, ToolCallDelta, ToolCallResult
 
-        # The delegation starts first, its subagent's tool completes first, and
-        # the delegation output returns last. Stored order must follow start
-        # order, not completion order.
         planner_start = StreamingChunk(
             content="",
             index=0,
@@ -564,8 +555,6 @@ class TestSubagentStreaming:
         assert tools[1]["arguments"] == {"query": "Leukeleu"}
         assert tools[1]["result"]["result"] == "two results"
 
-        # Live persistence records the tool_call ids so get_pipeline_result
-        # won't store the same tool activity a second time.
         assert "p1" in stream._persisted_tool_ids and "p1" in stream._persisted_tool_output_ids
         assert "s1" in stream._persisted_tool_ids and "s1" in stream._persisted_tool_output_ids
 
@@ -608,8 +597,6 @@ class TestSubagentStreaming:
         before = list(stream_writer.message.tool_calls)
         assert [t["name"] for t in before] == ["search_web"]
 
-        # The generator returns the same tool activity in its final message;
-        # the backstop must not double-store it.
         message = ChatMessage.from_dict(
             {
                 "role": "assistant",
@@ -645,8 +632,6 @@ class TestSubagentStreaming:
         from haystack import Pipeline
         from haystack.dataclasses import StreamingChunk, ToolCallDelta
 
-        # The start streams live but its output never does (e.g. a tool whose
-        # result is not streamed through the callback).
         tool_call = StreamingChunk(
             content="",
             index=0,
@@ -766,7 +751,6 @@ class TestSubagentStreaming:
                 }
             ],
         )
-        # The run hands the whole conversation back, history included.
         replayed = stream.replay_handoff(earlier)
         await stream.get_pipeline_result(_completed_task({"messages": replayed}), stream_writer)
         assert stream_writer.message.tool_calls == []
@@ -786,8 +770,6 @@ class TestSubagentStreaming:
         def sync_sink(chunk):
             received.append(chunk)
 
-        # Sync run() with a sync callback must not raise "The init callback
-        # cannot be a coroutine" (async-only filter would have failed here).
         result = wrapper.run(
             messages=[ChatMessage.from_user("hi")],
             task="Research Leukeleu",
@@ -801,8 +783,6 @@ class TestCoordinatorGetAgentTools:
     @pytest.mark.asyncio
     async def test_builds_component_tools_with_unique_names(self):
         coordinator = CoordinatorAgent()
-        # VIEW_AGENT is gated on an authenticated user (AgentDefaultPermission),
-        # so an anonymous caller gets every subagent filtered out.
         user = MagicMock(is_authenticated=True)
         with patch(
             "django_ai_sdk.agents.base.Agent.get_llm",
@@ -812,7 +792,6 @@ class TestCoordinatorGetAgentTools:
 
         names = [t.name for t in tools]
         assert len(names) == len(set(names))
-        # DeniedSubAgent filtered out; self-reference + dupes skipped.
         assert "denied_sub_agent" not in names
         assert "sub_agent" in names
         assert "coordinator_agent" not in names
@@ -841,10 +820,6 @@ class TestCoordinatorGetAgentTools:
 
     @pytest.mark.asyncio
     async def test_name_collision_is_resolved_by_agent_id_not_a_counter(self):
-        """Two different classes sharing a display name must not get the
-        old `_2`/`_3` counter suffix — agent_id guarantees no repeat collision,
-        a positional counter is just "the next free slot"."""
-
         class SubAgentTwin(SubAgent):
             pass
 
@@ -909,7 +884,6 @@ class TestSwarmEndToEnd:
         assert result["tool_call_counts"]["boat_expert"] == 1
         delegated = [m for m in result["messages"] if m.tool_call_results]
         assert delegated, "coordinator should have received the subagent output"
-        # The subagent's own report, as it wrote it.
         assert delegated[0].tool_call_results[0].result == "Aye! Keel lore."
 
     @pytest.mark.asyncio
@@ -996,7 +970,6 @@ class TestSwarmEndToEnd:
         )
         assert "could not be completed" in subagent_response(None)
 
-        # A run that ends on a bare tool call gathered nothing to hand back.
         tool_only = ChatMessage.from_assistant(
             tool_calls=[ToolCall(tool_name="noop", arguments={"x": 1}, id="c1")]
         )
@@ -1005,7 +978,6 @@ class TestSwarmEndToEnd:
 
 
 def _stream_with_handoffs(*handoff_tools: str) -> Stream:
-    """A Stream whose coordinator can delegate to the given subagent tools."""
     from haystack import Pipeline
     from haystack.tools.component_tool import ComponentTool
 
@@ -1062,11 +1034,6 @@ class TestHandoffAttribution:
         assert stream.get_attribution("get_weather") == {}
 
     def test_hallucinated_self_named_call_is_not_a_handoff(self):
-        """A subagent cannot delegate to itself (agent.py skips its own class,
-        build_subagent guards cycles), so a subagent hallucinating a tool call
-        named after the coordinator's delegation tool must never be labeled as
-        the agent handing off to itself — it stays a plain subagent tool call.
-        """
         stream = _stream_with_handoffs("research_planner")
 
         assert stream.get_attribution("research_planner", "Research Planner") == {
@@ -1107,7 +1074,6 @@ class TestHandoffAttribution:
                 tool_calls=[ToolCallDelta(index=0, tool_name="search_web", id="call_9")],
             )
         )
-        # Text-only chunks stay dropped.
         forward(StreamingChunk(content="raw subagent text"))
 
         assert len(received) == 1
@@ -1139,7 +1105,6 @@ class TestHandoffHistoryReplay:
 
         assert [m.role.value for m in replayed] == ["user", "assistant", "tool", "user"]
         assert replayed[1].tool_calls[0].tool_name == "research_planner"
-        # The report itself is back in context, not just the coordinator's summary.
         assert "Dutch agency" in replayed[2].tool_call_results[0].result
         assert replayed[2].tool_call_results[0].origin.id == "call_1"
 
@@ -1162,7 +1127,6 @@ class TestHandoffHistoryReplay:
         assert replayed[1].tool_call_results[0].result == "x" * 500
 
     def test_subagent_tool_calls_are_not_replayed(self):
-        """`agent` marks a subagent's own tool; only `handoff` replays."""
         stream = _stream_with_handoffs("research_planner")
         message = SDKChatMessage(
             role="assistant",
@@ -1184,7 +1148,6 @@ class TestHandoffHistoryReplay:
         assert not replayed[0].tool_calls
 
     def test_messages_without_tool_calls_are_unchanged(self):
-        """History stored before this change has no handoff key — no KeyError."""
         stream = _stream_with_handoffs("research_planner")
         history = [
             SDKChatMessage(role="user", content="hi"),
@@ -1208,11 +1171,9 @@ class TestHandoffHistoryReplay:
         replayed = stream.get_messages(history)
 
         assert [m.role.value for m in replayed] == ["user", "assistant", "tool", "assistant"]
-        # The two user turns merged; the handoff pair stayed intact between them.
         assert replayed[0].text == "one\n\ntwo"
 
     def test_incomplete_handoff_replays_empty_result(self):
-        """A delegation that never returned stores result=None."""
         stream = _stream_with_handoffs("research_planner")
         message = _handoff_message("unused")
         message.tool_calls[0]["result"] = None
@@ -1223,7 +1184,6 @@ class TestHandoffHistoryReplay:
 
 
 def _research_messages(*, report=None, skipped=False):
-    """A subagent conversation that gathered real material."""
     search = ToolCall(tool_name="search_web", arguments={"query": "bordeaux"}, id="c1")
     fetch = ToolCall(tool_name="fetch_page", arguments={"url": "https://ap.example"}, id="c2")
     messages = [
@@ -1251,17 +1211,14 @@ def _research_messages(*, report=None, skipped=False):
 
 class TestSubagentReport:
     def test_report_carries_the_work_when_the_budget_cut_the_run_short(self):
-        """The reported bug: budget fires, steps run out, research is discarded."""
         output = subagent_response(_research_messages(skipped=True))
 
         assert "cut short" in output
         assert "France and Spain battle wildfires" in output
         assert "5 results: Reuters, AP, France24" in output
-        # The budget stub is not gathered material.
         assert "Tool budget reached" not in output
 
     def test_successful_run_returns_just_the_report(self):
-        # The report names its own sources; no digest when there is one.
         output = subagent_response(_research_messages(report="Bordeaux: 220,000 evacuated."))
         assert output == "Bordeaux: 220,000 evacuated."
 
@@ -1271,7 +1228,6 @@ class TestSubagentReport:
 
         output = subagent_response(messages)
 
-        # Both bodies together are capped, not each one separately.
         assert "…" in output
         assert len(output) < 400
 
@@ -1306,12 +1262,10 @@ class TestToolCallBudgetHook:
         assert messages[-2].tool_calls == [call]
         assert messages[-1].tool_call_results[0].origin.id == "c9"
         assert messages[-1].meta[SKIPPED_META_KEY] is True
-        # Marker survives parse_tool_output as {"skipped": ...} for the client.
         from django_ai_sdk.adapters.base import parse_tool_output
 
         parsed = parse_tool_output(messages[-1].tool_call_results[0].to_dict())
         assert "skipped" in parsed["result"]
-        # No tool_calls on the last message, so nothing executes this step.
         assert not messages[-1].tool_calls
 
     def test_under_budget_is_untouched(self):
@@ -1324,8 +1278,6 @@ class TestToolCallBudgetHook:
 
 
 class TestSubagentSynthesis:
-    """FinalResponseHook asks for a response when the loop ended without one."""
-
     def _state(self, messages):
         from haystack.components.agents.state.state import State
 
@@ -1344,7 +1296,6 @@ class TestSubagentSynthesis:
 
         out = state.data["messages"]
         assert out[-1].text == "Bordeaux: 220,000 evacuated."
-        # Called with the gathered conversation and no tools.
         sent = generator.run.call_args.kwargs["messages"]
         assert "tools" not in generator.run.call_args.kwargs
         assert sent[-1].text == FINAL_PROMPT
@@ -1382,12 +1333,10 @@ class TestSubagentSynthesis:
 
         FinalResponseHook(generator).run(state)
 
-        # The run still returns, and the work is still recoverable.
         digest = subagent_response(state.data["messages"])
         assert "France and Spain battle wildfires" in digest
 
     def test_build_subagent_runs_it_before_oversight_finishes(self):
-        # Otherwise finish judges the digest of a run cut short, and no response is ever written.
         from django_ai_sdk.agents.tool_agent import default_hooks
         from haystack.components.agents import Agent as HaystackAgent
 
@@ -1421,7 +1370,6 @@ class TestUnstreamedResults:
             messages=[], task="research", streaming_callback=received.append
         )
 
-        # Nothing streamed during the run, so every result is replayed after it.
         ids = [c.tool_call_result.origin.id for c in received]
         assert ids == ["c1", "c2", "c3"]
         assert all(c.meta[SUBAGENT_META_KEY] == "Research Planner" for c in received)

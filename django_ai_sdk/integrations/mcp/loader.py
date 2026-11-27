@@ -40,18 +40,14 @@ try:
 except ImportError:
     HTTP_ERRORS = (httpx.HTTPError,)
 
-#: static: no auth; token: one shared secret; oauth: per-user OAuth 2.1 + PKCE.
 AUTH_KINDS = frozenset({"static", "token", "oauth"})
 
 _MCP_APP = "django_ai_sdk.integrations.mcp"
 
-# Keyed by state too, so two tabs connecting the same server don't collide.
 _K_FLOW = "mcp_oauth_{}_{}"
 
 
 class DynamicMCPIntegration(Integration):
-    """One configured MCP server; OAuth servers cache tools per user, others per server."""
-
     def __init__(
         self,
         name: str,
@@ -72,7 +68,6 @@ class DynamicMCPIntegration(Integration):
         self.config = config
         self.supports_connect = isinstance(config, OAuthMCPIntegrationConfig)
         self._needs_setup = needs_setup
-        # A failed config is a static placeholder; report the kind it was meant to be.
         self._intended_kind = intended_kind
 
     @property
@@ -138,7 +133,6 @@ class DynamicMCPIntegration(Integration):
         token = await self._get_oauth_token(user)
         if token is None:
             return IntegrationStatus.DISCONNECTED
-        # With a refresh token, get_tools() refreshes transparently.
         if token.is_expired() and not token.get_refresh_token():
             return IntegrationStatus.EXPIRED
 
@@ -146,7 +140,6 @@ class DynamicMCPIntegration(Integration):
         return self._cache.status_for(self._cache_key(user))
 
     async def reconnect(self, user: AbstractBaseUser | AnonymousUser | None = None) -> None:
-        """Clear the cache and breaker so the next call retries now."""
         key = self._cache_key(user)
         if key is not None:
             await self._cache.invalidate(key)
@@ -290,15 +283,10 @@ def build_mcp_config_safe(
     StaticMCPIntegrationConfig | TokenMCPIntegrationConfig | OAuthMCPIntegrationConfig,
     str | None,
 ]:
-    """Return (config, needs_setup_reason), never raising.
-
-    On failure the config is a static placeholder that never connects.
-    """
     if not url:
         return StaticMCPIntegrationConfig(url="about:blank", label=label, tools=[]), (
             "missing required url"
         )
-    # Name a typo rather than silently falling through to "static".
     if auth not in AUTH_KINDS:
         return StaticMCPIntegrationConfig(url="about:blank", label=label, tools=[]), (
             f"unknown auth {auth!r}; expected one of {', '.join(sorted(AUTH_KINDS))}"
@@ -330,14 +318,7 @@ def build_mcp_config_safe(
 
 
 class MCPIntegration(DynamicMCPIntegration):
-    """Base for a known MCP server app; settings override AUTH, URL, LABEL, TOOLS, SCOPE::
-
-    AI_SDK_INTEGRATIONS = {"github": {
-        "AUTH": "oauth",
-        "CLIENT_ID": env("GITHUB_OAUTH_CLIENT_ID"),
-        "CLIENT_SECRET": env("GITHUB_OAUTH_CLIENT_SECRET"),
-    }}
-    """
+    """Base for a known MCP server app; settings override AUTH, URL, LABEL, TOOLS, SCOPE."""
 
     url: str = ""
     auth: str = "static"
@@ -345,7 +326,6 @@ class MCPIntegration(DynamicMCPIntegration):
     scope: str = ""
     hint: str = ""
 
-    #: Anything else is a typo, warned about at boot.
     CONFIG_KEYS = frozenset(
         {
             "AUTH",
@@ -420,7 +400,6 @@ class MCPIntegration(DynamicMCPIntegration):
 async def resolve_client_credentials(
     server_name: str, config: OAuthMCPIntegrationConfig
 ) -> tuple[str, str]:
-    """(client_id, client_secret); a dynamically registered client beats static ones."""
     from django_ai_sdk.integrations.mcp.models import MCPOAuthClient
 
     try:
@@ -435,7 +414,6 @@ async def resolve_client_credentials(
 
 
 def build_oauth_client(client_id: str, client_secret: str, **kwargs: Any) -> AsyncOAuth2Client:
-    """Authlib OAuth2 client: HTTP Basic with a secret, client_id in the body without."""
     from authlib.integrations.httpx_client import AsyncOAuth2Client
 
     return AsyncOAuth2Client(
@@ -450,7 +428,6 @@ def build_oauth_client(client_id: str, client_secret: str, **kwargs: Any) -> Asy
 async def refresh_oauth_token(
     token_obj: MCPOAuthToken, config: OAuthMCPIntegrationConfig
 ) -> MCPOAuthToken | None:
-    """The single refresh_token grant; returns the updated token, or None on failure."""
     refresh_token = token_obj.get_refresh_token()
     if not refresh_token:
         logger.warning("No refresh token available for server %r", token_obj.server_name)
@@ -472,7 +449,6 @@ async def refresh_oauth_token(
 
     from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
 
-    # Concurrent refreshes race: only persist if the row still has the token we read.
     stale_refresh_token = token_obj.refresh_token
     outcome = {"updated": 0}
 
@@ -495,7 +471,6 @@ async def refresh_oauth_token(
         async with client:
             await client.refresh_token(discovery.token_endpoint, refresh_token=refresh_token)
     except (*HTTP_ERRORS, OAuthError) as e:
-        # A concurrent refresh may have rotated our token (invalid_grant); check for it.
         current = await MCPOAuthToken.objects.filter(pk=token_obj.pk).afirst()
         if (
             current is not None
@@ -525,10 +500,7 @@ async def refresh_oauth_token(
 async def _connect(
     url: str, token: str | None, tools: list[str] | None, timeout: float
 ) -> list[Any]:
-    """Connect to an MCP server and return Haystack tool objects.
-
-    timeout goes to MCPToolset itself: the asyncio timeout can't interrupt its thread.
-    """
+    """timeout goes to MCPToolset itself: the asyncio timeout can't interrupt its thread."""
     from haystack.utils import Secret
     from haystack_integrations.tools.mcp import MCPToolset, StreamableHttpServerInfo
 

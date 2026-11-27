@@ -1,10 +1,3 @@
-"""
-Mock agent factory.
-
-Agents have side effects (LLM calls, registry registration, storage I/O),
-so we use controlled MagicMock instances in unit tests instead of real subclasses.
-"""
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from django_ai_sdk.permissions import AllowAll
@@ -19,11 +12,6 @@ def create_agent_mock(
     storage_adapter=MemoryStorageAdapter,
     **attrs,
 ) -> MagicMock:
-    """Create a controlled MagicMock representing a registered agent.
-
-    Defaults to AllowAll permissions and MemoryStorageAdapter.
-    Pass extra keyword arguments to override or add attributes.
-    """
     if permissions is None:
         permissions = [AllowAll]
 
@@ -44,11 +32,6 @@ def create_agent_mock(
 
 
 def create_mock_adapter_class(get_thread=None):
-    """Create a mock storage adapter *class* (not instance).
-
-    The returned mock looks like a storage adapter class with
-    an async ``get_thread`` classmethod.
-    """
     adapter_cls = MagicMock()
     adapter_cls.__name__ = "MockAdapter"
     adapter_cls.get_thread = AsyncMock(return_value=get_thread)
@@ -56,14 +39,6 @@ def create_mock_adapter_class(get_thread=None):
 
 
 def mock_agent_memories(slugs):
-    """Return a ``patch.object`` context manager that mocks
-    ``registry.get`` to return an agent with the given memory slugs.
-
-    Usage::
-
-        with mock_agent_memories([mem1.slug]):
-            result = await MemoryService.get_agent_memories("test-asst")
-    """
     from django_ai_sdk.agents.services import registry
 
     mock_agent = MagicMock()

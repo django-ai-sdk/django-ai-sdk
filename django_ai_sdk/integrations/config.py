@@ -9,10 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 def get_integration_config(integration_name: str) -> dict[str, Any]:
-    """This integration's slice of AI_SDK_INTEGRATIONS, with upper-cased keys.
-
-    Returns {} when missing or malformed, so boot never breaks.
-    """
     configured = resolve_setting("AI_SDK_INTEGRATIONS") or {}
     if not isinstance(configured, dict):
         logger.error(
@@ -37,6 +33,5 @@ def get_integration_config(integration_name: str) -> dict[str, Any]:
 
 
 def configured_names() -> set[str]:
-    """Every integration name AI_SDK_INTEGRATIONS has an entry for."""
     configured = resolve_setting("AI_SDK_INTEGRATIONS") or {}
     return set(configured) if isinstance(configured, dict) else set()

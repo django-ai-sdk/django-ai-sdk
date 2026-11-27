@@ -36,7 +36,6 @@ class AgentSettings(models.Model):
     active = models.BooleanField(default=True, db_index=True)
     is_public = models.BooleanField(default=False)
 
-    # Reverse relation type hints
     agent_users: models.Manager[AgentUser]
     agent_groups: models.Manager[AgentGroup]
 
@@ -87,7 +86,7 @@ class AgentUser(models.Model):
         on_delete=models.CASCADE,
         related_name="agents",
     )
-    user_id: int  # Django FK attrib — no query needed
+    user_id: int
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

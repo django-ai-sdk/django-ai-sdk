@@ -11,7 +11,6 @@ MAX_AGE_SECONDS = 300
 
 
 def is_signed_by_slack(signing_secret: str, timestamp: str, signature: str, body: bytes) -> bool:
-    """Check that `body` has a valid, recent Slack signature."""
     if not signing_secret or not timestamp or not signature:
         return False
     try:

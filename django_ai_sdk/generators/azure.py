@@ -13,7 +13,6 @@ from django_ai_sdk.utils import resolve_setting
 
 
 def _deployment(kwargs: dict[str, Any]) -> str | None:
-    """Azure names the model a deployment, so accept either spelling."""
     return (
         kwargs.pop("azure_deployment", None)
         or kwargs.pop("model", None)
@@ -23,7 +22,6 @@ def _deployment(kwargs: dict[str, Any]) -> str | None:
 
 @watched_factory
 def azure_openai_chat(**kwargs: Any) -> AzureOpenAIChatGenerator:
-    """Azure OpenAI Chat Completions generator wired to Django settings."""
     return AzureOpenAIChatGenerator(
         **build_kwargs(
             {
@@ -39,7 +37,6 @@ def azure_openai_chat(**kwargs: Any) -> AzureOpenAIChatGenerator:
 
 @watched_factory
 def azure_openai_responses_chat(**kwargs: Any) -> AzureOpenAIResponsesChatGenerator:
-    """Azure OpenAI Responses API generator wired to Django settings."""
     return AzureOpenAIResponsesChatGenerator(
         **build_kwargs(
             {

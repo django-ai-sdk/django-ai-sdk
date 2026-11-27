@@ -1,7 +1,3 @@
-"""
-Integration tests for BaseAgent.
-"""
-
 import pytest
 import pytest_asyncio
 import uuid
@@ -16,17 +12,13 @@ from tests.factories.schemas import ChatMessageFactory
 
 @pytest.mark.django_db
 class TestBaseAgent:
-    """Test suite for BaseAgent core functionality."""
-
     @pytest_asyncio.fixture
     async def agent(self):
-        """Create a test agent with memory storage."""
-
         class TestAgent(Agent):
             name = "test_agent"
             model = "gpt-4o-mini"
             instructions = ["You are a test agent"]
-            protocol = VercelProtocolHandler  # Class, not instance!
+            protocol = VercelProtocolHandler
             storage_adapter = MemoryStorageAdapter
 
             async def get_pipeline_adapter(self, thread_id: str | None = None):
@@ -36,41 +28,31 @@ class TestBaseAgent:
 
     @pytest_asyncio.fixture
     async def thread_id(self):
-        """Create a test thread ID - must be valid UUID for Django ORM."""
         return str(uuid.uuid4())
 
     @pytest.mark.asyncio
     async def test_agent_creates_thread(self, agent, thread_id):
-        """Test that agent properly creates threads."""
-        # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
             title="Test Thread", metadata={"agent_id": "test_agent"}, thread_id=thread_id
         )
 
-        # Now get storage adapter for existing thread
         storage = await agent.get_storage_adapter(thread_id)
 
-        # Thread should be accessible
         assert storage is not None
         assert storage.thread_id == thread_id
 
     @pytest.mark.asyncio
     async def test_message_storage_flow(self, agent, thread_id):
-        """Test complete message storage flow."""
-        # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
             title="Test Thread", metadata={"agent_id": "test_agent"}, thread_id=thread_id
         )
 
-        # Now get storage adapter
         storage = await agent.get_storage_adapter(thread_id)
         assert storage is not None
 
-        # Store user message
         user_msg = ChatMessageFactory.build(role="user")
         message_id = await storage.store_chat_message(user_msg)
 
-        # Verify storage
         history = await storage.get_messages()
         assert len(history) == 1
         assert history[0].content == user_msg.content
@@ -78,8 +60,6 @@ class TestBaseAgent:
 
     @pytest.mark.asyncio
     async def test_message_rating_flow(self, agent, thread_id):
-        """Test complete message rating workflow."""
-        # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
             title="Test Thread", metadata={"agent_id": "test_agent"}, thread_id=thread_id
         )
@@ -87,23 +67,18 @@ class TestBaseAgent:
         storage = await agent.get_storage_adapter(thread_id)
         assert storage is not None
 
-        # Store message
         msg = ChatMessageFactory.build()
         message_id = await storage.store_chat_message(msg)
 
-        # Rate the message
         success = await storage.rate_message(message_id, rating=1)
         assert success is True
 
-        # Verify rating persisted by checking MemoryStore directly
         stored_messages = MemoryStore.get_messages(thread_id)
         assert len(stored_messages[0].feedbacks) == 1
         assert stored_messages[0].feedbacks[0]["rating"] == 1
 
     @pytest.mark.asyncio
     async def test_conversation_history_retrieval(self, agent, thread_id):
-        """Test conversation history retrieval."""
-        # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
             title="Test Thread", metadata={"agent_id": "test_agent"}, thread_id=thread_id
         )
@@ -111,7 +86,6 @@ class TestBaseAgent:
         storage = await agent.get_storage_adapter(thread_id)
         assert storage is not None
 
-        # Create conversation history
         messages = [
             ChatMessageFactory.build(role="user", content="Question 1"),
             ChatMessageFactory.build(role="assistant", content="Answer 1"),
@@ -121,7 +95,6 @@ class TestBaseAgent:
         for msg in messages:
             await storage.store_chat_message(msg)
 
-        # Retrieve and verify
         history = await storage.get_messages()
         assert len(history) == 3
         assert history[0].role == "user"
@@ -130,22 +103,17 @@ class TestBaseAgent:
 
     @pytest.mark.asyncio
     async def test_thread_not_found_error(self, agent):
-        """Test that accessing non-existent thread raises error."""
-        # Use a valid UUID format but one that doesn't exist
         nonexistent_id = str(uuid.uuid4())
         storage = MemoryStorageAdapter(thread_id=nonexistent_id)
 
-        # Should raise ValueError when trying to store without creating thread first
         msg = ChatMessageFactory.build()
         with pytest.raises(ValueError, match="not found in memory store"):
             await storage.store_chat_message(msg)
 
     @pytest.mark.asyncio
     async def test_protocol_message_conversion(self, agent):
-        """Test protocol handler converts messages correctly."""
-        protocol = agent.protocol_handler  # Use protocol_handler, not protocol
+        protocol = agent.protocol_handler
 
-        # Create mock Vercel message objects with .parts attribute
         class MockPart:
             def __init__(self, type, text) -> None:
                 self.type = type
@@ -156,7 +124,6 @@ class TestBaseAgent:
                 self.role = role
                 self.parts = [MockPart("text", text)]
 
-        # Test converting from protocol format
         protocol_messages = [
             MockMessage("user", "Hello"),
             MockMessage("assistant", "Hi there!"),
@@ -170,22 +137,18 @@ class TestBaseAgent:
 
     @pytest.mark.asyncio
     async def test_get_storage_adapter_falls_back_for_unknown_thread(self, agent):
-        """get_storage_adapter() must return configured adapter for unknown threads."""
         unknown_thread_id = str(uuid.uuid4())
-        # No thread created in any adapter — should fall back to storage_adapter
         storage = await agent.get_storage_adapter(unknown_thread_id)
         assert storage is not None
         assert storage.thread_id == unknown_thread_id
 
     @pytest.mark.asyncio
     async def test_get_storage_adapter_returns_none_for_none_thread_id(self, agent):
-        """get_storage_adapter() must return None when thread_id is None."""
         storage = await agent.get_storage_adapter(None)
         assert storage is None
 
     @pytest.mark.asyncio
     async def test_stream_rejects_non_pipeline(self):
-        """Stream.__init__ must raise TypeError if given a non-Pipeline object."""
         from django_ai_sdk.adapters.base import Stream
         from unittest.mock import MagicMock
 
@@ -195,12 +158,8 @@ class TestBaseAgent:
 
 @pytest.mark.django_db
 class TestStreamWriterIntegration:
-    """Test StreamWriter integration with BaseAgent."""
-
     @pytest_asyncio.fixture
     async def agent_with_storage(self):
-        """Create agent with storage enabled."""
-
         class TestAgent(Agent):
             name = "test_agent"
             model = "gpt-4o-mini"
@@ -215,7 +174,6 @@ class TestStreamWriterIntegration:
 
     @pytest.mark.asyncio
     async def test_stream_writer_creates_message_with_id(self, agent_with_storage):
-        """Test that StreamWriter creates message with proper ID."""
         from django_ai_sdk.common import StreamWriter
 
         message_id = str(uuid.uuid4())
@@ -226,16 +184,13 @@ class TestStreamWriterIntegration:
             storage_callback=None,
         )
 
-        # Verify ID is set
         assert stream_writer.message.id == message_id
         assert isinstance(uuid.UUID(message_id), uuid.UUID)
 
     @pytest.mark.asyncio
     async def test_stream_writer_requires_id(self):
-        """Test that StreamWriter requires message_id parameter."""
         from django_ai_sdk.common import StreamWriter
 
-        # Should work with valid ID
         stream_writer = StreamWriter(
             message_id=str(uuid.uuid4()),
             model="test-model",
@@ -246,10 +201,6 @@ class TestStreamWriterIntegration:
 
 @pytest.mark.django_db
 class TestTitleGenerationPrompt:
-    """`get_title_generation_prompt` is overridable and defaults to a
-    length-capped prompt, and `generate_thread_title` must honour whatever
-    the agent returns from it."""
-
     @pytest_asyncio.fixture
     async def agent(self):
         class TestAgent(Agent):
@@ -308,8 +259,6 @@ class TestTitleGenerationPrompt:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestAThreadIsCheckedBeforeAnythingIsStored:
-    """A refused chat leaves no trace in someone else's thread."""
-
     @pytest_asyncio.fixture
     async def agent(self):
         class OpenAgent(Agent):
@@ -346,8 +295,6 @@ class TestAThreadIsCheckedBeforeAnythingIsStored:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestMemoryStoreStaysInItsThread:
-    """A message id from another thread is not this thread's to change."""
-
     async def _two_threads(self):
         mine = await MemoryStorageAdapter.create_thread(title="mine")
         theirs = await MemoryStorageAdapter.create_thread(title="theirs")

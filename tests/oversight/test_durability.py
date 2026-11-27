@@ -1,8 +1,3 @@
-"""A turn survives what goes wrong around it: errors, disconnects, crashes, lost tasks.
-
-The turn is written when its gate ends (open) and updated at close; one that never
-closes is marked interrupted by `oversight_sweep`."""
-
 from __future__ import annotations
 
 import asyncio
@@ -63,7 +58,7 @@ def slow_finish(seconds: float = 0.5) -> FnLens:
 @register_policy
 class DurablePolicy(Policy):
     name = "test-durable"
-    lenses = [  # noqa: RUF012
+    lenses = [
         FnLens(
             name="asked",
             stages=[Stage.GATE],
@@ -77,7 +72,7 @@ class DurablePolicy(Policy):
             fn=lambda text, context: len(context.output) > 20,
         ),
     ]
-    rules = [  # noqa: RUF012
+    rules = [
         Rule("refunds", when=L("asked").is_true, then=Queue("refunds"), mode=ENFORCE),
         Rule("ban", when=L("banned").is_true, then=Block("No."), mode=ENFORCE),
         Rule("long_answers", when=L("long").is_true, then=Queue("long"), mode=ENFORCE),
@@ -87,8 +82,8 @@ class DurablePolicy(Policy):
 @register_policy
 class SlowFinishPolicy(Policy):
     name = "test-durable-slow"
-    lenses = [slow_finish()]  # noqa: RUF012
-    rules = [  # noqa: RUF012
+    lenses = [slow_finish()]
+    rules = [
         Rule("never", when=L("slow").is_true, then=Block(), mode=ENFORCE),
     ]
 
@@ -103,14 +98,12 @@ async def close(guard: TurnGuard, **kwargs: Any) -> Turn:
 
 
 async def sweep(*args: str) -> str:
-    """The sweep's line about open turns."""
     out = StringIO()
     await sync_to_async(call_command)("oversight_sweep", *args, stdout=out)
     return out.getvalue().splitlines()[0]
 
 
 async def age(turn_id: Any, minutes: int) -> None:
-    """Make a turn look as if it started `minutes` ago."""
     await Turn.objects.filter(id=turn_id).aupdate(
         created_at=timezone.now() - timedelta(minutes=minutes)
     )
@@ -119,7 +112,7 @@ async def age(turn_id: Any, minutes: int) -> None:
 @register_policy
 class ReflectingPolicy(Policy):
     name = "test-durable-reflect"
-    lenses = [  # noqa: RUF012
+    lenses = [
         FnLens(
             name="later",
             subject=Subject.ANSWER,
@@ -127,28 +120,24 @@ class ReflectingPolicy(Policy):
             fn=lambda text, context: "bad" in context.output,
         ),
     ]
-    rules = [  # noqa: RUF012
+    rules = [
         Rule("tell_later", when=L("later").is_true, then=Notify(), mode=ENFORCE),
     ]
 
 
 async def reflect_pending(*args: str) -> str:
-    """The sweep's line about lost reflection."""
     out = StringIO()
     await sync_to_async(call_command)("oversight_sweep", *args, stdout=out)
     return out.getvalue().splitlines()[1]
 
 
 async def expire_lease(turn_id: Any) -> None:
-    """What a worker killed after its claim leaves: a lease that ran out."""
     await Turn.objects.filter(id=turn_id).aupdate(
         reflect_lease_until=timezone.now() - timedelta(seconds=1)
     )
 
 
 class WorkerBackend(BaseTaskBackend):
-    """A backend with a worker somewhere else: tasks leave the request."""
-
     def enqueue(self, task: Any, args: Any, kwargs: Any) -> Any:
         raise NotImplementedError
 
@@ -160,7 +149,6 @@ class TestWriteAhead:
         await guard.gate()
         turn = await Turn.objects.aget(id=guard.id)
         assert turn.status == Turn.Status.OPEN
-        # Something acted: the row says so already. Nothing else is decided yet.
         assert turn.outcome == "flagged"
         assert turn.labels == {"asked": True, "banned": False}
         assert await RuleMatch.objects.filter(turn=turn, rule="refunds", acted=True).aexists()
@@ -248,7 +236,7 @@ class TestCrashedTurns:
         assert turn.outcome == "flagged"
 
     async def test_a_run_that_raised_is_recorded_with_its_error(self):
-        # Haystack skips after_run on an exception: run_with_oversight closes the turn then.
+        # Haystack skips after_run on an exception.
         agent, model = agent_with("never", policy="test-durable")
 
         with (
@@ -301,7 +289,7 @@ class TestStreamEnds:
                     pass
 
             task = asyncio.create_task(consume())
-            await asyncio.sleep(0.25)  # the model is done, finish is still judging
+            await asyncio.sleep(0.25)
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
@@ -309,7 +297,6 @@ class TestStreamEnds:
         assert (turn.status, turn.outcome, turn.error) == ("closed", "", "disconnected")
 
     async def test_a_response_never_read_records_and_stores_nothing(self):
-        # The gate runs inside the run, so an unread response never reached the gate.
         from django_ai_sdk.views.schemas import Message
 
         storage = Storage()
@@ -331,7 +318,6 @@ class TestSweep:
         return guard.id
 
     async def test_a_worker_killed_mid_turn_leaves_the_gate_record_to_sweep(self):
-        # The guard is dropped without close(): what a killed worker leaves.
         turn_id = await self.open_turn(45, "I want a refund")
         assert await sweep("--stale-after", "30m") == "1 turn swept"
         turn = await Turn.objects.aget(id=turn_id)
@@ -411,7 +397,6 @@ class TestReflectLease:
         turn_id = await self.closed()
         with patch("django_ai_sdk.oversight.tasks.enqueue_notifications"):
             assert await run_reflection(turn_id) == 1
-            # A duplicate delivery finds it done.
             assert await run_reflection(turn_id) == 0
         turn = await Turn.objects.aget(id=turn_id)
         assert (turn.reflect_state, turn.reflect_attempts) == ("done", 1)
@@ -433,7 +418,7 @@ class TestReflectLease:
 
     async def test_a_lease_that_ran_out_is_claimed_again(self):
         turn_id = await self.closed()
-        assert await claim_for_reflect(turn_id) is not None  # its worker dies here
+        assert await claim_for_reflect(turn_id) is not None
         await expire_lease(turn_id)
         with patch("django_ai_sdk.oversight.tasks.enqueue_notifications"):
             assert await run_reflection(turn_id) == 1
@@ -448,7 +433,6 @@ class TestReflectLease:
         turn = await Turn.objects.select_related("content").aget(id=turn_id)
         judged = await judge_stored_turn(turn)
         assert judged is not None
-        # Too slow: the lease ran out, and another run reflected the turn.
         await expire_lease(turn_id)
         with patch("django_ai_sdk.oversight.tasks.enqueue_notifications"):
             assert await run_reflection(turn_id) == 1
@@ -471,7 +455,6 @@ class TestReflectLease:
             pytest.raises(RuntimeError),
         ):
             await run_reflection(turn_id)
-        # Its answers and matches went with it: the reflection is all or nothing.
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "pending"
         assert not await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").aexists()
         with patch("django_ai_sdk.oversight.tasks.enqueue_notifications"):
@@ -518,7 +501,6 @@ class TestReflectLease:
 @pytest.mark.django_db(transaction=True)
 class TestReflectPending:
     async def lost(self) -> str:
-        """A closed turn whose reflect task was never queued."""
         guard = await start("test-durable-reflect", "hello")
         await guard.gate()
         await guard.finish("a bad answer")
@@ -530,11 +512,9 @@ class TestReflectPending:
         await age(turn_id, 30)
         with patch("django_ai_sdk.oversight.tasks.enqueue_notifications"):
             assert await reflect_pending("--reflect-after", "10m") == "1 turn queued"
-        # The test settings run tasks at once.
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "done"
 
     async def test_a_sweep_first_loaded_under_a_patch_still_queues(self):
-        """A random test order once loaded the command while a test patched the task."""
         import importlib
 
         from django_ai_sdk.oversight.management.commands import oversight_sweep
@@ -562,7 +542,6 @@ class TestReflectPending:
         await expire_lease(turn_id)
         assert await reflect_pending() == "0 turns queued"
         turn = await Turn.objects.aget(id=turn_id)
-        # The same as when reflect itself gives up.
         assert (turn.reflect_state, turn.error) == ("failed", "reflect failed")
 
     async def test_dry_run_queues_nothing(self):
@@ -591,10 +570,10 @@ class TestStableEventIds:
         @register_policy
         class Noisy(Policy):
             name = "test-durable-noisy"
-            lenses = [  # noqa: RUF012
+            lenses = [
                 FnLens(name="always", stages=[Stage.GATE], fn=lambda text, context: True)
             ]
-            rules = [  # noqa: RUF012
+            rules = [
                 Rule("tell", when=L("always").is_true, then=Notify(), mode=ENFORCE)
             ]
 
@@ -654,7 +633,6 @@ class TestTaskBackendCheck:
         return [m.id for m in check_oversight_deploy() if m.id == "ai_sdk.oversight.W014"]
 
     def test_tasks_run_inline_warns(self):
-        # The test settings use the immediate backend.
         assert self.ids() == ["ai_sdk.oversight.W014"]
 
     def test_tasks_never_run_warns(self):
@@ -720,6 +698,5 @@ class TestRacesOnPostgres:
         Turn.objects.filter(id=guard.id).update(created_at=timezone.now() - timedelta(hours=1))
 
         race(lambda: async_to_sync(sweep)(), lambda: async_to_sync(close)(guard))
-        # The sweep marks only a turn still open: whichever comes first, it ends closed.
         assert Turn.objects.get(id=guard.id).status == "closed"
         assert Turn.objects.filter(id=guard.id).count() == 1

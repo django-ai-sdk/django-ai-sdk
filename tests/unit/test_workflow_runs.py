@@ -1,5 +1,3 @@
-"""A queued run: sequencing, declared inputs, listeners, and the task entry point."""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -69,7 +67,6 @@ class TestSteps:
         assert any(m.role == "user" and "prior result" in m.content for m in captured[0])
 
     async def test_a_required_name_with_no_source_is_refused_before_any_step_runs(self):
-        """A typo reaches the author, rather than the agent as a silent gap."""
         agent = make_agent("ok")
         workflow = make_workflow(StepDefinition(name="result", agent_id="a1", requires=["missing"]))
 
@@ -90,12 +87,10 @@ class TestSteps:
         assert kwargs.get("system_prompt") is None
 
     async def test_a_definition_with_no_steps_is_refused(self):
-        """One rule for all three doors: register_workflow, create, and execute all refuse it."""
         with pytest.raises(ImproperlyConfigured, match="no steps to run"):
             await run_now(make_workflow())
 
     async def test_a_continue_failure_leaves_the_step_out_of_the_outputs(self):
-        """No synthetic error key: a failed step simply produced nothing."""
         from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
 
         class BoomStep(Step):
@@ -136,8 +131,6 @@ def test_published_carries_only_what_completed():
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
 class TestDeclaredInputs:
-    """Input and output are the same mechanism, so a run's inputs are checked once."""
-
     async def test_declared_inputs_are_coerced_before_the_first_step(self):
         from django_ai_sdk.common import ChatMessage
 
@@ -170,7 +163,6 @@ class TestDeclaredInputs:
             await run_now(workflow, inputs={})
 
     async def test_an_undeclared_extra_is_dropped(self):
-        """The schema is the contract, so a stray key never reaches a step."""
         seen = {}
         from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
 
@@ -196,7 +188,6 @@ class TestDeclaredInputs:
         assert seen == {"document": "doc-1"}
 
     async def test_a_definition_declaring_nothing_takes_what_it_is_given(self):
-        """A code-authored pipeline is not obliged to describe itself in JSON."""
         agent = make_agent("ok")
         workflow = make_workflow(StepDefinition(name="result", agent_id="a1"))
 
@@ -252,8 +243,6 @@ class TestStructuredOutput:
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
 class TestListeners:
-    """A definition's listeners are built and attached; the recorder is always there."""
-
     async def test_a_workflow_listener_fires_for_every_step(self):
         from django_ai_sdk.workflows.listeners import RunListener
 
@@ -297,7 +286,6 @@ class TestListeners:
         ]
 
     async def test_a_step_listener_fires_for_that_step_alone(self):
-        """The difference the two attachment points buy."""
         from django_ai_sdk.workflows.listeners import RunListener
 
         events: list[str] = []
@@ -330,7 +318,6 @@ class TestListeners:
         assert events == ["first"]
 
     async def test_an_unregistered_listener_stops_the_run_rather_than_being_skipped(self):
-        """The registry is the gate; a name outside it is a configuration error."""
         agent = make_agent("data")
         workflow = make_workflow(
             StepDefinition(name="result", agent_id="a1"),
@@ -363,7 +350,6 @@ class TestListeners:
                         "user": ctx.user,
                         "workflow": ctx.workflow,
                         "run_id": ctx.run_id,
-                        # The row is closed before any listener hears the run ended.
                         "status": (await WorkflowRun.objects.aget(pk=ctx.run_id)).status,
                     }
                 )
@@ -387,7 +373,6 @@ class TestListeners:
                 }
             ),
         ):
-            # Registered, so the run is keyed by its name.
             register_workflow(workflow)
             try:
                 _outputs, run = await run_now(workflow, user=user)
@@ -404,8 +389,6 @@ class TestListeners:
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
 class TestRunState:
-    """A run's inputs seed its state, persist on the row, and survive a resume."""
-
     async def test_inputs_are_persisted_on_the_row(self):
         agent = make_agent("ok")
         workflow = make_workflow(
@@ -450,7 +433,6 @@ class TestRunState:
             inputs={"document": "doc-1"},
         )
 
-        # The caller passes no inputs; the row supplies them.
         with patch(AGENT_GET, AsyncMock(return_value=agent)):
             outputs, _ = await run_now(workflow, run=run)
 
@@ -464,7 +446,6 @@ class TestRunState:
             StepDefinition(name="first", agent_id="a1"),
             StepDefinition(name="second", agent_id="a1", requires=["first"]),
         )
-        # A failed run that was resumed: pending again, with its first step done.
         run = await WorkflowRun.objects.acreate(
             workflow_definition=workflow.model_dump(), status=WorkflowRun.Status.PENDING
         )

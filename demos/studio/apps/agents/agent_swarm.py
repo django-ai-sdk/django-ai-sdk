@@ -20,12 +20,10 @@ if TYPE_CHECKING:
 
 
 def _pirate_boat_expert(topic: Annotated[str, "Topic about pirate boats"]) -> str:
-    """Provide expert lore about pirate boats."""
     return f"Aye! On pirate boats: {topic}! They be swift and full o' tales."
 
 
 def pirate_boat_expert_tool(**kwargs: object) -> Tool:
-    """Expert knowledge about pirate boats."""
     return Tool(
         name="pirate_boat_expert",
         description="Expert knowledge about pirate boats",
@@ -44,7 +42,6 @@ def pirate_boat_expert_tool(**kwargs: object) -> Tool:
 
 
 def _find_treasure(location: Annotated[str, "Location to search for treasure"]) -> dict:
-    """Simulate treasure discovery."""
     treasure_id = random.randint(1000, 9999)
     value = random.randint(5000, 50000)
     return {
@@ -55,7 +52,6 @@ def _find_treasure(location: Annotated[str, "Location to search for treasure"]) 
 
 
 def find_treasure_tool(**kwargs: object) -> Tool:
-    """Find treasure at a given location."""
     return Tool(
         name="find_treasure",
         description="Find treasure at a given location",
@@ -74,7 +70,6 @@ def find_treasure_tool(**kwargs: object) -> Tool:
 
 
 def get_datetime() -> dict:
-    """Get current time and date in Europe/Amsterdam timezone."""
     tz = timezone.get_current_timezone()
     nowtz = timezone.now().astimezone(tz)
 
@@ -85,7 +80,6 @@ def get_datetime() -> dict:
 
 
 def get_datetime_tool(**kwargs: object) -> Tool:
-    """Current date and time tool."""
     return Tool(
         name="get_datetime",
         parameters={},
@@ -96,8 +90,6 @@ def get_datetime_tool(**kwargs: object) -> Tool:
 
 @auto_register
 class PirateBoatExpertAgent(Agent):
-    """Expert on pirate boats, galleons, and seafaring lore."""
-
     name = "Pirate Boat Expert"
     description = "Deep knowledge about pirate boats and seafaring lore."
     model = settings.AI_SDK_DEFAULT_MODEL
@@ -114,8 +106,6 @@ class PirateBoatExpertAgent(Agent):
 
 @auto_register
 class TreasureHunterAgent(Agent):
-    """Hunts for treasure at a given location."""
-
     name = "Treasure Hunter"
     description = "Simulates discovering treasure at a location."
     model = settings.AI_SDK_DEFAULT_MODEL
@@ -131,10 +121,6 @@ class TreasureHunterAgent(Agent):
 
 @auto_register
 class PirateSwarmAgent(Agent):
-    """
-    Agent swarm agent with a crew of specialized pirate agents.
-    """
-
     name = "Pirate Agent Swarm"
     description = "An agent swarm agent that delegates to a crew of pirate subagents."
     model = settings.AI_SDK_DEFAULT_MODEL
@@ -173,8 +159,6 @@ class PirateSwarmAgent(Agent):
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Stream:
-        """Create Haystack agent swarm adapter."""
-
         generator = self.get_llm()
         storage_adapter = await self.get_storage_adapter(thread_id)
 

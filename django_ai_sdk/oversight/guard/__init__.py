@@ -1,9 +1,3 @@
-"""TurnGuard checks one turn, whatever channel it came from.
-
-It decides at the gate, before each tool call, and at finish; closing records the turn and
-queues the background stages. Without a policy, or with oversight off, it is inert.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -65,7 +59,6 @@ _watched: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
 
 
 def unguarded() -> contextlib.AbstractContextManager[None]:
-    """Run code that must not open turns of its own, such as judges and titles."""
     return scoped(_unguarded, True)
 
 
@@ -75,17 +68,12 @@ def is_unguarded() -> bool:
 
 @contextlib.contextmanager
 def watching_turns() -> Generator[list[str]]:
-    """Collect the ids of the turns opened inside the block, in order.
-
-    A run that joins an outer turn opens none, so it adds nothing.
-    """
     opened: list[str] = []
     with scoped(_watched, opened):
         yield opened
 
 
 def note_opened(guard: TurnGuard) -> None:
-    """Tell `watching_turns()` that `guard` opened a turn of its own."""
     if (opened := _watched.get()) is not None:
         opened.append(guard.id)
 
@@ -97,10 +85,8 @@ def guarding(guard: TurnGuard | None) -> contextlib.AbstractContextManager[None]
 
 @contextlib.asynccontextmanager
 async def closing_turn(guard: TurnGuard, *, keep_open: bool = False) -> AsyncGenerator[None]:
-    """Close `guard` when the block ends, recording an exception as the run's error.
-
-    A disconnect is recorded as "disconnected"; `Blocked` is not an error. With
-    `keep_open` the guard closes only on an exception (the Stream takes it over).
+    """A disconnect is recorded as "disconnected"; `Blocked` is not an error. With
+    `keep_open` the guard closes only on an exception.
     """
     try:
         yield
@@ -123,19 +109,16 @@ def current_guard() -> TurnGuard | None:
 
 
 def outlived_turn() -> bool:
-    """True under a closed guard; its tool calls are blocked since nothing would record them."""
+    """True under a closed guard; its tool calls are blocked."""
     guard = _current.get()
     return guard is not None and guard._closed
 
 
-# How many earlier messages the lenses see with a question.
 HISTORY_TURNS = 12
 
 
 @dataclass
 class Usage:
-    """The model and token counts a turn used, summed over its model calls."""
-
     model: str = ""
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
@@ -150,9 +133,6 @@ class Usage:
 
 @dataclass
 class TurnRecordState:
-    """What the record has of a turn so far. Only `recording` writes it."""
-
-    # Written ahead after the gate, so close updates the row.
     row_written: bool = False
     answer_ids: list[str] = field(default_factory=list)
     matches_saved: int = 0
@@ -160,7 +140,7 @@ class TurnRecordState:
 
 @dataclass
 class TurnGuard:
-    """One turn under a policy. Build it with `start()`; inert unless `active`."""
+    """Build it with `start()`; inert unless `active`."""
 
     active: bool = False
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -175,32 +155,23 @@ class TurnGuard:
     answered: list[Answered] = field(default_factory=list)
     matched: list[Matched] = field(default_factory=list)
     restrict: list[str] | None = None
-    # Block messages by call (name and arguments): the same call again is blocked at once.
     blocked_calls: dict[str, str] = field(default_factory=dict)
     usage: Usage = field(default_factory=Usage)
     created_at: Any = None
     error: str = ""
-    # The run's own error (crash, disconnect): the turn never finished, nothing was let through.
     run_error: str = ""
-    # False for a dry run, which writes nothing.
     recording: bool = True
-    # Blocked unread at the gate for exceeding MAX_INPUT_CHARS.
     too_long: bool = False
     blocked: bool = False
-    # The gate ran, so a model call now counts as seen.
     gated: bool = False
     original_input: str = ""
     original_output: str = ""
-    # A turn is finished once, inside its run or after it.
     finish_result: StageResult | None = None
     parent_turn_id: str = ""
-    # Set by a streaming adapter to send stub results for blocked tool calls.
     on_tool_results: Callable[[list[Any]], Awaitable[None]] | None = None
     started_at: float = field(default_factory=time.perf_counter)
     _closed: bool = False
-    # An errored answer carries over to later stages until the lens answers again.
     _lens_errored: dict[str, bool] = field(default_factory=dict)
-    # Policy could not be chosen or loaded under FAIL_MODE "closed": every stage blocks.
     policy_unloaded: bool = False
     record: TurnRecordState = field(default_factory=TurnRecordState)
     masks: TurnMasks = field(init=False, repr=False)
@@ -221,7 +192,6 @@ class TurnGuard:
         self.error = join_error(self.error, error)
 
     def block(self, error: str = "") -> None:
-        """Block the turn from the caller, e.g. a masked result no longer fits its schema."""
         if not self.active:
             return
         self.blocked = True
@@ -235,7 +205,6 @@ class TurnGuard:
         ][-HISTORY_TURNS:]
 
     def set_sources(self, sources: Iterable[Any], *, seeded: Iterable[Any] = ()) -> None:
-        """Set what retrieval found. `seeded`: sources or keys carried over from earlier turns."""
         if not self.active:
             return
         seeded_keys = {s if isinstance(s, str) else as_source(s).key for s in seeded}
@@ -254,7 +223,6 @@ class TurnGuard:
         call = call if isinstance(call, ToolCall) else ToolCall.model_validate(call)
         for index, existing in enumerate(self.context.tool_calls):
             if call.id and existing.id == call.id:
-                # Only what this report says. A result of 0 or False still counts.
                 update = {k: v for k, v in call.model_dump().items() if v is not None and v != ""}
                 update["error"] = existing.error or call.error
                 self.context.tool_calls[index] = existing.model_copy(update=update)
@@ -270,7 +238,6 @@ class TurnGuard:
             self.context.output += chunk
 
     def keep_answers(self, answered: list[Answered]) -> None:
-        """Keep answers for the record; only turn-level answers (not per tool call) feed rules."""
         for item in answered:
             self.answered.append(item)
             if item.about_turn:
@@ -282,7 +249,7 @@ class TurnGuard:
         return self.policy is None or self.policy.fails_closed
 
     def record_stage_error(self, error: str, *, block_turn: bool) -> bool:
-        """Log and note `error`. True when failing closed; `block_turn` then blocks the turn."""
+        """True when failing closed; `block_turn` then blocks the turn."""
         logger.exception("Oversight: {} in turn {}", error, self.id)
         self.note_error(error)
         if self.fails_closed and block_turn:
@@ -295,11 +262,6 @@ class TurnGuard:
     def record_aside(
         self, stage: Stage, answered: list[Answered], matched: list[Matched]
     ) -> list[Matched]:
-        """Record findings on other text as aside, once per lens and rule per stage.
-
-        Spans are dropped: they point into the other text and must never mask the
-        question or answer. Returns the matches added.
-        """
         seen = {(o.lens.name, o.stage) for o in self.answered if o.aside}
         for item in answered:
             found = (item.answer.ok and item.answer.value) or item.errored
@@ -330,10 +292,7 @@ class TurnGuard:
         return worst_outcome(*blocked, *(m.outcome(report=True) for m in self.matched))
 
     async def write_ahead(self) -> None:
-        """Insert the open turn's row so a turn that never closes is left for `oversight_sweep`.
-
-        Runs once and never raises; if it fails, close writes the whole turn.
-        """
+        """Runs once and never raises; if it fails, close writes the whole turn."""
         if not self.active or self._closed or self.record.row_written or not self.recording:
             return
         try:
@@ -353,9 +312,7 @@ class TurnGuard:
         input: str | None = None,
         oversight: type[Policy] | str | Literal[False] | None = None,
     ) -> TurnGuard:
-        """Open a guard for one turn of `agent`. Inert unless a policy applies.
-
-        `oversight` overrides the agent's policy; False or "" opens no turn. A policy that
+        """`oversight` overrides the agent's policy; False or "" opens no turn. A policy that
         fails to load blocks every stage, or under FAIL_MODE "open" runs unguarded.
         """
         if input is None:
@@ -428,7 +385,6 @@ class TurnGuard:
 
     @classmethod
     def blocking_all(cls, *, name: str, error: str, **opening: Any) -> TurnGuard:
-        """Block all under a stand-in policy so the failure is recorded. Inert if FAIL_MODE open."""
         if default_fail_mode() == "open":
             logger.error(
                 "Oversight runs a turn of {!r} unguarded: its {} (FAIL_MODE is open)",
@@ -439,7 +395,6 @@ class TurnGuard:
         try:
             guard = cls.under_policy(_blocking_policy(name), **opening)
         except Exception:
-            # The block cannot be recorded, so block without a record.
             logger.exception("Oversight could not open a blocking turn")
             guard = cls(active=True, policy=_blocking_policy(name), _closed=True)
         guard.policy_unloaded = True
@@ -466,10 +421,7 @@ class TurnGuard:
         *,
         history: bool = True,
     ) -> StageResult:
-        """Judge history the server did not store itself. Call before `gate()`.
-
-        `question` brings only its attachments: `gate()` judges what it says.
-        """
+        """Judge history the server did not store itself. Call before `gate()`."""
         return await stages.judge_history(self, earlier, question, history=history)
 
     async def tool_call(self, call: ToolCall) -> str | None:
@@ -494,8 +446,6 @@ class TurnGuard:
     async def close(self, *, error: str = "") -> str | None:
         """Record the turn and queue the background stages. Never raises.
 
-        Cancels pending tool-result masking first so nothing lands on a closed turn.
-        With the run's `error`, a turn no rule acted on gets a blank outcome.
         Returns the turn id, or None (inert or failed write).
         """
         if not self.active or self._closed:
@@ -509,7 +459,6 @@ class TurnGuard:
         try:
             turn_id = await sync_to_async(record_turn)(self)
         except Exception:
-            # Log the outcome and errors, never the content.
             logger.exception(
                 "Oversight could not record turn {}: outcome {}, acted {}, errors {}",
                 self.id,

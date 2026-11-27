@@ -16,22 +16,14 @@ from django_ai_sdk.utils import resolve_setting
 
 logger = get_logger(__name__)
 
-# Message meta keys the SDK sets, all under "django_ai_sdk.".
-# On a stub result for a call the budget hook skipped.
 SKIPPED_META_KEY = "django_ai_sdk.skipped"
-# On a cut tool result: {"original_chars", "kept_chars"}.
 TRUNCATED_META_KEY = "django_ai_sdk.truncated"
-# On a stub result for a call oversight blocked (True) or skipped with it (False).
-# The value stays as messages already stored carry it.
 BLOCKED_META_KEY = "django_ai_sdk.refused"
-# On a stub the turn's stream already sent, so no one sends it again.
 STREAMED_META_KEY = "django_ai_sdk.streamed"
-# On a tool result oversight has checked for masking.
 MASKED_META_KEY = "django_ai_sdk.masked"
 
 
 def pending_tool_calls(state: State) -> list[ChatMessage] | None:
-    """Return the run's messages when the last one calls tools, else None."""
     messages = state.data.get("messages") or []
     return messages if messages and messages[-1].tool_calls else None
 
@@ -39,11 +31,6 @@ def pending_tool_calls(state: State) -> list[ChatMessage] | None:
 def answer_calls_with(
     state: State, messages: list[ChatMessage], stubs: list[tuple[dict[str, Any], dict[str, Any]]]
 ) -> list[ChatMessage]:
-    """Answer the last message's tool calls with error stubs, so they never run.
-
-    `stubs` holds a (payload, meta) pair per call. Returns the stub messages. A
-    blocked call's stub keeps none of its arguments: the block may be about them.
-    """
     answers = [
         ChatMessage.from_tool(
             json.dumps(payload),
@@ -72,12 +59,10 @@ def decode_tool_result(value: Any) -> Any:
 
 
 def returned_error(value: Any) -> bool:
-    """Whether a decoded result is the {"error": ...} a tool returns to report a safe error."""
     return isinstance(value, dict) and bool(value.get("error"))
 
 
 def tool_failed(result: ToolCallResult) -> bool:
-    """A call failed when it raised or returned {"error": ...}."""
     return bool(result.error) or returned_error(decode_tool_result(result.result))
 
 
@@ -88,7 +73,6 @@ def tool_calls_made(state: State) -> int:
 def tool_results(
     messages: list[ChatMessage], unmarked: str
 ) -> list[tuple[int, ChatMessage, ToolCallResult]]:
-    """Return the tool results without the `unmarked` meta key, with their index."""
     return [
         (index, message, result)
         for index, message in enumerate(messages)
@@ -99,15 +83,12 @@ def tool_results(
 def replace_messages(
     state: State, messages: list[ChatMessage], changed: dict[int, ChatMessage]
 ) -> None:
-    """Replace the messages at the indexes in `changed`. Nothing happens when it is empty."""
     if changed:
         updated = [changed.get(index, message) for index, message in enumerate(messages)]
         state.set("messages", updated, handler_override=replace_values)
 
 
 class ToolCallBudgetHook:
-    """Hard cap on how many tool calls an agent may make in a single run."""
-
     allowed_hook_points = ["before_tool"]
 
     def __init__(self, max_tool_calls: int, message: str | None = None) -> None:
@@ -128,8 +109,6 @@ class ToolCallBudgetHook:
 
 
 class ToolCallBudgetSpentHook:
-    """Once the tool budget is spent, the next model step gets no tools, so it answers."""
-
     allowed_hook_points = ["before_llm"]
 
     def __init__(self, max_tool_calls: int) -> None:
@@ -154,19 +133,12 @@ class LogToolCallsHook:
             return
         for tool_call in messages[-1].tool_calls:
             self._log("Tool call: {}", tool_call.tool_name)
-            # Arguments can carry PII or tokens: keep them out of the default log.
             logger.debug("Tool call {} args={}", tool_call.tool_name, tool_call.arguments)
 
 
 class ToolOutputLimitHook:
-    """Cut tool results longer than `max_chars`, with a note to the model.
-
-    Each result is cut once, when it arrives; later steps see it as it was left.
-    """
-
     allowed_hook_points = ["after_tool"]
 
-    # Ahead of the result: a note at the end of a long result is easily missed.
     _NOTE = (
         "[This tool result is {original:,} characters; only the first {kept:,} are shown. "
         "Answer from this part and say briefly that it is partial; a narrower request "
@@ -203,25 +175,16 @@ class ToolOutputLimitHook:
 
 
 def tool_output_limit(max_chars: int | None = None) -> int | None:
-    """`max_chars`, else ``AI_SDK_TOOL_OUTPUT_LIMIT``; None when 0 or below."""
     limit = (
         max_chars if max_chars is not None else resolve_setting("AI_SDK_TOOL_OUTPUT_LIMIT", 100_000)
     )
     return limit if limit > 0 else None
 
 
-# message meta flag on the nudge the require-tools hook adds
 REQUIRE_TOOLS_META_KEY = "django_ai_sdk.require_tools"
 
 
 class RequireToolsHook:
-    """Keep the agent running until every required tool has been called.
-
-    Required = `required_tools` plus `hook_context["required_tools"]` of the
-    run. Tools not in the current toolset are ignored, and the model is nudged
-    at most `max_nudges` times per run, so a stubborn model can't loop.
-    """
-
     allowed_hook_points = ["on_exit"]
 
     def __init__(self, required_tools: list[str] | None = None, max_nudges: int = 2) -> None:
@@ -251,10 +214,6 @@ class RequireToolsHook:
 
 
 def default_hooks(agent: Any) -> dict[str, list[Any]]:
-    """The tool hooks every Haystack Agent built for `agent` runs: logging and its limits.
-
-    Oversight's hooks join at run time (see `oversight.plugin.run_with_oversight`).
-    """
     return _tool_hooks(
         {"before_tool": [LogToolCallsHook()]},
         max_tool_calls=agent.max_tool_calls,
@@ -270,12 +229,6 @@ def _tool_hooks(
     max_output_chars: int | None,
     required_tools: list[str] | None,
 ) -> dict[str, list[Any]]:
-    """Add the SDK's tool hooks to `base`: call budget, output limit, required tools.
-
-    `base` may already hold them (from `default_hooks`), so each kind is added
-    once and a limit passed here wins over one already in `base`. Hooks of other
-    kinds, oversight's included, keep their places.
-    """
     hooks = {point: list(items) for point, items in (base or {}).items()}
     replaced: tuple[type, ...] = ()
     if max_tool_calls is not None:
@@ -304,8 +257,6 @@ def _tool_hooks(
 
 
 class ToolAgentConfig(BaseModel):
-    """Configuration for ToolAgent."""
-
     model_config = {"arbitrary_types_allowed": True}
 
     model: str
@@ -315,7 +266,6 @@ class ToolAgentConfig(BaseModel):
     # Loop exits once the generator replies with a plain text message.
     exit_conditions: list[str] = ["text"]
 
-    # Hard cap on loop iterations per run.
     max_agent_steps: int = 100
 
     # Optional hard cap on tool calls per run. None disables the budget hook.
@@ -324,26 +274,18 @@ class ToolAgentConfig(BaseModel):
     # Characters kept of each tool result. None uses AI_SDK_TOOL_OUTPUT_LIMIT; 0 disables.
     max_tool_output_chars: int | None = None
 
-    # Maximum number of tools invoked in parallel per step.
     tool_concurrency_limit: int = 4
 
-    # Optional state schema passed through to the Haystack Agent.
     state_schema: dict[str, Any] | None = None
 
-    # Optional hooks passed through to the Haystack Agent, keyed by hook point.
     hooks: dict[str, list[Any]] | None = None
 
-    # Tools the agent must call before it may finish (see RequireToolsHook).
     required_tools: list[str] = []
 
-    # Forward the streaming callback into subagent tools, so their tool calls stream
-    # through the coordinator's event queue.
     stream_subagent_tools: bool = True
 
 
 class ToolAgent:
-    """ToolAgent that wraps a Haystack Agent with tools."""
-
     def __init__(
         self,
         config: ToolAgentConfig,
@@ -368,11 +310,7 @@ class ToolAgent:
         hooks: dict[str, list[Any]] | None = None,
         stream_subagent_tools: bool = True,
     ) -> HaystackAgent:
-        """Build a configured Haystack Agent, for streamed agents and subagent wrappers.
-
-        Only non-None loop knobs are passed, keeping Haystack's defaults. ``user_prompt`` and
-        ``required_variables`` give a subagent's ``run()`` the ``task`` the coordinator passes.
-        """
+        """Only non-None loop knobs are passed, keeping Haystack's defaults."""
         kwargs: dict[str, Any] = {
             "chat_generator": generator,
             "tools": tools,
@@ -405,7 +343,6 @@ class ToolAgent:
         )
 
     def pipeline(self) -> Pipeline:
-        """Build and return the fully connected pipeline."""
         logger.debug("Building ToolAgent pipeline")
 
         agent = self.build_agent(

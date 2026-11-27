@@ -1,8 +1,3 @@
-"""What reflect does to the stored answer: masks it, leaves a notice, or leaves it alone.
-
-How a reflection is claimed, retried and given back: test_durability.TestReflectLease.
-"""
-
 from __future__ import annotations
 
 import json
@@ -161,7 +156,6 @@ class TestReflect:
                 thread=await Thread.objects.acreate(),
                 result=stored.model_dump(),
             )
-            # The record never held the number; the thread did, and reflect fixes that copy.
             assert (await kept(turn))["output"] == "Call [PHONE] for it."
             await run_reflection(str(turn.id))
         message = await Message.objects.aget(id=guard.message_id)

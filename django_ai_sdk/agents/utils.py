@@ -20,9 +20,6 @@ TASK_MODEL_SETTING = "AI_SDK_TASK_MODEL"
 
 
 def llm_generator() -> Any:
-    """
-    Build a dedicated generator
-    """
     model = resolve_setting(EXTRACTION_MODEL_SETTING) or resolve_setting(
         "AI_SDK_DEFAULT_MODEL", "gpt-4o-mini"
     )
@@ -30,7 +27,6 @@ def llm_generator() -> Any:
 
 
 def task_runner() -> Run | None:
-    """A one-shot runner on AI_SDK_TASK_MODEL, a small fast model for side tasks"""
     model = resolve_setting(TASK_MODEL_SETTING)
     return Run(generator=openai_responses_chat(model=model)) if model else None
 
@@ -39,9 +35,6 @@ async def extract_artifact(
     messages: list[ChatMessage],
     output_model: type[ArtifactSchema],
 ) -> ArtifactSchema | None:
-    """
-    Run a one-shot structured extraction
-    """
     from django_ai_sdk.oversight.stream import run_side_task
 
     extractor = Run(generator=llm_generator())

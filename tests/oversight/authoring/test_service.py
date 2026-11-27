@@ -1,5 +1,3 @@
-"""Authoring policies at runtime: who may, what a definition may hold, what turns then run."""
-
 from __future__ import annotations
 
 import pytest
@@ -28,7 +26,6 @@ async def save(name: str = "refunds", **changes):
 
 
 def judged(*judges) -> dict:
-    """An authored judge lens named like the refunds lens, answered by `judges`."""
     return {"kind": "judge", "name": "refund", "stages": ["gate"], "judges": list(judges)}
 
 
@@ -63,7 +60,6 @@ class TestSaving:
         assert (out.active, out.loaded, out.error) == (True, True, "")
         refused = await gate("refunds", "I want a refund")
         assert refused.blocked and refused.message == "Refunds go through support."
-        # What it extends still runs.
         assert (await gate("refunds", "a xylophone")).blocked
         assert not (await gate("refunds", "hello")).blocked
         resolved = await get_resolved_policy("refunds")
@@ -80,7 +76,6 @@ class TestSaving:
         lenses = [
             judged(
                 {"class": "PatternJudge", "keywords": ["refund"]},
-                # Not set up here, so the lens skips it.
                 {"alias": "judge", "optional": True},
             ),
             {
@@ -112,7 +107,6 @@ class TestSaving:
         load = loader.load_sync
 
         def other_request_creates_it_first() -> None:
-            # A new name has no row to lock, so another request can insert it meanwhile.
             if not AuthoredPolicy.objects.filter(name="refunds").exists():
                 AuthoredPolicy.objects.create(name="refunds")
             load()
@@ -235,17 +229,14 @@ class TestWhatADefinitionMayNotDo:
         assert "MUST_EXTEND" in await self.refused(extends=[])
 
     async def test_open_up_a_parent_that_fails_closed(self):
-        # A failed lens would let au-base's enforced block through.
         assert "fail_mode 'open'" in await self.refused(options={"fail_mode": "open"})
 
     async def test_stream_an_answer_it_withholds_at_finish(self):
-        # W011, which the system check never sees for an authored policy.
         lenses = [{**refunds()["lenses"][0], "stages": ["finish"], "subject": "output"}]
         refused = await self.refused(lenses=lenses, options={"stream_mode": "live"})
         assert "streams it live" in refused
 
     async def test_mask_the_question_on_a_rule_that_waits_past_the_gate(self):
-        # W019, which the system check never sees either: the model would read it unmasked.
         lenses = [
             {"preset": "pii", "name": "mail", "kinds": ["email"]},
             {"preset": "pii", "name": "mail_out", "kinds": ["email"], "subject": "output"},
@@ -274,7 +265,6 @@ class TestWhatADefinitionMayNotDo:
         longer = {"retention": {"content": 60}}
         refused = await self.refused(extends=["au-short"], options=longer)
         assert "content retention of 60 days is longer than the 30 days 'au-short' keeps" in refused
-        # A parent that sets none keeps what the RETENTION setting says: 90 days of content.
         refused = await self.refused(options={"retention": {"content": 91}})
         assert "longer than the 90 days 'au-base' keeps" in refused
         await save(extends=["au-short"], options={"retention": {"content": 7}})
@@ -302,7 +292,6 @@ class TestOtherProcesses:
 
         await save()
         other = AuthoredPolicyLoader()
-        # Another process: its registry has not seen the save yet.
         from django_ai_sdk.oversight.registry import unregister_policy
 
         unregister_policy("refunds")
@@ -321,7 +310,6 @@ class TestOtherProcesses:
         await save("later", extends=["au-base"], lenses=[], rules=[])
         other = AuthoredPolicyLoader()
         await other.load()
-        # A save that commits after a newer one, stamped by a clock that runs behind.
         rules = [{**refunds()["rules"][0], "mode": "report"}]
         assert first.updated_at is not None
         await AuthoredPolicy.objects.filter(name="refunds").aupdate(
@@ -333,12 +321,10 @@ class TestOtherProcesses:
 
     async def test_a_policy_that_no_longer_loads_is_refused_not_skipped(self):
         await save()
-        # A deploy removed the code policy it extends.
         from django_ai_sdk.oversight.authoring.loader import loader
         from django_ai_sdk.oversight.registry import unregister_policy
 
         unregister_policy("au-base")
-        # Nothing in the table changed, so make the loader read it again.
         loader.stamp = None
         await loader.load()
         assert get_policy_class("refunds") is None
@@ -347,7 +333,6 @@ class TestOtherProcesses:
 
     async def test_a_row_extending_an_authored_policy_does_not_load(self, fresh_loader):
         await save()
-        # Saved by hand, before authored policies could only extend code.
         await AuthoredPolicy.objects.acreate(name="refunds-eu", extends=["refunds"])
         await fresh_loader.load()
         assert get_policy_class("refunds-eu") is None
@@ -358,7 +343,6 @@ class TestOtherProcesses:
 @pytest.mark.django_db(transaction=True)
 class TestCodeKeepsItsRules:
     async def test_a_second_parent_cannot_replace_a_code_rule(self):
-        """The later parent would win in the build, so `block_x` would be au-off-x's: off."""
         with pytest.raises(UserError, match="'block_x' of 'au-base' is replaced"):
             await save("child", extends=["au-base", "au-off-x"], lenses=[], rules=[])
         assert (await gate("au-base", "a xylophone")).blocked
@@ -411,7 +395,6 @@ async def test_a_code_policy_that_does_not_load_cannot_be_stood_in_for(registry_
     with pytest.raises(UserError, match="declared in code that does not load"):
         await save("care", extends=["au-base"], lenses=[], rules=[])
     assert "care" in get_invalid_policies()
-    # A row saved before the code broke: it never takes over, not on a later load either.
     from django_ai_sdk.oversight.authoring.loader import loader
 
     await AuthoredPolicy.objects.acreate(name="care", extends=["au-base"])
@@ -448,11 +431,10 @@ class TestWritesRacingOnPostgres:
 @pytest.mark.usefixtures("no_reflect_queue")
 @pytest.mark.django_db(transaction=True)
 async def test_a_code_policy_named_by_its_class_takes_its_name_back(registry_snapshot):
-    """It registers only once an agent names it, so a policy may be authored under its name first."""
     from django_ai_sdk.oversight import Block, L, PatternLens, Policy, Rule
     from django_ai_sdk.oversight.registry import policy_name
 
-    class Care(Policy):  # chosen with run(oversight=Care), never registered
+    class Care(Policy):
         name = "care"
         lenses = [PatternLens(name="pay", keywords=["salary"])]  # noqa: RUF012
         rules = [Rule("block_pay", when=L("pay").is_true, then=Block(), mode="enforce")]  # noqa: RUF012

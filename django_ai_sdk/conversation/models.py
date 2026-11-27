@@ -13,10 +13,6 @@ from .managers import MessageManager, ThreadManager
 
 
 class Thread(models.Model):
-    """
-    Represents a conversation thread that can contain multiple messages.
-    """
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=THREAD_TITLE_MAX_LENGTH, blank=True, default="")
     user = models.ForeignKey(
@@ -37,15 +33,12 @@ class Thread(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     metadata = models.JSONField(default=dict, blank=True)
 
-    # Reverse relation type hints
     messages: models.Manager[Message]
     user_id: str | None
     file_memory_id: str | None
 
-    # Annotated field from querysets
     msg_count: int
 
-    # Custom manager
     objects = ThreadManager()
 
     class Meta:
@@ -69,33 +62,23 @@ class Thread(models.Model):
         return self.messages.order_by("-created_at").first()  # ty: ignore[invalid-attribute-access]
 
     def add_user_message(self, chat_message: ChatMessage) -> Message:
-        """Add user ChatMessage to this thread."""
         message = Message.from_chat_message(self, chat_message)
         message.save()
         return message
 
 
 class Message(models.Model):
-    """
-    Represents a single message within a conversation thread.
-    Stores complete ChatMessage as JSON for unified storage.
-    """
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     thread = models.ForeignKey(Thread, on_delete=models.CASCADE, related_name="messages")
     created_at = models.DateTimeField(default=timezone.now)
 
-    # Type hints for related fields
     thread_id: str
 
-    # Store complete ChatMessage as JSON
     result = models.JSONField()
 
-    # Soft delete
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    # Custom manager
     objects = MessageManager()
 
     class Meta:
@@ -115,22 +98,16 @@ class Message(models.Model):
         return f"{chat_msg.role}: {content_preview}"
 
     async def asave(self, *args: Any, **kwargs: Any) -> None:
-        # Update thread's updated_at timestamp when a message is saved
         await super().asave(*args, **kwargs)
-        # Use atomic update to avoid race conditions
         await Thread.objects.filter(id=self.thread_id).aupdate(updated_at=timezone.now())
 
     def to_chat_message(self) -> ChatMessage:
-        """Convert stored JSON data to ChatMessage object."""
         chat_message = ChatMessage.model_validate(self.result)
-        # Set created_at from the database timestamp
         chat_message.created_at = self.created_at.isoformat() if self.created_at else ""
         return chat_message
 
     @classmethod
     def from_chat_message(cls, thread: Thread, chat_message: ChatMessage) -> Message:
-        """Create Message from ChatMessage - ID must be provided by adapter."""
-        # Validate that ID is provided by adapter (contract enforcement)
         if not chat_message.id:
             raise ValueError(
                 "ChatMessage.id is required but was not provided. ID must be generated at adapter level."
@@ -144,24 +121,17 @@ class Message(models.Model):
         return cls(id=message_id, thread=thread, result=chat_message.model_dump())
 
     def delete_message(self) -> Message:
-        """Soft delete this message."""
         self.is_deleted = True
         self.deleted_at = timezone.now()
         return self
 
     def restore_message(self) -> Message:
-        """Restore a soft-deleted message."""
         self.is_deleted = False
         self.deleted_at = None
         return self
 
 
 class MessageFeedback(models.Model):
-    """
-    Feedback (rating + optional comment) on a message.
-    Supports multiple feedbacks per message (one per user).
-    """
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="feedbacks")
     user = models.ForeignKey(
@@ -175,7 +145,6 @@ class MessageFeedback(models.Model):
     feedback = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now)
 
-    # Type hints for related fields
     message_id: str
     user_id: str | None
 

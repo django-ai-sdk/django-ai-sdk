@@ -13,18 +13,6 @@ logger = get_logger(__name__)
 
 
 def to_document(doc: RagDocument) -> HaystackDocument:
-    """
-    Convert a RagDocument to a Haystack Document.
-
-    Args:
-        doc: RagDocument to convert
-
-    Returns:
-        Haystack Document
-
-    Example:
-        haystack_doc = to_document(rag_doc)
-    """
     return HaystackDocument(
         id=doc.id,
         content=doc.content,
@@ -33,25 +21,10 @@ def to_document(doc: RagDocument) -> HaystackDocument:
 
 
 async def queryset_to_rag_documents(queryset: Any, **kwargs: Any) -> list[RagDocument]:
-    """
-    Convert any Django QuerySet to a list of RagDocuments.
-
-    Each item in the queryset must implement ``to_rag_document() -> RagDocument``.
-    Works with Entry, Document (alias), or any proxy subclass (NoteEntry, etc.).
-
-    The ``memory_id`` keyword arg is accepted for backward compatibility with
-    callers that still pass it — it is not used here because each model's own
-    ``to_rag_document()`` knows how to populate metadata.
+    """Each item in the queryset must implement ``to_rag_document() -> RagDocument``.
 
     Args:
-        queryset: Django QuerySet whose items implement to_rag_document()
         **kwargs: Ignored (backward-compat for memory_id callers)
-
-    Returns:
-        List of RagDocuments (vendor-neutral)
-
-    Example:
-        documents = await queryset_to_rag_documents(Entry.objects.filter(memory_id=...))
     """
     rag_docs = []
     skipped_count = 0

@@ -1,17 +1,9 @@
-"""AgentStep: the model call as one step, and what its outcome carries.
-
-One class serves both ways of naming an agent — a class a code-declared step
-imports, and the id a JSON definition carries — so there is no second agent step.
-"""
-
 import pytest
 from pydantic import BaseModel
 
 from django_ai_sdk import Agent
 from django_ai_sdk.workflows.steps import AgentStep, StepOutcome, WorkflowContext
 
-# Distinguishes "not passed" from an explicit None, which Agent.run reads as
-# "no structured output".
 OMITTED = object()
 
 
@@ -83,8 +75,6 @@ async def test_an_agent_step_passes_prompt_and_user_to_the_agent():
 
 
 class TestTheSystemPrompt:
-    """`instructions` is the override; without one the agent keeps its own."""
-
     async def test_no_instructions_leaves_the_agents_own_prompt_alone(self):
         StubAgent.result = "the answer"
 
@@ -104,8 +94,6 @@ class TestTheSystemPrompt:
 
 
 class TestTheDefaultTurn:
-    """An agent step with no `user_message` sends what the steps it requires made."""
-
     async def test_it_renders_each_required_steps_output(self):
         step = AgentStep()
         step.agent = StubAgent
@@ -130,11 +118,9 @@ class TestTheDefaultTurn:
         ctx = WorkflowContext(inputs={"history": [ChatMessage(role="user", content="ahoy")]})
         await step.run(ctx)
 
-        # Nothing required, so the transcript is the whole conversation.
         assert [m.content for m in StubAgent.seen[-1]["messages"]] == ["ahoy"]
 
     async def test_a_history_input_is_coerced_from_the_json_it_crossed_the_queue_as(self):
-        """The inline and the queued path have to send the same conversation."""
         step = AgentStep()
         step.agent = StubAgent
         step.name = "reply"
@@ -147,7 +133,6 @@ class TestTheDefaultTurn:
         assert [m.content for m in StubAgent.seen[-1]["messages"]] == ["ahoy"]
 
     async def test_a_string_history_field_is_one_user_turn(self):
-        """What a history field holds is the author's choice, and a str is a prompt."""
         step = AgentStep()
         step.agent = StubAgent
         step.name = "reply"
@@ -184,7 +169,6 @@ class TestTheDefaultTurn:
         assert [m.content for m in StubAgent.seen[-1]["messages"]] == ["ahoy", "go on"]
 
     async def test_an_input_nobody_named_is_not_mistaken_for_a_transcript(self):
-        """Named, not guessed: a list of role-shaped rows is data until it is declared."""
         step = AgentStep()
         step.agent = StubAgent
         step.name = "reply"
@@ -205,7 +189,6 @@ class TestTheDefaultTurn:
         ids=["one-message", "in-a-list"],
     )
     async def test_a_system_turn_in_history_is_refused(self, history):
-        """History speaks as the user and the assistant, never with the agent's authority."""
         step = AgentStep()
         step.agent = StubAgent
         step.name = "reply"
@@ -232,8 +215,6 @@ class TestTheDefaultTurn:
 
 
 class TestTheChatGate:
-    """A code pipeline is not a permission bypass — the same gate a JSON step gets."""
-
     async def test_a_denied_principal_never_reaches_the_agent(self):
         from django_ai_sdk.permissions import DenyAll, PermissionDenied
 
@@ -272,8 +253,6 @@ def test_an_outcome_defaults_to_completed_with_no_output():
 
 
 class TestTheTwoNamespaces:
-    """Inputs and step results never contend, so neither has to be renamed."""
-
     def test_an_input_and_a_step_may_share_a_name(self):
         ctx = WorkflowContext(
             inputs={"document": "what the caller passed"},
@@ -301,8 +280,6 @@ class Extracted(BaseModel):
 
 
 class TestTheSchemaReachesTheAgentUntouched:
-    """A step's `schema` is the agent's `response_format`, and only when set."""
-
     async def test_a_declared_schema_is_passed(self):
         class WithSchema(StubStep):
             schema = Extracted
@@ -312,7 +289,6 @@ class TestTheSchemaReachesTheAgentUntouched:
         outcome = await WithSchema().run(WorkflowContext())
 
         assert StubAgent.seen[-1]["response_format"] is Extracted
-        # Dumped, because the outcome goes on the run's record.
         assert outcome.output == {"title": "t"}
 
     async def test_a_declared_schema_that_did_not_come_back_is_a_failure(self):
@@ -327,7 +303,6 @@ class TestTheSchemaReachesTheAgentUntouched:
         assert outcome.detail == "the agent returned no structured output"
 
     async def test_no_schema_leaves_the_agents_own_response_format_alone(self):
-        """Passing None would strip it: Agent.run reads None as "no format"."""
         StubAgent.result = "text"
 
         await StubStep().run(WorkflowContext())

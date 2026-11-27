@@ -1,9 +1,3 @@
-"""Save, toggle, delete, dry-run and list authored policies.
-
-Toggles change only what the policy itself declares; what it extends always runs.
-Every write locks the row, so a save and a toggle never overwrite each other.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -130,7 +124,7 @@ class AuthoringService(OversightAccess):
 
     @classmethod
     async def delete_policy(cls, name: str, *, user: UserType) -> bool:
-        """Refused while an agent or DEFAULT_POLICY names it: those turns would be blocked."""
+        """Refused while an agent or DEFAULT_POLICY names it."""
         await cls.has_perms(user, AUTHOR)
         return await sync_to_async(_delete_unused_policy)(name)
 
@@ -189,10 +183,6 @@ def _save_definition(
     *,
     create: bool = False,
 ) -> AuthoredPolicy | None:
-    """Lock the row, apply `mutate`, check, save. None when missing and not `create`.
-
-    A new name has no row to lock: when another request creates it first, ConflictError.
-    """
     from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
     try:
@@ -202,7 +192,6 @@ def _save_definition(
                 return None
             row = row or AuthoredPolicy(name=name)
             mutate(row)
-            # Read after the lock, so what other processes saved counts.
             loader.load_sync()
             try:
                 check_definition(name, row.definition())
@@ -247,7 +236,7 @@ def _dependents(name: str) -> list[str]:
             if attribute_policy(agent)[0] == name:
                 named.append(agent_id)
         except Exception:
-            continue  # An agent whose policy cannot be read here names none.
+            continue
     if named:
         found.append(f"agents {named} name it in code")
     return found

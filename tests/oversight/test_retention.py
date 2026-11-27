@@ -1,6 +1,3 @@
-"""Retention: `oversight_prune` deletes what expired in batches, and W007 says when expired
-rows are left."""
-
 from __future__ import annotations
 
 from datetime import timedelta
@@ -30,7 +27,6 @@ LATER = timedelta(days=1)
 
 
 async def expire(turn_id: str, *, content: bool = False, turn: bool = False) -> None:
-    """Make `turn_id`'s content, or the turn itself, expired by now."""
     past = timezone.now() - LATER
     row = await Turn.objects.aget(id=turn_id)
     if content:
@@ -56,7 +52,6 @@ async def test_an_expired_turn_takes_its_rows_and_content():
     await expire(gone, turn=True)
     counts = await sync_to_async(prune)()
     assert counts["turns"] == 1
-    # Its hr review was still open: retention wins, and the record says so.
     assert counts["open_reviews"] == 1
     assert not await Turn.objects.filter(id=gone).aexists()
     for model in (LensAnswer, RuleMatch, ReviewItem):
@@ -71,13 +66,11 @@ async def test_it_deletes_in_batches_each_its_own_transaction():
         await expire(turn_id, turn=True)
     counts, deletes = await sync_to_async(prune_counting_turn_deletes)(2)
     assert counts["turns"] == 5
-    # Three batches of at most two turns: one delete of turn rows each.
     assert deletes == 3
     assert not await Turn.objects.aexists()
 
 
 def prune_counting_turn_deletes(batch_size: int) -> tuple[dict[str, int], int]:
-    """`prune(batch_size=...)`, and how many DELETEs of turn rows it sent."""
     with CaptureQueriesContext(connection) as queries:
         counts = prune(batch_size=batch_size)
     sql = [q["sql"] for q in queries.captured_queries]
@@ -105,8 +98,6 @@ async def test_the_command_says_what_it_deleted():
 
 
 class TestNothingPrunes:
-    """W007: a deploy check against a database; fresh deployments and recent runs are fine."""
-
     @staticmethod
     def ids() -> list[str]:
         return [m.id for m in check_oversight_retention(databases=["default"])]
@@ -127,7 +118,6 @@ class TestNothingPrunes:
         assert await sync_to_async(self.ids)() == []
 
     async def test_a_turn_open_for_more_than_a_day_warns_until_swept(self):
-        # W017: a run that crashed outside run_with_oversight leaves its turn open until the sweep.
         turn_id = await a_turn()
         await Turn.objects.filter(id=turn_id).aupdate(
             status="open", created_at=timezone.now() - timedelta(days=2)

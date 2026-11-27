@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 TIMEOUT_MESSAGE = "Sorry, that took too long. Try asking something smaller."
 ERROR_MESSAGE = "Sorry, something went wrong answering that."
 
-# Fixed namespace, so a conversation always maps to the same thread id.
 _THREAD_NAMESPACE = uuid.UUID("6b1f3c2e-9a84-4d1f-b7e0-2c8a5d9f1e44")
 
 
@@ -41,23 +40,19 @@ async def handle_inbound(payload: dict[str, Any]) -> None:
 
 
 async def run_inbound(payload: dict[str, Any]) -> None:
-    """Answer one inbound event. Always replies once an agent is found."""
     event = InboundEvent.model_validate(payload)
     integration = (await get_integrations([event.integration])).get(event.integration)
-    # The integration may have been removed since the request.
     if not isinstance(integration, WebhookIntegration):
         logger.warning(
             "Dropping event for %r, which no longer receives webhooks", event.integration
         )
         return
 
-    # Kept on failure since tools may have acted; no id means no dedup.
     key = f"ai_sdk:webhook:{event.integration}:{event.event_id}"
     if event.event_id and not await cache.aadd(key, 1, integration.dedup_ttl):
         logger.info("Dropping a repeat of %r event %s", event.integration, event.event_id)
         return
 
-    # Here, not in the view: receivers are too slow for the platform's ack window.
     for receiver, outcome in await event_received.asend_robust(
         sender=type(integration), event=event
     ):
@@ -71,7 +66,6 @@ async def run_inbound(payload: dict[str, Any]) -> None:
 
     agent = integration.resolve_agent()
     if agent is None:
-        # Still reply, so the person in the channel is not left waiting.
         logger.error(
             "AI_SDK_INTEGRATIONS[%r]['AGENT'] does not resolve to a registered agent; "
             "answering with the error message",
@@ -80,7 +74,6 @@ async def run_inbound(payload: dict[str, Any]) -> None:
         await integration.reply(event, ERROR_MESSAGE)
         return
 
-    # SECURITY: never trust the sender id as a user; runs act as RUN_AS or anonymously.
     principal = await integration.aget_principal()
 
     storage, thread_id, history = await _load_conversation(agent, integration, event, principal)
@@ -109,7 +102,6 @@ async def run_inbound(payload: dict[str, Any]) -> None:
         current_event.reset(token)
 
     reply_text = str(text) if text else ERROR_MESSAGE
-    # Store fallback replies too, so the thread matches what the channel shows.
     if storage is not None:
         await _persist_turn(storage, user_message, reply_text)
     await integration.reply(event, reply_text)
@@ -121,7 +113,6 @@ async def _load_conversation(
     event: InboundEvent,
     principal: AbstractBaseUser | None,
 ) -> tuple[BaseStorageAdapter | None, str | None, list[ChatMessage]]:
-    """Create the thread if needed and return its earlier messages."""
     scope = integration.thread_scope(event)
     storage_class = agent.storage_adapter
     if not scope or storage_class is None:
@@ -140,12 +131,10 @@ async def _load_conversation(
                     "external_user_id": event.external_user_id,
                     "webhook_scope": scope,
                 },
-                # Owned by the run's user, so normal thread permissions apply.
                 user=principal,
                 thread_id=thread_id,
             )
         except Exception:
-            # Two events can race to create it; storage may not be a database.
             if await storage_class.get_thread(thread_id) is None:
                 raise
         else:
@@ -153,7 +142,6 @@ async def _load_conversation(
 
     storage = storage_class(thread_id)
     history = await storage.get_messages()
-    # Agent.run sends what it is given, so apply max_history here.
     if agent.max_history and len(history) > agent.max_history:
         history = history[-agent.max_history :]
     return storage, thread_id, history
@@ -164,7 +152,6 @@ async def _persist_turn(
     user_message: ChatMessage,
     reply_text: str,
 ) -> None:
-    # No transaction (storage may not be a database); a half-written turn looks unanswered.
     try:
         if not user_message.id:
             user_message.id = str(uuid.uuid4())

@@ -1,3 +1,0 @@
-"""
-Piratespeak Django models.
-"""

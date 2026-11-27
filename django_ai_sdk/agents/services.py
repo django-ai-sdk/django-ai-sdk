@@ -79,10 +79,6 @@ class AgentUpdateData(TypedDict, total=False):
 
 
 class AgentService(PermissionsMixin):
-    """
-    Service for resolving agents from the registry.
-    """
-
     domain = PermissionDomain.AGENT
 
     @classmethod
@@ -108,7 +104,6 @@ class AgentService(PermissionsMixin):
 
     @classmethod
     def from_registry(cls, agent_id: str) -> Agent:
-        """Resolve agent from registry only (sync). Raises ValueError if not found."""
         agent = registry.get(agent_id)
         if agent is None:
             raise NotFound(f"Agent '{agent_id}' not found")
@@ -139,10 +134,7 @@ class AgentService(PermissionsMixin):
         user: UserType,
         thread_id: str | None = None,
     ) -> tuple[Any, bool]:
-        """Run `agent` as one "api" turn and return (reply, blocked).
-
-        A blocked or withheld reply returns the policy's message with blocked True.
-        """
+        """A blocked or withheld reply returns the policy's message with blocked True."""
         try:
             result = await agent.run(messages, thread_id=thread_id, user=user, channel="api")
         except Blocked as blocked:
@@ -151,21 +143,6 @@ class AgentService(PermissionsMixin):
 
     @classmethod
     async def get_agent(cls, thread_id: str, user: UserType) -> Agent:
-        """Find the thread and return its associated agent.
-
-        Checks the registry first; falls back to AgentSettings for
-        DB-configured agents.
-
-        Args:
-            thread_id: Thread ID to look up
-            user: Optional user for permission checking on the thread lookup
-
-        Returns:
-            The agent instance associated with the thread
-
-        Raises:
-            ValueError: If thread or agent not found
-        """
         from django_ai_sdk.storage.services import ThreadService
 
         thread = await ThreadService.get_thread(thread_id, user=user)
@@ -189,7 +166,6 @@ class AgentService(PermissionsMixin):
 
     @classmethod
     async def get_rag_agents(cls) -> list[Agent]:
-        """Registry and active runtime agents that have a RAG provider."""
         from django_ai_sdk.agents.config import get_runtime_agent_class
         from django_ai_sdk.agents.models import AgentSettings
 
@@ -277,14 +253,7 @@ class AgentService(PermissionsMixin):
     async def get_integration_status(
         cls, agent: Any, *, user: UserType
     ) -> list[AgentIntegrationStatus]:
-        """Get integration status for every integration configured on an agent.
-
-        Requires VIEW_AGENT permission.
-
-        Returns a list of AgentIntegrationStatus, each carrying an IntegrationStatus
-        (see django_ai_sdk.integrations.base). `type`/`tool_names` come from the
-        Integration itself (`.kind`/`.get_tool_names()`).
-        """
+        """Requires VIEW_AGENT permission."""
         await cls.has_perms(
             user, Operation.VIEW_AGENT, obj=agent.config if agent.is_runtime else None, agent=agent
         )
@@ -307,16 +276,10 @@ class AgentService(PermissionsMixin):
                 tool_names=tool_names,
             )
 
-        # Run every integration concurrently — each get_status()/get_tool_names() is
-        # individually bounded — mirroring Agent._get_integration_tools().
         integrations = await get_integrations(integration_names)
         return list(
             await asyncio.gather(*(_status_for(name, i) for name, i in integrations.items()))
         )
-
-    # ============================================================================
-    # Agent user management
-    # ============================================================================
 
     @classmethod
     async def list_agent_users(cls, agent_id: str, *, user: UserType) -> Sequence[AgentUser]:
@@ -416,10 +379,6 @@ class AgentService(PermissionsMixin):
         if not deleted:
             raise NotFound(f"User '{target_user_id}' not found on agent '{agent_id}'")
 
-    # ============================================================================
-    # Agent group management
-    # ============================================================================
-
     @classmethod
     async def list_agent_groups(cls, agent_id: str, *, user: UserType) -> Sequence[AgentGroup]:
         from django_ai_sdk.agents.models import AgentGroup, AgentSettings
@@ -487,10 +446,6 @@ class AgentService(PermissionsMixin):
         deleted, _ = await AgentGroup.objects.filter(agent_id=agent_id, group_id=group_id).adelete()
         if not deleted:
             raise NotFound(f"Group '{group_id}' not found on agent '{agent_id}'")
-
-    # ============================================================================
-    # Runtime agent CRUD
-    # ============================================================================
 
     @classmethod
     async def list_runtime_agents(

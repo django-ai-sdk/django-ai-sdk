@@ -63,7 +63,6 @@ def _openai_kwargs(**kwargs: Any) -> dict[str, Any]:
 def dense_document_embedder(
     model: str, remote: bool, meta_fields_to_embed: list[str]
 ) -> FastembedDocumentEmbedder | OpenAIDocumentEmbedder:
-    """Embeds documents locally with FastEmbed, or through an OpenAI-compatible API."""
     if remote:
         return OpenAIDocumentEmbedder(
             **_openai_kwargs(model=model, meta_fields_to_embed=meta_fields_to_embed)
@@ -74,15 +73,12 @@ def dense_document_embedder(
 def dense_text_embedder(
     model: str, remote: bool, prefix: str = ""
 ) -> FastembedTextEmbedder | OpenAITextEmbedder:
-    """Embeds a query locally with FastEmbed, or through an OpenAI-compatible API."""
     if remote:
         return OpenAITextEmbedder(**_openai_kwargs(model=model, prefix=prefix))
     return FastembedTextEmbedder(model=model, prefix=prefix)
 
 
 class QdrantBM25HybridRAGConfig(RAGConfig):
-    """Configuration for Qdrant Hybrid RAG (BM42 Sparse + Dense)."""
-
     sparse_embedder_model: str = Field(
         default="Qdrant/bm42-all-minilm-l6-v2-attentions",
     )
@@ -92,7 +88,6 @@ class QdrantBM25HybridRAGConfig(RAGConfig):
     remote_embeddings: bool = Field(
         default_factory=lambda: bool(resolve_setting("AI_SDK_EMBEDDINGS_MODEL")),
     )
-    # The dimension setting belongs to the remote model; the local default model is 384.
     embedding_dim: int = Field(
         default_factory=lambda: (
             resolve_setting("AI_SDK_EMBEDDINGS_DIM", 384)
@@ -101,7 +96,6 @@ class QdrantBM25HybridRAGConfig(RAGConfig):
         ),
         ge=1,
     )
-    # Prepended to queries only, for instruction-tuned models such as Qwen3-Embedding.
     query_prefix: str = ""
     chunk_size: int = Field(default=500, ge=1)
     chunk_overlap: int = Field(default=150, ge=0)
@@ -110,8 +104,6 @@ class QdrantBM25HybridRAGConfig(RAGConfig):
 
 
 class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
-    """RAG implementation using Qdrant with Hybrid retrieval + Query Expansion."""
-
     def __init__(
         self,
         documents: list[RagDocument],
@@ -129,11 +121,9 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             )
 
     def _convert_documents(self) -> list[HaystackDocument]:
-        """Convert RagDocuments to HaystackDocuments for internal use."""
         return [to_document(doc) for doc in self.documents]
 
     def _create_document_store(self, recreate: bool = False) -> QdrantDocumentStore:
-        """Create document store based on persistence configuration."""
         storage = self.config.storage
         extra = storage.extra
 
@@ -149,8 +139,6 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                     similarity=storage.similarity,
                     **extra,
                 )
-                # The collection is created on first use. A ValueError means there is
-                # no index yet, as `_has_existing_index` reads it.
                 with contextlib.suppress(ValueError):
                     store.count_documents()
                 return store
@@ -160,8 +148,6 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             except Exception as exc:
                 if not _created_meanwhile(exc):
                     raise
-            # Another worker created the collection after this one looked: use it, and
-            # never recreate it, which would delete what that worker writes.
             return connect(False)
 
         if storage.is_persistent and storage.persist_path:
@@ -192,8 +178,6 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                         similarity=storage.similarity,
                         **extra,
                     )
-                    # The folder lock is taken on first use. A ValueError is about
-                    # the index, not the lock.
                     with contextlib.suppress(ValueError):
                         store.count_documents()
                     return store
@@ -208,16 +192,14 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             )
 
     async def embed_missing(self) -> tuple[int, int]:
-        """Embed the chunks stored without a dense vector"""
         store = self._cached_document_store or await asyncio.to_thread(self._create_document_store)
         try:
             return await asyncio.to_thread(self._embed_missing, store)
         finally:
             if store is not self._cached_document_store:
-                store.close()  # releases a local store's lock
+                store.close()
 
     def _embed_missing(self, store: QdrantDocumentStore) -> tuple[int, int]:
-        # reads every chunk to find the few without a vector.
         missing = [doc for doc in store.filter_documents() if doc.embedding is None]
         if not missing:
             return 0, 0
@@ -230,19 +212,16 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         embedded = [
             doc for doc in embedder.run(documents=missing)["documents"] if doc.embedding is not None
         ]
-        # Same ids, sparse vectors kept, fills in just the dense vector.
         store.write_documents(embedded, policy=DuplicatePolicy.OVERWRITE)
         return len(embedded), len(missing) - len(embedded)
 
     def _has_existing_index(self, document_store: QdrantDocumentStore) -> bool:
-        """Check if document store already has indexed documents."""
         try:
             return document_store.count_documents() > 0
         except ValueError:
             return False
 
     async def add_documents(self, documents: list[RagDocument]) -> None:
-        """Add documents to the existing Qdrant index."""
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot add documents")
             return
@@ -252,9 +231,6 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         logger.info(f"Added {len(documents)} documents to Qdrant index")
 
     async def _index_documents(self, documents: list, document_store: QdrantDocumentStore) -> None:
-        """Index documents with chunking and embedding."""
-
-        # Add original doc_id to metadata so we can delete by it later
         for doc in documents:
             if "doc_id" not in doc.meta:
                 doc.meta["doc_id"] = doc.id
@@ -295,17 +271,13 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         indexing_pipeline.connect("sparse_doc_embedder", "dense_doc_embedder")
         indexing_pipeline.connect("dense_doc_embedder", "writer")
 
-        # Run sync pipeline in thread pool so embeddings don't block the event loop
         await asyncio.to_thread(indexing_pipeline.run, {"documents": documents})
 
     async def remove_documents(self, document_ids: list[str]) -> None:
-        """Remove documents from the Qdrant index."""
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot remove documents")
             return
 
-        # Use delete_by_filter with metadata filtering
-        # Build filter for doc_id field in metadata
         from qdrant_client.http.models import FieldCondition, Filter, MatchAny
 
         filter_obj = Filter(
@@ -316,13 +288,6 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
 
     async def warmup(self, force_rebuild: bool = False) -> None:
-        """
-        Build or load indexed document store.
-
-        Args:
-            force_rebuild: If True, clears existing index and rebuilds from scratch.
-                          This will delete all documents in the persistent storage.
-        """
         if self._is_warmed_up and not force_rebuild:
             logger.debug("QdrantBM25HybridRAG already warmed up, skipping")
             return
@@ -360,8 +325,6 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 )
             return
 
-        # If server collection was deleted externally, recreate the store
-        # so _index_documents has a collection to write into.
         if not force_rebuild and storage.is_server and not self._has_existing_index(document_store):
             document_store = await asyncio.to_thread(self._create_document_store, recreate=True)
 
@@ -375,7 +338,6 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         else:
             logger.info("Creating in-memory Qdrant index")
 
-        # Convert RagDocuments to HaystackDocuments
         haystack_docs = self._convert_documents()
         logger.info(f"[warmup] Converted {len(haystack_docs)} HaystackDocuments")
 
@@ -432,30 +394,23 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         return query_pipeline
 
     async def refresh_documents(self, documents: list[RagDocument]) -> None:
-        """
-        Update the indexed documents without releasing the Qdrant file lock.
+        """Update the indexed documents without releasing the Qdrant file lock.
 
-        Replaces self.documents with the new list and re-indexes all of them
-        into the already-open document store using OVERWRITE policy.
-        Safe to call on a warmed-up instance — avoids creating a second
-        QdrantClient on the same storage folder (which would deadlock).
+        Safe to call on a warmed-up instance.
         """
         self.documents = documents
         logger.info(f"[refresh_documents] Refreshing Qdrant index with {len(documents)} documents")
 
         if self._cached_document_store is None:
-            # Not yet warmed up — do a full warmup with force_rebuild
             await self.warmup(force_rebuild=True)
             return
 
         document_store = self._cached_document_store
 
-        # Wipe and rewrite all chunks so deleted/updated docs don't linger
         existing_docs = document_store.filter_documents()
         if existing_docs:
             document_store.delete_documents(document_ids=[doc.id for doc in existing_docs])
 
-        # Convert and index using shared helper
         haystack_docs = self._convert_documents()
         await self._index_documents(haystack_docs, document_store)
 
@@ -465,7 +420,6 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         )
 
     async def as_tool(self) -> ComponentTool:
-        """Return the RAG pipeline as a ComponentTool."""
         if self.needs_warmup:
             logger.debug("RAG needs warmup before creating tool, warming up now")
             await self.warmup()
@@ -498,9 +452,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         )
 
     async def get_chunk(self, chunk_id: str) -> str | None:
-        """Fetch a single chunk from the Qdrant store by its Haystack document ID.
-
-        Only uses the already-open cached store — never opens a second connection,
+        """Only uses the already-open cached store — never opens a second connection,
         which would conflict with the exclusive file lock held during RAG warmup.
         """
         if self._cached_document_store is None:
@@ -511,26 +463,6 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
 
 @component
 class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
-    """
-    Retriever that runs multiple queries with hybrid search and deduplicates results.
-
-    This retriever is more complex than Chroma/BM25 because it requires:
-    1. Embedding generation (sparse + dense)
-    2. Warmup for embedders
-    3. Special handling for query preprocessing
-
-    Uses MultiQueryDeduplicationMixin directly (not BaseMultiQueryRetriever)
-    because it needs custom run() logic for embeddings.
-
-    Example:
-        retriever = MultiQueryQdrantHybridRetriever(
-            document_store=qdrant_store,
-            top_k=3
-        )
-        retriever.warm_up()  # Load embedders
-        result = retriever.run(queries=["query1", "query2"])
-    """
-
     def __init__(
         self,
         document_store: Any,
@@ -552,7 +484,6 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         self._dense_embedder: Any | None = None
 
     def warm_up(self) -> None:
-        """Initialize and warm up the embedding models."""
 
         self._sparse_embedder = FastembedSparseTextEmbedder(
             model=self.sparse_embedder_model,
@@ -568,10 +499,7 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
     def run(
         self, queries: str | list[str], top_k: int | None = None, query: str | None = None
     ) -> dict[str, list[HaystackDocument]]:
-        """
-        Run hybrid search with multiple queries.
-
-        Args:
+        """Args:
             queries: Single query string or list of query strings
             top_k: Maximum documents to return
             query: The user's query before expansion (its words count verbatim)
@@ -585,13 +513,11 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         if self._sparse_embedder is None or self._dense_embedder is None:
             raise ValueError("Embedders not initialized after warm_up()")
 
-        # Convert single query to list
         if isinstance(queries, str):
             queries = [queries]
 
         k = top_k if top_k is not None else self.top_k
 
-        # Run hybrid search for all queries
         results: list[dict[str, list[HaystackDocument]]] = []
         for q in queries:
             sparse_result = self._sparse_embedder.run(text=q)

@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 
 
 def get_pattern(pattern: str, *, ignore_case: bool = True) -> re.Pattern[str]:
-    """`pattern` as a regex"""
     flags = re.IGNORECASE if ignore_case else 0
     try:
         return re.compile(pattern, flags)
@@ -22,8 +21,6 @@ def get_pattern(pattern: str, *, ignore_case: bool = True) -> re.Pattern[str]:
 
 
 class LineRegex(Func):
-    """True where a line of `expression` matches `pattern`, decided in the database."""
-
     output_field = BooleanField()
 
     def __init__(self, expression: Any, pattern: str, *, ignore_case: bool = True) -> None:
@@ -45,8 +42,6 @@ class LineRegex(Func):
 async def agrep(
     queryset: QuerySet, regex: re.Pattern[str], *, field: str = "content"
 ) -> AsyncIterator[tuple[Model, int, str]]:
-    """Each line of `field` that `regex` matches."""
-
     ignore_case = bool(regex.flags & re.IGNORECASE)
     try:
         rows = [
@@ -56,7 +51,6 @@ async def agrep(
             )
         ]
     except DatabaseError:
-        # fallback, process in python if the database doesn't support regex
         rows = [row async for row in queryset]
     for row in rows:
         for number, line in enumerate((getattr(row, field) or "").splitlines(), 1):

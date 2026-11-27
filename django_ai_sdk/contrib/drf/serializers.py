@@ -1,9 +1,3 @@
-"""DRF serializers for the SDK viewsets.
-
-Request serializers validate input; response serializers render what services return.
-Swap a request serializer via ``serializer_classes`` on a viewset subclass.
-"""
-
 from __future__ import annotations
 
 from typing import Any, ClassVar
@@ -18,8 +12,6 @@ from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
 
 class PydanticField(serializers.Field):
-    """Read-only: renders a nested pydantic value (or dict of them) as JSON."""
-
     def __init__(self, **kwargs: Any) -> None:
         kwargs.setdefault("read_only", True)
         super().__init__(**kwargs)
@@ -32,17 +24,7 @@ class PydanticField(serializers.Field):
         return value
 
 
-# --- Requests ---------------------------------------------------------------
-
-
 class MessagePartSerializer(serializers.Serializer):
-    """A Vercel UI message part.
-
-    Fields are snake_case like the SDK's ``MessagePart``; on the wire they keep the
-    client's camelCase (``mediaType``, ``providerMetadata``), in both directions and in
-    validation errors.
-    """
-
     WIRE_NAMES: ClassVar[dict[str, str]] = {
         "media_type": "mediaType",
         "provider_metadata": "providerMetadata",
@@ -50,7 +32,6 @@ class MessagePartSerializer(serializers.Serializer):
 
     type = serializers.CharField()
     text = serializers.CharField(required=False, allow_null=True, allow_blank=True)
-    # file parts
     url = serializers.CharField(required=False, allow_null=True)
     media_type = serializers.CharField(required=False, allow_null=True)
     filename = serializers.CharField(required=False, allow_null=True)
@@ -79,8 +60,6 @@ class MessageSerializer(serializers.Serializer):
 
 
 class ChatRequestSerializer(serializers.Serializer):
-    """A Vercel UI chat request: the conversation so far and, optionally, the agent."""
-
     messages = MessageSerializer(many=True)
     agent_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     id = serializers.CharField(required=False, allow_null=True)
@@ -152,8 +131,6 @@ class RuntimeAgentCreateSerializer(serializers.Serializer):
 
 
 class RuntimeAgentUpdateSerializer(serializers.Serializer):
-    """Every field optional: only the ones sent are changed."""
-
     name = serializers.CharField(required=False)
     agent = serializers.CharField(required=False, allow_blank=True)
     model = serializers.CharField(required=False)
@@ -171,8 +148,6 @@ class RuntimeAgentUpdateSerializer(serializers.Serializer):
 
 
 class WorkflowDefinitionField(serializers.JSONField):
-    """A workflow definition, validated by the SDK's own schema."""
-
     def to_internal_value(self, data: Any) -> WorkflowDefinition:
         try:
             return WorkflowDefinition.model_validate(super().to_internal_value(data))
@@ -216,9 +191,6 @@ class ReindexQuerySerializer(serializers.Serializer):
     force_rebuild = serializers.BooleanField(required=False, default=False)
 
 
-# --- Responses --------------------------------------------------------------
-
-
 class ObjectPermissionsSerializer(serializers.Serializer):
     can_read = serializers.BooleanField()
     can_write = serializers.BooleanField()
@@ -241,7 +213,6 @@ class ThreadSerializer(serializers.Serializer):
 
 class ThreadDetailSerializer(serializers.Serializer):
     thread = ThreadSerializer()
-    # Messages in the thread's protocol format (e.g. Vercel UI messages), as stored.
     messages = serializers.ListField(child=serializers.DictField())
     permissions = ObjectPermissionsSerializer()
 
@@ -348,8 +319,6 @@ class AgentSettingsSerializer(serializers.ModelSerializer):
 
 
 class AgentMemberSerializer(serializers.Serializer):
-    """An AgentUser row: who, and whether they manage the agent."""
-
     user_id = serializers.CharField()
     email = serializers.SerializerMethodField()
     first_name = serializers.SerializerMethodField()

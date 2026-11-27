@@ -44,7 +44,6 @@ from django_ai_sdk.workflows.triggers import (
 
 logger = logging.getLogger(__name__)
 
-# A run's copies of its definition and inputs: large, and in no listing.
 RUN_BLOBS = ("workflow_definition", "inputs")
 
 if TYPE_CHECKING:
@@ -56,7 +55,6 @@ if TYPE_CHECKING:
 
 
 def _validate_submitted(workflow: WorkflowDefinition) -> None:
-    """A definition the caller sent: an illegal one is their bad request."""
     try:
         validate_definition(workflow)
     except ImproperlyConfigured as exc:
@@ -65,7 +63,6 @@ def _validate_submitted(workflow: WorkflowDefinition) -> None:
 
 
 async def _refuse_changed_workflow(run: WorkflowRun) -> None:
-    """Refuse to resume `run` when its workflow is gone, off, or edited since it started."""
     declared, record = await afind(run.workflow_key)
     if record is not None:
         with contextlib.suppress(ImproperlyConfigured, ValidationError):
@@ -79,7 +76,6 @@ async def _refuse_changed_workflow(run: WorkflowRun) -> None:
 
 
 async def _resync_schedules(key: str) -> None:
-    """Bring workflow `key`'s cron schedules in line after its row changed. Logs a failure."""
     try:
         await async_schedules(key)
     except Exception:
@@ -103,9 +99,9 @@ class WorkflowService(PermissionsMixin):
         inputs: dict[str, Any] | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> WorkflowRun:
-        """Queue a run of `workflow` as `user`. For trusted code, never a client's JSON.
+        """For trusted code, never a client's JSON.
 
-        Unregistered definitions are caller-written, so also need MANAGE_WORKFLOW.
+        Unregistered definitions also need MANAGE_WORKFLOW.
         """
         await cls.has_perms(user, Operation.RUN_WORKFLOW, raise_on_deny=True)
         if not is_registered(workflow):
@@ -233,9 +229,7 @@ class WorkflowService(PermissionsMixin):
         note: str = "",
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> WorkflowRun:
-        """Approve or reject the approval step `step` that `run_id` waits on.
-
-        Never by the run's own user or starter. First decision wins; later ones raise
+        """Never by the run's own user or starter. First decision wins; later ones raise
         `DecisionConflict`.
         """
         from django_ai_sdk.workflows.models import StepRun, WorkflowRun
@@ -281,7 +275,6 @@ class WorkflowService(PermissionsMixin):
         from django_ai_sdk.workflows.models import WorkflowRun
 
         await cls.has_perms(user, Operation.VIEW_WORKFLOW, raise_on_deny=True)
-        # Who a trigger acts as is for those who manage workflows, not every viewer.
         shows_run_as = await cls.has_perms(user, Operation.MANAGE_WORKFLOW, raise_on_deny=False)
         schedules = await _schedules()
         runs = await sync_to_async(cls.has_queryset_perms)(
@@ -290,7 +283,6 @@ class WorkflowService(PermissionsMixin):
         found: list[dict[str, Any]] = []
         for key, definition, record in await sync_to_async(declared_workflows)():
             for trigger in definition.triggers:
-                # ponytail: one indexed query per trigger; batch it if trigger counts grow.
                 last = (
                     await runs.filter(workflow_key=key, trigger=f"{trigger.kind}:{trigger.name}")
                     .order_by("-created_at")
@@ -329,7 +321,7 @@ class WorkflowService(PermissionsMixin):
         paused: bool,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> None:
-        """Pause or resume a cron trigger's schedule. A deploy keeps the choice."""
+        """A deploy keeps the choice."""
         name = await cls._managed_schedule(key, trigger, user)
         dbos = runtime.client()
         await sync_to_async(dbos.pause_schedule if paused else dbos.resume_schedule)(name)
@@ -342,9 +334,7 @@ class WorkflowService(PermissionsMixin):
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> None:
-        """Fire a cron trigger now, outside its schedule.
-
-        The caller is recorded as starter (so cannot approve). Stored runs act as their
+        """The caller is recorded as starter (so cannot approve). Stored runs act as their
         author, so only the author fires them by hand.
         """
         await cls._managed_schedule(key, trigger, user)
@@ -357,7 +347,6 @@ class WorkflowService(PermissionsMixin):
     async def _managed_schedule(
         cls, key: str, trigger: str, user: AbstractBaseUser | AnonymousUser | None
     ) -> str:
-        """The schedule name of a cron trigger this caller may manage, or DoesNotExist."""
         from django_ai_sdk.workflows.models import Workflow
 
         await cls.has_perms(user, Operation.MANAGE_WORKFLOW, raise_on_deny=True)
@@ -395,7 +384,6 @@ class WorkflowService(PermissionsMixin):
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[dict[str, str]]:
-        """The listeners a definition may name, for a UI that composes one."""
         await cls.has_perms(user, Operation.MANAGE_WORKFLOW, raise_on_deny=True)
         return [
             {"key": key, "description": listener.description}
@@ -473,13 +461,11 @@ class WorkflowService(PermissionsMixin):
         if workflow is not None:
             _validate_submitted(workflow)
             record.definition = workflow.model_dump()
-            # SECURITY: triggered runs act as the creator; editing must not borrow their account.
             record.created_by_id = user_pk(user)
         if name is not None:
             record.name = name
         if active is not None:
             if active and not record.active:
-                # SECURITY: reactivating restarts triggers; they act as the reactivator.
                 record.created_by_id = user_pk(user)
             record.active = active
         await record.asave()
@@ -531,7 +517,6 @@ class WorkflowService(PermissionsMixin):
         from django_ai_sdk.workflows.models import WorkflowRun
 
         await cls.has_perms(user, Operation.VIEW_WORKFLOW, raise_on_deny=True)
-        # Unknown workflow_id looks like one whose runs are all someone else's.
         qs = (
             WorkflowRun.objects.filter(workflow_id=workflow_id)
             .defer(*RUN_BLOBS)
@@ -571,7 +556,6 @@ async def _schedules() -> dict[str, Any]:
 
 
 def _next_run(trigger: Any, schedule: dict[str, Any] | None) -> str | None:
-    """When an active cron trigger fires next, in UTC ISO 8601."""
     if (
         not isinstance(trigger, CronTrigger)
         or schedule is None
@@ -579,13 +563,12 @@ def _next_run(trigger: Any, schedule: dict[str, Any] | None) -> str | None:
         or not setting("SCHEDULES_ENABLED")
     ):
         return None
-    from croniter import croniter  # comes with dbos, which every schedule needs
+    from croniter import croniter
 
     now = datetime.now(ZoneInfo(trigger.timezone))
     return croniter(trigger.cron, now).get_next(datetime).astimezone(UTC).isoformat()
 
 
-# Sync wrappers, for sync views (e.g. Django REST framework).
 start_workflow = async_to_sync(WorkflowService.start)
 resume_workflow_run = async_to_sync(WorkflowService.resume)
 cancel_workflow_run = async_to_sync(WorkflowService.cancel)

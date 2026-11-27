@@ -1,8 +1,3 @@
-"""DBOS in the test process: launched on a SQLite file per test, its steps in its own threads.
-
-The tests that use it need `django_db(transaction=True)`, so DBOS's threads see the rows.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +25,6 @@ def dbos(tmp_path, settings):
     from django.db import connection
 
     settings.AI_SDK_DBOS = {
-        # On Postgres DBOS shares the test database, in a schema of its own.
         **(
             {"SCHEMA": "dbos_test"}
             if connection.vendor == "postgresql"
@@ -46,7 +40,6 @@ def dbos(tmp_path, settings):
 
 
 async def settled(run_id, *, until=("completed", "failed", "cancelled"), step_waiting="", seconds=20):
-    """The run once its status is in `until`, or once step `step_waiting` waits."""
     from django_ai_sdk.workflows.models import StepRun, WorkflowRun
 
     deadline = time.monotonic() + seconds

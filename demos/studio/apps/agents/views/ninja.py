@@ -1,9 +1,3 @@
-"""The studio's own endpoints, next to the SDK's contrib routers (see demo/urls.py).
-
-This is the extension example: anything the SDK doesn't ship (accounts, a
-project-specific workflow trigger) lives in your own Router, mounted on the same API.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -75,7 +69,6 @@ async def digest_thread(request: HttpRequest, thread_id: str) -> Any:
     if definition is None:
         raise NotFound("thread-digest workflow is not registered")
 
-    # Inline, so the caller gets the outcome. WorkflowService.start() queues it.
     run = await open_run(definition, inputs={"thread": thread_id}, user=user)
     await execute_run(str(run.pk))
     return DigestResponse(

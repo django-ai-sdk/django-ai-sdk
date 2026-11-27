@@ -1,5 +1,3 @@
-"""What the model gets back from tools: failures as they are, oversized results cut."""
-
 from __future__ import annotations
 
 from haystack.dataclasses import ChatMessage, ToolCall
@@ -10,8 +8,6 @@ from django_ai_sdk.agents.tool_agent import TRUNCATED_META_KEY, ToolOutputLimitH
 
 
 class ScriptedGenerator:
-    """Replies from a script, keeping what each call was sent."""
-
     def __init__(self, replies: list[ChatMessage]) -> None:
         self.replies = list(replies)
         self.sent: list[list[ChatMessage]] = []
@@ -40,8 +36,6 @@ def tool_results(result: dict) -> list:
 
 class TestToolErrors:
     def test_the_model_sees_why_a_tool_failed(self):
-        """So it can correct itself, e.g. fix its arguments or pick an existing tool."""
-
         def broken():
             raise ValueError("city must include a country code")
 
@@ -82,7 +76,6 @@ class TestToolOutputLimit:
         assert result.result == "x" * 1_000
 
     def test_a_result_is_cut_once(self):
-        """A later step's hook run leaves the earlier cut, and its note, as they were."""
         generator = ScriptedGenerator(
             [call("wiki", "c1"), call("wiki", "c2"), ChatMessage.from_assistant("Summary.")]
         )
@@ -128,7 +121,6 @@ class TestToolOutputLimitWiring:
         from django_ai_sdk.oversight.plugin.hooks import MaskToolResultHook
         from django_ai_sdk.oversight.plugin import merge_oversight_hooks
 
-        # Oversight masks the full result first, then the cut.
         mask, limit = merge_oversight_hooks(default_hooks(Agent()))["after_tool"]
         assert isinstance(limit, ToolOutputLimitHook)
         assert isinstance(mask, MaskToolResultHook)

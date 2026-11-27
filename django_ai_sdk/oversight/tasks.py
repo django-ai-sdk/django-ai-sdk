@@ -1,5 +1,3 @@
-"""Oversight's django-tasks. A missing backend must not fail the turn, so queueing only logs."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -21,7 +19,6 @@ def reflect_turn(turn_id: str) -> None:
 
 @task(queue_name="default")
 def send_notifications(events: list[list[Any]]) -> None:
-    """Each item in `events` is [event, notifier names]."""
     for event, names in events:
         async_to_sync(send_to_notifiers)(event, names=names)
 
@@ -34,7 +31,6 @@ def enqueue_notifications(events: list[tuple[dict[str, Any], list[str]]]) -> Non
 
 
 def enqueue_reflect(turn_id: Any) -> bool:
-    """False, and logged, when it could not be queued."""
     try:
         reflect_turn.enqueue(str(turn_id))
     except Exception:

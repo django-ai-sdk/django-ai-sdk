@@ -1,6 +1,3 @@
-"""The cited page of a knowledge-base document: converted to PDF, found from
-quotes, rendered with marks, and served through both contrib layers (tests/urls.py)."""
-
 from io import BytesIO
 
 import pytest
@@ -25,7 +22,6 @@ ALSO = "Night shifts earn a bonus of twenty percent."
 
 
 def make_pdf(pages: list[list[str]]) -> bytes:
-    """A PDF with one page per item: its lines in Helvetica, from the top."""
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [%s] /Count %d >>"
@@ -102,14 +98,11 @@ class TestPassageAreas:
 
 
 WEEKEND = "Weekend work is paid at one and a half."
-# ALSO twice: on the first line, and again right after WEEKEND
 REPEATS = make_pdf([[ALSO, "Unrelated filler text sits right here.", WEEKEND, ALSO]])
 FIRST_LINE = 720  # y of the first line, in points from the bottom
 
 
 class TestPassageFoundOnce:
-    """Located as the citation grounder locates it: once, not at every repeat."""
-
     @pytest.fixture
     def words(self):
         import pdf_oxide
@@ -140,7 +133,7 @@ class TestRenderPage:
         assert image.format == "PNG"
         assert image.width == round(612 * PAGE_DPI / 72)
         top, left, bottom, right = map(float, mark.split(","))
-        assert 0 < top < bottom < 0.5  # near the top of the page
+        assert 0 < top < bottom < 0.5
         assert 0 < left < right < 1
 
     def test_no_mark_without_quotes(self):
@@ -207,14 +200,10 @@ class TestToPdf:
         assert to_pdf(PDF, ".pdf") is PDF
 
     def test_an_image_is_not_made_a_pdf(self):
-        # shown as itself: no text, so nothing to mark on a page
         assert to_pdf(png(), "png") is None
 
     def test_no_preview_for_other_files(self):
         assert to_pdf(b"PK", "zip") is None
-
-
-# Endpoints
 
 
 @pytest.fixture
@@ -229,8 +218,6 @@ def stranger(django_user_model):
 
 @pytest.fixture
 def stored(owner, settings, tmp_path):
-    """A private knowledge base the owner may read: a PDF, a Word file, a zip and
-    an image."""
     from django_ai_sdk.memories.models import Entry, EntryDocument
     from tests.factories.db import MemoryFactory, MemoryUserFactory
 
@@ -262,7 +249,7 @@ BASES = ["/api/memories", "/drf/memories"]
 
 
 def at(base: str, path: str) -> str:
-    """``path`` on a contrib layer; DRF's routes end with a slash."""
+    """DRF's routes end with a slash."""
     return f"{base}{path}/" if base.startswith("/drf") else f"{base}{path}"
 
 
@@ -352,7 +339,6 @@ class TestEndpoints:
 
         assert found.json()["name"] == "rules.DOCX"
         assert found.json()["page"] > 1
-        # #page=N only means something in a PDF viewer
         assert found.json()["page_url"] is None
         assert original["Content-Disposition"].startswith("attachment")
         assert 'filename="rules.DOCX"' in original["Content-Disposition"]

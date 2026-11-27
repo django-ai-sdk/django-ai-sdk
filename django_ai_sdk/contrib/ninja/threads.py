@@ -1,5 +1,3 @@
-"""Threads, messages, traces and the streaming chat endpoint."""
-
 from __future__ import annotations
 
 from collections.abc import Collection
@@ -69,8 +67,6 @@ async def list_threads(
 @routes.post("/threads/", response=CreateThreadResponse)
 async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
     agent_id = payload.agent_id or ""
-    # Initial messages are not persisted here; the chat endpoint receives and stores
-    # the full message list.
     thread_id = await ThreadService.create_thread(agent_id=agent_id, user=request.user)
     await MemoryService.link_memories(agent_id, thread_id, user=request.user)
     return CreateThreadResponse(thread_id=thread_id)
@@ -79,7 +75,6 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
 @routes.get("/threads/{thread_id}/", response=ThreadDetailResponse)
 async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
     data = await aget_thread_history(thread_id, user=request.user)
-    # Each caller sees only their own feedback on a message.
     user_pk = str(request.user.pk) if request.user.is_authenticated else None
     for message in data.get("messages", []):
         feedbacks = message.pop("feedbacks", [])

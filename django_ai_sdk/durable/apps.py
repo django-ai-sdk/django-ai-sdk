@@ -1,5 +1,3 @@
-"""The durable app: workflow runs, triggers and tasks on DBOS (see the package docstring)."""
-
 from __future__ import annotations
 
 from django.apps import AppConfig

@@ -1,9 +1,3 @@
-"""Catch model calls that no policy sees.
-
-Inside `requires_turn()` (every workflow step), an SDK generator's call must come from a
-turn or an opted-out run; others follow UNGUARDED_MODEL_CALLS.
-"""
-
 from __future__ import annotations
 
 import contextvars
@@ -22,15 +16,12 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Where a turn is required, e.g. "workflow:<key>:<step>". Empty when not required.
 _required: contextvars.ContextVar[str] = contextvars.ContextVar(
     "django_ai_sdk_oversight_turn_required", default=""
 )
-# True inside a run that has a turn or opted out of oversight on purpose.
 _settled: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "django_ai_sdk_oversight_settled", default=False
 )
-# Places already warned about, so a loop logs only once.
 _warned: set[str] = set()
 
 
@@ -39,24 +30,19 @@ class UnguardedModelCall(RuntimeError):
 
 
 def requires_turn(where: str) -> AbstractContextManager[None]:
-    """Require model calls in this block to come from a turn. `where` names the place."""
     return scoped(_required, where)
 
 
 def settled() -> AbstractContextManager[None]:
-    """Mark model calls in this block as covered by a turn or an explicit opt-out."""
     return scoped(_settled, True)
 
 
 def _check_model_call(generator: Any) -> None:
-    """Warn about, or refuse, a model call where a turn is required and none is open."""
     where = _required.get()
     if not where or _settled.get() or not is_enabled():
-        # With oversight disabled no turn ever opens, so there is nothing to check.
         return
     from django_ai_sdk.oversight.guard import current_guard, is_unguarded
 
-    # An open turn counts once its gate ran: before that no policy saw the text.
     guard = current_guard()
     if is_unguarded() or (guard is not None and guard.gated):
         return
@@ -76,10 +62,7 @@ def _check_model_call(generator: Any) -> None:
 
 
 def watched[T](generator: T) -> T:
-    """Wrap `generator.run()` and `run_async()` so they call `_check_model_call` first.
-
-    Bound on the instance, so Haystack's deep copies stay watched and class signatures intact.
-    """
+    """Bound on the instance, so Haystack's deep copies stay watched and class signatures intact."""
     cls = type(generator)
     for name in ("run", "run_async"):
         method = getattr(cls, name, None)
@@ -90,8 +73,6 @@ def watched[T](generator: T) -> T:
 
 
 def watched_factory[**P, T](factory: Callable[P, T]) -> Callable[P, T]:
-    """Decorate a generator factory so every generator it builds is `watched`."""
-
     @functools.wraps(factory)
     def build(*args: P.args, **kwargs: P.kwargs) -> T:
         return watched(factory(*args, **kwargs))

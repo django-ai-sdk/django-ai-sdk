@@ -1,5 +1,3 @@
-"""FAIL_MODE: what a failed lens does at each stage, closed by default."""
-
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -46,8 +44,6 @@ from tests.oversight.helpers import (
 
 @pytest.mark.django_db(transaction=True)
 class TestClosedByDefault:
-    """Every way a lens can fail refuses where an enforced rule protects."""
-
     @pytest.mark.parametrize("answerer", [broken, slow_no], ids=["down", "deadline"])
     async def test_a_failed_judge_blocks(self, answerer):
         name = policy(
@@ -66,13 +62,12 @@ class TestClosedByDefault:
         with override_settings(AI_SDK_OVERSIGHT={"DEADLINE_MS": {"gate": 50}}):
             result = await gate(name)
         assert result.blocked
-        # Generic: the rule did not find an injection, its lens failed.
         assert result.message == str(Block.DEFAULT_MESSAGE)
         assert "notes" not in (result.notice or {})
 
     async def test_a_question_too_long_for_the_judge_blocks(self):
         judge = LLMJudge(model="m")
-        judge.get_generator = lambda: pytest.fail("must not be asked")  # type: ignore[method-assign]
+        judge.get_generator = lambda: pytest.fail("must not be asked")
         name = policy(
             "fc-long",
             [JudgeLens(name="j", stages=[Stage.GATE], judges=[judge])],
@@ -87,7 +82,7 @@ class TestClosedByDefault:
             def missing(self) -> str:
                 return "no API key"
 
-            async def answer(self, lens, context):  # noqa: ANN001, ANN201
+            async def answer(self, lens, context):
                 pytest.fail("a missing judge is never asked")
 
         name = policy(
@@ -138,8 +133,6 @@ class TestClosedByDefault:
 
 @pytest.mark.django_db(transaction=True)
 class TestFailModeAtEachStage:
-    """What a failing answerer does to each action, open and closed."""
-
     @pytest.mark.parametrize("answerer", [broken, slow_yes], ids=["raises", "times-out"])
     @pytest.mark.parametrize("kind", ["block", "restrict"])
     async def test_closed_gate_protects_and_open_records_the_failure(self, answerer, kind):
@@ -160,7 +153,6 @@ class TestFailModeAtEachStage:
         assert row.error
 
     async def test_a_tool_removed_only_by_a_failed_lens_gets_the_generic_refusal(self):
-        """The rule's own message would tell the person a rule matched, which it did not."""
         from django_ai_sdk.common import ChatMessage
         from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE_MESSAGE
 
@@ -221,7 +213,6 @@ class TestFailModeAtEachStage:
             assert not (await (await start(name)).gate()).blocked
 
     async def test_a_failed_lens_does_not_overturn_what_answered(self):
-        """One judge said no to a rule that needs both: a second that is down changes nothing."""
         name = policy(
             "fx-and-decided",
             [gate_flag(broken), gate_flag(lambda text, context: False, "other")],
@@ -284,7 +275,6 @@ class TestFailModeAtEachStage:
         guard = await start(policy("fx-missing-alert", [gate_flag(broken)], alert))
         await guard.gate()
         assert [m.rule.name for m in guard.matched] == ["judge_down"]
-        # Also where a failure itself stops nothing.
         block = [Rule("r", when=L("g").missing, then=Block(), mode=ENFORCE)]
         name = policy("fx-missing-open", [gate_flag(broken)], block, fail_mode="open")
         assert (await gate(name)).blocked
@@ -292,14 +282,12 @@ class TestFailModeAtEachStage:
     async def test_conditions_are_three_valued(self):
         failed = Answer(error="RuntimeError")
         answers = {"a": failed, "b": Answer(value=True)}
-        assert (~L("a").is_true).matches(answers)  # failed, but not said to: false
+        assert (~L("a").is_true).matches(answers)
         assert not (~L("a").is_true).matches(answers, {"a"})
         assert not (L("a").is_true | ~L("b").is_true).matches(answers, {"a"})
         assert (L("a").is_true | L("b").is_true).matches(answers, {"a"})
         assert not (L("a").is_false & L("b").is_true).matches(answers, {"a"})
         assert L("a").missing.matches(answers, {"a"})
-        # A condition compares an unsure answer kept after a later failure as usual; a rule
-        # never gets to: `match_rules` reads a failed lens's kept answer as failed.
         assert L("a").is_true.matches({"a": Answer(value=True, confidence=0.4)}, {"a"})
 
     async def test_a_gate_failure_counts_at_finish(self):
@@ -313,7 +301,7 @@ class TestFailModeAtEachStage:
         )
         with closed():
             guard = await start(name)
-            assert not (await guard.gate()).blocked  # waits for f
+            assert not (await guard.gate()).blocked
             assert (await guard.finish("answer")).blocked
 
     def test_a_mask_over_a_tool_call_lens_is_not_registered(self):
@@ -332,7 +320,6 @@ class TestFailModeAtEachStage:
             ],
             [Rule("r", when=L("t").is_true, then=Mask(), mode=ENFORCE)],
         )
-        # A tool call's arguments are never masked: the rule could never act.
         assert get_policy_class(name) is None
         assert "tool call" in get_invalid_policies()[name]
 
@@ -350,8 +337,6 @@ class TestFailModeAtEachStage:
 
 
 class Said(Judge):
-    """A judge that answers what `fn(text, context)` returns."""
-
     def __init__(self, fn, name: str) -> None:
         self.fn = fn
         self.name = name
@@ -367,7 +352,7 @@ class TestUnsureChainsFailClosed:
         @register_policy
         class Unsure(Policy):
             name = "test-unsure-then-down"
-            lenses = [  # noqa: RUF012
+            lenses = [
                 JudgeLens(
                     name="risky",
                     stages=[Stage.GATE],
@@ -377,13 +362,12 @@ class TestUnsureChainsFailClosed:
                     ],
                 )
             ]
-            rules = [Rule("block_risky", when=L("risky").is_true, then=Block(), mode=ENFORCE)]  # noqa: RUF012
+            rules = [Rule("block_risky", when=L("risky").is_true, then=Block(), mode=ENFORCE)]
 
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "open"}):
             assert not (await (await start("test-unsure-then-down")).gate()).blocked
         guard = await start("test-unsure-then-down")
         assert (await guard.gate()).blocked
-        # The unsure answer is still what the record says the lens answered.
         turn = await closed_turn(guard)
         row = await LensAnswer.objects.aget(turn=turn, lens="risky")
         assert (row.value, row.trail[-1]["error"]) == (False, "RuntimeError")
@@ -425,8 +409,6 @@ def raising(*args, **kwargs):
 
 @pytest.mark.django_db(transaction=True)
 class TestBrokenHandlers:
-    """Where a stage itself breaks (not a lens), the turn follows the fail mode too."""
-
     @pytest.mark.parametrize("mode", ["closed", "open"])
     async def test_a_history_check_that_raises(self, mode):
         from django_ai_sdk.common import ChatMessage
@@ -497,7 +479,7 @@ class TestBrokenHandlers:
 
         judge_stage = stages.judge_stage
 
-        async def finish_raising(guard, stage, **kwargs):  # noqa: ANN001, ANN202
+        async def finish_raising(guard, stage, **kwargs):
             if stage is Stage.FINISH:
                 raise RuntimeError("boom")
             return await judge_stage(guard, stage, **kwargs)
