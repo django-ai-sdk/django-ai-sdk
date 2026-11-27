@@ -89,20 +89,6 @@ local = ["onnxruntime>=1.32.0", "tokenizers>=0.23.3", "huggingface-hub>=0.23", "
 dbos = ["dbos>=3.5.0,<4"]
 
 [dependency-groups]
-# Stack for the demo projects in demos/ (demos/base holds their shared settings).
-studio = [
-  "ai-sdk-demo-base",
-  "daphne>=4.2.3",
-  "ddgs-haystack>=2.0.0",
-  "django-allauth[headless]>=65.22.1",
-  "django-cors-headers>=4.9.0",
-  "django-environ>=0.14.0",
-  "django-ninja>=1.8.0",
-  "django-tasks-db>=0.13.0",
-  "django-watchfiles>=1.4.0",
-  "djangorestframework>=3.18.3",
-  "trafilatura>=2.3.1",
-]
 dev = [
   "django-stubs>=6.1.2",
   "factory-boy>=3.3.3",
@@ -119,9 +105,6 @@ dev = [
 ]
 # The docs site (docs/), built with dokk.
 docs = ["dokk[format,search,serve]>=0.0.5", "graphviz>=0.21"]
-
-[tool.uv.sources]
-ai-sdk-demo-base = { path = "demos/base", editable = true }
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
@@ -147,7 +130,7 @@ exclude = [
   "**/tests/**",
   "**/conftest.py",
 ]
-src = ["django_ai_sdk", "demos/studio", "demos/base"]
+src = ["django_ai_sdk"]
 target-version = "py312"
 
 [tool.ruff.lint]
@@ -164,8 +147,6 @@ ignore = ["ANN401", "E501"]
 [tool.ruff.lint.per-file-ignores]
 # Ninja reads endpoint annotations at runtime; they cannot move under TYPE_CHECKING.
 "django_ai_sdk/contrib/ninja/*" = ["TCH"]
-# Demo settings build on demo_base.settings with a star import, after loading .env.
-"demos/**/settings.py" = ["E402", "F403", "F405"]
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
@@ -186,13 +167,12 @@ runtime-evaluated-decorators = [
 ]
 
 [tool.ty.src]
-include = ["django_ai_sdk", "demos"]
+include = ["django_ai_sdk"]
 exclude = [
   "docs/**",
   "**/tests/**",
   "**/conftest.py",
   "**/migrations/**",
-  "demos/**/settings.py",
   "**/node_modules/**",
   "**/__pycache__/**",
   "**/.*",

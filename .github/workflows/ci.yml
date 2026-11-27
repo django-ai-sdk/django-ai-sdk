@@ -55,10 +55,6 @@ jobs:
           fi
           make test UV_RUN_ARGS="$args"
 
-      - name: Run demo tests
-        if: runner.os == 'Linux'
-        run: make test-demos
-
   postgres:
     name: Test (Postgres 16)
     runs-on: ubuntu-latest
@@ -130,7 +126,7 @@ jobs:
           python-version: "3.12"
 
       - name: Ruff lint
-        run: uv run ruff check django_ai_sdk/ demos/
+        run: uv run ruff check django_ai_sdk/
 
       - name: Typecheck
         run: make typecheck
