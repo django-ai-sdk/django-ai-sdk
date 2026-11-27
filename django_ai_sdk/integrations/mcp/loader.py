@@ -317,7 +317,7 @@ class MCPIntegration(DynamicMCPIntegration):
     scope: str = ""
     hint: str = ""
 
-    CONFIG_KEYS = frozenset(
+    KNOWN_CONFIG_KEYS = frozenset(
         {
             "AUTH",
             "URL",
@@ -349,13 +349,13 @@ class MCPIntegration(DynamicMCPIntegration):
         return str(self._config().get("AUTH") or self.auth)
 
     def _warn_unknown_config_keys(self) -> None:
-        unknown = set(self._config()) - self.CONFIG_KEYS
+        unknown = set(self._config()) - self.KNOWN_CONFIG_KEYS
         if unknown:
             logger.warning(
                 "AI_SDK_INTEGRATIONS[%r] has unrecognised keys %s; expected any of %s",
                 self.name,
                 ", ".join(sorted(unknown)),
-                ", ".join(sorted(self.CONFIG_KEYS)),
+                ", ".join(sorted(self.KNOWN_CONFIG_KEYS)),
             )
 
     def _missing_mcp_app(self) -> str | None:
