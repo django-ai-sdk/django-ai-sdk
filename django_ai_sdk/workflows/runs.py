@@ -20,7 +20,7 @@ from django_ai_sdk.workflows.models import StepRun, WorkflowRun
 from django_ai_sdk.workflows.registry import ADHOC, is_registered
 from django_ai_sdk.workflows.runner import perform_now, run_steps
 from django_ai_sdk.workflows.schemas import WorkflowDefinition
-from django_ai_sdk.workflows.steps import RunSuperseded, StepOutcome, StepRecorded
+from django_ai_sdk.workflows.steps import RunSuperseded, StepAlreadyRecorded, StepOutcome
 
 if TYPE_CHECKING:
     import uuid
@@ -321,7 +321,7 @@ class RunRecorder(RunListener):
         self.closed = True
 
     async def on_step_start(self, ctx: WorkflowContext, step: Step) -> None:
-        """A completed row means the worker died before DBOS recorded it: raise `StepRecorded`."""
+        """A completed row means the worker died before DBOS recorded it: raise `StepAlreadyRecorded`."""
         await self.beat()
         sequence = self.sequence[step.name]
         await StepRun.objects.abulk_create(
@@ -343,7 +343,7 @@ class RunRecorder(RunListener):
         )
         if not claimed:
             row = await StepRun.objects.aget(run=self.run, sequence=sequence)
-            raise StepRecorded(
+            raise StepAlreadyRecorded(
                 StepOutcome(output=row.output, detail=row.detail, turn_id=row.turn_id)
             )
 

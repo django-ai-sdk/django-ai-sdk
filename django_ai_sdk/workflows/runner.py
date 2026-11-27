@@ -12,8 +12,8 @@ from django_ai_sdk.oversight.guard import watching_turns
 from django_ai_sdk.workflows.steps import (
     OnError,
     RunSuperseded,
+    StepAlreadyRecorded,
     StepOutcome,
-    StepRecorded,
     WorkflowContext,
     WorkflowStopped,
 )
@@ -136,7 +136,7 @@ class _StepRunner:
             await self._notify(
                 self._listeners_for(step), lambda listener: listener.on_step_start(ctx, step)
             )
-        except StepRecorded as recorded:
+        except StepAlreadyRecorded as recorded:
             self.outcomes[step.name] = recorded.outcome
             return recorded.outcome
         if waiting:

@@ -36,7 +36,8 @@ class RunSuperseded(Exception):
     """This worker no longer holds the run; raised before writing over a newer attempt."""
 
 
-class StepRecorded(Exception):
+class StepAlreadyRecorded(Exception):
+
     def __init__(self, outcome: StepOutcome) -> None:
         super().__init__(outcome.detail)
         self.outcome = outcome
@@ -319,7 +320,7 @@ __all__ = [
     "RunSuperseded",
     "Step",
     "StepOutcome",
-    "StepRecorded",
+    "StepAlreadyRecorded",
     "WorkflowContext",
     "WorkflowStopped",
 ]
