@@ -62,7 +62,7 @@ api.add_router("/", router)
 
 List endpoints take `?limit=&offset=`. `limit` defaults to 100 and is capped at 100, the same bound as the DRF layer. A larger value is a 422. The services themselves accept `limit=None` to return everything. Over HTTP a client pages through with `offset`. An endpoint that must return everything is one you write yourself.
 
-`exclude` takes endpoint function names, which are also the OpenAPI `operationId`s; a misspelt name raises at startup. Your own routers can live on the same `NinjaAPI`, which is how the studio demo adds its health, digest and account endpoints (`demos/studio/apps/agents/views/ninja.py`).
+`exclude` takes endpoint function names, which are also the OpenAPI `operationId`s; a misspelt name raises at startup. Your own routers can live on the same `NinjaAPI`, which is how the studio demo adds its health, digest and account endpoints ([`app/studio/apps/agents/views/ninja.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/apps/agents/views/ninja.py)).
 
 `register_error_handlers()` covers the whole API, so your own endpoints on it answer errors the same way: raise `NotFound` or `UserError` from `django_ai_sdk.errors` and the client gets the matching code. See [Error Handling](errors.md).
 

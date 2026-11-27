@@ -66,14 +66,11 @@ uv run pytest tests/unit/test_thread_service.py::test_something -v
 # Debug
 uv run pytest -x
 uv run pytest --pdb
-
-# The demo projects' own tests (each demo in demos/ runs with its own settings)
-make test-demos
 ```
 
 `tests/settings.py` is a minimal Django project. It has the SDK apps, an in-memory SQLite
 database, and `tests.testapp` with an email-only `User` that has no `username` field, like many
-host projects. It never imports from `demos/`. Tests that depend on a specific
+host projects. It never imports from the demo projects. Tests that depend on a specific
 permission class set it themselves, with the helpers in `tests/mocks/permissions.py`.
 
 Set `DATABASE_URL` to run the suite on PostgreSQL instead. Tests that race
