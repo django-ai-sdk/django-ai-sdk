@@ -387,6 +387,15 @@ class TestAuthoringWithAPydanticModel:
                 name="bad", inputs=Exotic, steps=[StepDefinition(name="d", agent_id="a1")]
             )
 
+    def test_an_optional_type_without_a_default_is_refused(self):
+        class Inputs(BaseModel):
+            note: str | None
+
+        with pytest.raises(ValidationError, match="Inputs.note"):
+            WorkflowDefinition(
+                name="bad", inputs=Inputs, steps=[StepDefinition(name="d", agent_id="a1")]
+            )
+
     def test_giving_both_forms_is_refused(self):
         class Inputs(BaseModel):
             thread: str
