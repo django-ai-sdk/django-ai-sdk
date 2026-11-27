@@ -196,7 +196,7 @@ await MemoryService.delete_thread_file(thread_id, doc_id, user=request.user)
 await MemoryService.get_document_status(doc_id, user=request.user)           # DocumentStatusOut
 ```
 
-The demo connects this to `GET /threads/{id}/files/meta/` (`aget_thread_file_meta`), so the frontend knows how many files a thread has and which memory holds them. See [Memories](memories.md) for the full API.
+The [studio demo](https://github.com/django-ai-sdk/studio) connects this to `GET /threads/{id}/files/meta/` (`aget_thread_file_meta`), so the frontend knows how many files a thread has and which memory holds them. See [Memories](memories.md) for the full API.
 
 ## Fonts
 

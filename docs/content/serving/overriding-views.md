@@ -30,7 +30,7 @@ async def export_thread(request, thread_id: str):
 api.add_router("/", router)
 ```
 
-Or keep your endpoints in your own `Router` and mount it on the same `NinjaAPI`; the studio demo does this for its health, digest and account endpoints.
+Or keep your endpoints in your own `Router` and mount it on the same `NinjaAPI`; the [studio demo](https://github.com/django-ai-sdk/studio) does this for its health, digest and account endpoints.
 
 ### Replace an endpoint
 

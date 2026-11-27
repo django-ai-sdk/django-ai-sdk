@@ -261,7 +261,7 @@ Each `Agent` sets its own guardrails. A subagent caps its own loop with `max_age
 config = ToolAgentConfig(..., hooks={"before_tool": [LogToolCallsHook()]})
 ```
 
-The two swarm demos wire it into both the coordinator and (through `build_subagent`) each subagent, so you'll see lines like these:
+The two swarm agents in the [studio demo](https://github.com/django-ai-sdk/studio) wire it into both the coordinator and (through `build_subagent`) each subagent, so you'll see lines like these:
 
 ::::trace[A delegation in the server console]
 :::step[Armed subagent tool 'treasure_hunter' ...]{icon="wrench"}
@@ -558,7 +558,7 @@ except Blocked as blocked:
 
 ## Permissions
 
-Each agent declares `permissions`: classes that gate operations like `CHAT`, `VIEW_THREAD`, and `USE_INTEGRATION`. The demo shows per-domain overrides:
+Each agent declares `permissions`: classes that gate operations like `CHAT`, `VIEW_THREAD`, and `USE_INTEGRATION`. The [studio demo](https://github.com/django-ai-sdk/studio) shows per-domain overrides:
 
 ```python
 # settings.py

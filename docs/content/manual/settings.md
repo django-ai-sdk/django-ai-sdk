@@ -210,7 +210,7 @@ TASKS = {
 }
 ```
 
-Then run the worker with `./manage.py db_worker`. The demo project uses this
+Then run the worker with `./manage.py db_worker`. The [studio demo](https://github.com/django-ai-sdk/studio) uses this
 split: the immediate backend in `DEBUG`, the database backend otherwise.
 :::
 ::::

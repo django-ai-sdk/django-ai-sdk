@@ -42,7 +42,7 @@ says which extra provides it.
 :::caution[Streaming needs an ASGI server]
 Streaming needs an ASGI server, but the SDK does not choose one for you. Install
 daphne, uvicorn or hypercorn yourself. The SDK doesn't depend on the packages the
-demo project happens to use either: allauth, DRF, django-cors-headers or a
+[studio demo](https://github.com/django-ai-sdk/studio) happens to use either: allauth, DRF, django-cors-headers or a
 `django-tasks` backend.
 :::
 

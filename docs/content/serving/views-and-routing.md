@@ -196,7 +196,7 @@ The run endpoint uses `protocol_handler.to_chat_messages(payload.messages)` then
 
 ## Threads and messages
 
-Conversations live in threads. `ThreadService` manages them; `MemoryService` links the memories (documents) an agent can retrieve in that thread. See the [Memories reference](../manual/memories.md) for the full `MemoryService` API and the demo's memory endpoints.
+Conversations live in threads. `ThreadService` manages them; `MemoryService` links the memories (documents) an agent can retrieve in that thread. See the [Memories reference](../manual/memories.md) for the full `MemoryService` API and the ready-made memory endpoints.
 
 :::note
 Contributor? The [ThreadService](../manual/thread-service.md) manual page documents every method and its permission checks.

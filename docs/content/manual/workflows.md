@@ -281,7 +281,7 @@ Marks the run `completed` with `{step name: output}` for every completed step. A
 
 At every step the recorder refreshes `heartbeat_at` and checks that the run is still `running` under the attempt this worker claimed. When the run was cancelled, or resumed and claimed again, the recorder raises `RunSuperseded` before it writes anything, and the walk stops. A step whose row this attempt already completed does not run again, and the engine uses the row's outcome. That happens when the worker died after writing the row but before DBOS recorded the step.
 
-Called directly, `execute_run(run_id)` does the same walk in the calling process without checkpoints, as an inline demo endpoint does. Such a run cannot wait, so an approval step in it fails at once. In a host's tests, `django_ai_sdk.durable.testing.run_inline(monkeypatch)` in an autouse fixture makes every queued run execute that way, without DBOS tables.
+Called directly, `execute_run(run_id)` does the same walk in the calling process without checkpoints, as an inline endpoint in the [studio demo](https://github.com/django-ai-sdk/studio) does. Such a run cannot wait, so an approval step in it fails at once. In a host's tests, `django_ai_sdk.durable.testing.run_inline(monkeypatch)` in an autouse fixture makes every queued run execute that way, without DBOS tables.
 
 ## Durable runs on DBOS
 

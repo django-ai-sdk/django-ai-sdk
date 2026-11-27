@@ -11,25 +11,25 @@ If you're building an application with the SDK, start with the [Quick Start](../
 ## Dev setup
 
 :::steps
-1. Clone the repository and install the dependencies.
+1. Clone the repository and install the dependencies. You need [uv](https://docs.astral.sh/uv/) and [just](https://just.systems/).
 
    ```bash
    git clone https://github.com/django-ai-sdk/django-ai-sdk.git
    cd django-ai-sdk
-   make setup      # runtime + demo extras only
-   make setup-all  # every extra, including the torch-based transformers stack
+   just setup      # runtime + the qdrant, mcp, files and dbos extras
+   just setup-all  # every extra, including the torch-based transformers stack
    ```
 
 2. Run the tests.
 
    ```bash
-   make test
+   just test
    ```
 
 3. Regenerate the docs diagrams after you change `docs/graph.py`.
 
    ```bash
-   make docs-graphs
+   just docs-graphs
    ```
 :::
 

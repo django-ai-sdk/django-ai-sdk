@@ -1,4 +1,4 @@
-# Django AI SDK documentation, built with dokk: make docs-serve / make docs-build
+# Django AI SDK documentation, built with dokk: just docs-serve / just docs-build
 title = "Django AI SDK"
 description = "Build AI agents in Django: agents, workflows, subagents and RAG."
 site_url = "https://django-ai-sdk.github.io/django-ai-sdk/docs/"

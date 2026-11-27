@@ -29,13 +29,16 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v7
 
+      - name: Setup just
+        uses: extractions/setup-just@v4
+
       - name: Setup Graphviz
         run: |
           sudo apt-get update
           sudo apt-get install -y graphviz
 
       - name: Build docs
-        run: make docs-build
+        run: just docs-build
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

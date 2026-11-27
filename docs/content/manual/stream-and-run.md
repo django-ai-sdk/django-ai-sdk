@@ -123,7 +123,7 @@ the loop finished or not.
 
 :::caution
 No shipped code calls `agent.run(tools=True)` yet, in `django_ai_sdk` or in
-the demo project. Tests cover the mechanism, but there is no example to copy.
+the [studio demo](https://github.com/django-ai-sdk/studio). Tests cover the mechanism, but there is no example to copy.
 A workflow step that needs tool access is the likely first caller.
 :::
 

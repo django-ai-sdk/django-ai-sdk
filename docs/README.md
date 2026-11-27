@@ -5,8 +5,8 @@ The documentation site, built with [dokk](https://github.com/terminalkitten/dokk
 ## Local development
 
 ```shell
-make docs-serve    # http://127.0.0.1:8002/, reloads on save
-make docs-build    # diagrams, link check, then the site into public/docs/
+just docs-serve    # http://127.0.0.1:8002/, reloads on save
+just docs-build    # diagrams, link check, then the site into public/docs/
 ```
 
 The diagrams need [Graphviz](https://graphviz.org/download/) (`brew install graphviz`). `docs/graph.py` writes them to `content/images/graphs/`.

@@ -4,7 +4,7 @@ sidebar:
   order: 119
 ---
 
-A memory is a named knowledge base the SDK indexes for retrieval. Users upload documents and files into a memory, and link the memory to threads so its contents reach the agent. This page covers the data model, the `MemoryService` API, and the demo's memory endpoints.
+A memory is a named knowledge base the SDK indexes for retrieval. Users upload documents and files into a memory, and link the memory to threads so its contents reach the agent. This page covers the data model, the `MemoryService` API, and the ready-made memory endpoints.
 
 ## Concepts
 
@@ -84,7 +84,7 @@ await MemoryService.disconnect_memory_from_thread(thread_id, memory_id, user=req
 
 `link_memories(agent_id, thread_id)` and `unlink_memories(agent_id, thread_id)` resolve the agent's configured default memories before linking. The [Views and Routing guide](../serving/views-and-routing.md#threads-and-messages) uses them.
 
-## Demo endpoints
+## Memory endpoints
 
 The contrib layers ship ready-made memory endpoints: `get_memories_router()` for django-ninja, mounted at `/memories`, and `MemoryViewSet` for DRF. See [Views and Routing](../serving/views-and-routing.md#pick-a-starting-point). List and detail responses include an `ObjectPermissions` block with `can_read`, `can_write` and `can_manage`, computed by `django_ai_sdk.views.permissions.memory_permissions()`.
 

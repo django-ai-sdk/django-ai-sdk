@@ -36,6 +36,9 @@ jobs:
         with:
           version: "latest"
 
+      - name: Install just
+        uses: extractions/setup-just@v4
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v7
         with:
@@ -53,7 +56,7 @@ jobs:
           if [ "${{ matrix.django }}" = "6.1" ]; then
             args="$args --with djangorestframework~=3.18.3"
           fi
-          make test UV_RUN_ARGS="$args"
+          just UV_RUN_ARGS="$args" test
 
   postgres:
     name: Test (Postgres 16)
@@ -83,6 +86,9 @@ jobs:
         with:
           version: "latest"
 
+      - name: Install just
+        uses: extractions/setup-just@v4
+
       - name: Set up Python 3.13
         uses: actions/setup-python@v7
         with:
@@ -94,19 +100,21 @@ jobs:
       # The race tests in tests/oversight/test_durability.py only run on Postgres.
       - name: Run tests, with a coverage floor for oversight
         run: >-
-          make test
+          just
           UV_RUN_ARGS="$UV_RUN_ARGS --with pytest-cov"
           PYTEST_ARGS='--cov=django_ai_sdk/oversight --cov-report=term --cov-fail-under=90'
+          test
 
       - name: Run the oversight tests in random order
-        run: make test UV_RUN_ARGS="$UV_RUN_ARGS --with pytest-randomly" TEST_PATHS=tests/oversight
+        run: just UV_RUN_ARGS="$UV_RUN_ARGS --with pytest-randomly" TEST_PATHS=tests/oversight test
 
       # The authoring app is opt-in: without it, policies are code's alone.
       - name: Run the oversight tests without the authoring app
         run: >-
-          make test
+          just
           TEST_PATHS=tests/oversight
           PYTEST_ARGS='--ds=tests.settings_without_authoring --ignore=tests/oversight/authoring'
+          test
 
   lint:
     name: Lint & Typecheck
@@ -120,6 +128,9 @@ jobs:
         with:
           version: "latest"
 
+      - name: Install just
+        uses: extractions/setup-just@v4
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v7
         with:
@@ -129,7 +140,7 @@ jobs:
         run: uv run ruff check django_ai_sdk/
 
       - name: Typecheck
-        run: make typecheck
+        run: just typecheck
 
       - name: Migrations match the models
-        run: make check-migrations
+        run: just check-migrations

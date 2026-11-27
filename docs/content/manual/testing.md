@@ -33,8 +33,8 @@ Principles:
 ## Setup
 
 ```bash
-make setup      # runtime + demo extras only
-make setup-all  # every extra, including the torch-based transformers stack
+just setup      # runtime + the qdrant, mcp, files and dbos extras
+just setup-all  # every extra, including the torch-based transformers stack
 ```
 
 The pytest configuration lives in `pyproject.toml`:
@@ -54,7 +54,7 @@ python_functions = ["test_*"]
 
 ```bash
 # Everything
-make test
+just test
 # equivalent: uv run pytest tests -v
 
 # A single file
