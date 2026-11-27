@@ -37,7 +37,6 @@ class RunSuperseded(Exception):
 
 
 class StepAlreadyRecorded(Exception):
-
     def __init__(self, outcome: StepOutcome) -> None:
         super().__init__(outcome.detail)
         self.outcome = outcome
