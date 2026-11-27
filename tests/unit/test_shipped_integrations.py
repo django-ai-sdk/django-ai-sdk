@@ -63,14 +63,14 @@ class TestBootSafety:
         _run_ready("django_ai_sdk.integrations.linear.apps.LinearConfig")
 
         integration = (await get_all_integrations())["linear"]
-        assert integration._needs_setup
+        assert integration.detail
         assert await integration.get_tools() == []
 
     async def test_a_malformed_settings_entry_does_not_break_ready(self, settings):
         settings.AI_SDK_INTEGRATIONS = {"linear": "should-have-been-a-dict"}
         _run_ready("django_ai_sdk.integrations.linear.apps.LinearConfig")
 
-        assert (await get_all_integrations())["linear"]._needs_setup
+        assert (await get_all_integrations())["linear"].detail
 
 
 class TestPerDeploymentOverrides:
@@ -85,7 +85,7 @@ class TestPerDeploymentOverrides:
         _run_ready("django_ai_sdk.integrations.linear.apps.LinearConfig")
 
         integration = (await get_all_integrations())["linear"]
-        assert not integration._needs_setup
+        assert not integration.detail
         assert integration.config.url == "https://mcp.internal.example/linear"
         assert integration.config.tools == ["list_issues", "create_issue"]
 
@@ -117,7 +117,7 @@ class TestPerDeploymentOverrides:
         _run_ready("django_ai_sdk.integrations.github.apps.GitHubConfig")
 
         integration = (await get_all_integrations())["github"]
-        assert not integration._needs_setup
+        assert not integration.detail
         assert integration.kind == "oauth"
         assert integration.supports_connect is True
         assert integration.connect_kind == "oauth"
@@ -127,7 +127,7 @@ class TestPerDeploymentOverrides:
         _run_ready("django_ai_sdk.integrations.github.apps.GitHubConfig")
 
         integration = (await get_all_integrations())["github"]
-        assert integration._needs_setup
+        assert integration.detail
         assert "0auth" in integration.detail
         assert await integration.get_tools() == []
 
@@ -152,7 +152,7 @@ class TestMissingMCPApp:
         _run_ready("django_ai_sdk.integrations.linear.apps.LinearConfig")
 
         integration = (await get_all_integrations())["linear"]
-        assert integration._needs_setup
+        assert integration.detail
         assert "INSTALLED_APPS" in integration.detail
         assert await integration.get_tools() == []
 

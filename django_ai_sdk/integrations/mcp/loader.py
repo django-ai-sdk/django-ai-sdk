@@ -68,28 +68,20 @@ class DynamicMCPIntegration(Integration):
         self.config = config
         self.supports_connect = isinstance(config, OAuthMCPIntegrationConfig)
         self.connect_kind = "oauth" if self.supports_connect else None
-        self._needs_setup = needs_setup
+        self.detail = needs_setup
         self._intended_kind = intended_kind
 
     @property
     def kind(self) -> str:
-        if self._needs_setup and self._intended_kind:
+        if self.detail and self._intended_kind:
             return self._intended_kind
         return self.config.type
-
-    @property
-    def detail(self) -> str | None:
-        return self._needs_setup
-
-    @detail.setter
-    def detail(self, value: str | None) -> None:
-        self._needs_setup = value
 
     async def get_tool_names(
         self, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[str]:
         """The configured allow-list, else the cached get_tools() names."""
-        if self._needs_setup:
+        if self.detail:
             return []
         if self.config.tools:
             return self.config.tools
@@ -109,7 +101,7 @@ class DynamicMCPIntegration(Integration):
         agent: Agent | None = None,
         thread_id: str = "",
     ) -> list[Any]:
-        if self._needs_setup:
+        if self.detail:
             return []
         key = self._cache_key(user)
         if key is None:
@@ -122,7 +114,7 @@ class DynamicMCPIntegration(Integration):
         agent: Agent | None = None,
     ) -> IntegrationStatus:
         """Status of a real attempt: ACTIVE only if the last fetch succeeded."""
-        if self._needs_setup:
+        if self.detail:
             return IntegrationStatus.DISCONNECTED
 
         if isinstance(self.config, (StaticMCPIntegrationConfig, TokenMCPIntegrationConfig)):
@@ -183,8 +175,8 @@ class DynamicMCPIntegration(Integration):
         """Begin the OAuth 2.1 + PKCE flow; returns {"redirect_url": ...}."""
         if not isinstance(self.config, OAuthMCPIntegrationConfig):
             raise IntegrationNotConnectable(f"{self.name!r} is not an OAuth integration")
-        if self._needs_setup:
-            raise IntegrationNotConnectable(f"{self.name!r} is not configured: {self._needs_setup}")
+        if self.detail:
+            raise IntegrationNotConnectable(f"{self.name!r} is not configured: {self.detail}")
         if request is None:
             raise ValueError("connect() for an OAuth integration requires the request")
 

@@ -52,7 +52,7 @@ class TestToIntegration:
 
         integration = row.to_integration()
 
-        assert integration._needs_setup is not None
+        assert integration.detail is not None
 
     def test_detail_can_be_set_like_on_any_integration(self):
         integration = DynamicMCPIntegration(
