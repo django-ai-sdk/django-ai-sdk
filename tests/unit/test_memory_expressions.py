@@ -2,7 +2,7 @@ import re
 from unittest.mock import patch
 
 import pytest
-from django.db import OperationalError
+from django.db import DatabaseError
 from django_ai_sdk.memories.expressions import LineRegex, agrep, get_pattern
 from django_ai_sdk.memories.models import Entry, Memory
 
@@ -59,7 +59,8 @@ class TestLineRegex:
 
         with (
             patch.object(LineRegex, "as_sqlite", return_value=("no_such_column REGEXP %s", ["x"])),
-            pytest.raises(OperationalError, match="no_such_column"),
+            patch.object(LineRegex, "as_postgresql", return_value=("no_such_column ~ %s", ["x"])),
+            pytest.raises(DatabaseError, match="no_such_column"),
         ):
             [hit async for hit in agrep(entries, get_pattern("dock"))]
 
