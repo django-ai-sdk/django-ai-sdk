@@ -58,9 +58,7 @@ class AllowAnonymousMemoryPermission(BasePermission):
 
         ownership = await obj.memory_users.filter(user=user).afirst()
         if ownership is None:
-            if operation in self.READ | self.WRITE and obj.is_public:
-                return True
-            return False
+            return operation in self.READ and obj.is_public
 
         if operation in self.MANAGE:
             return ownership.can_manage
@@ -76,9 +74,9 @@ class AllowAnonymousMemoryPermission(BasePermission):
 
         if not is_authenticated:
             return queryset.filter(is_public=True) if operation in self.READ else queryset.none()
-        if operation in self.READ or operation in self.WRITE:
+        if operation in self.READ:
             return queryset.filter(is_public=True) | queryset.filter(memory_users__user=user)
-        if operation in self.MANAGE:
+        if operation in self.WRITE or operation in self.MANAGE:
             return queryset.filter(memory_users__user=user)
 
         return queryset.none()

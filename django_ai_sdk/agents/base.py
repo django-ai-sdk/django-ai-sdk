@@ -163,8 +163,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
     title_generation: bool = True
 
-    rag_document_limit: int = 10_000
-
     citation_formatter_class: type[SourceFormatter] = SourcesFormatter
 
     suggestion_generator: type[SuggestionGenerator] | None = None

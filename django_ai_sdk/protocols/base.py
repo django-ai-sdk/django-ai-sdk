@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 
 
 class BaseProtocolHandler(ABC):
+    response_headers: ClassVar[dict[str, str]] = {}
+
     @abstractmethod
     def to_chat_messages(
         self,
