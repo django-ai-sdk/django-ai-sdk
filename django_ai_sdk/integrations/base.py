@@ -159,29 +159,35 @@ class ResilientCache:
         cb_cooldown: float = 60,
         empty: Callable[[], Any] = list,
     ) -> None:
+        self._ttl = ttl
         self._timeout = timeout
         self._empty = empty
         self._cb_cooldown = cb_cooldown
         # cashews exposes no breaker state, so track it for status_for().
         self._last_ok: dict[str, bool] = {}
         self._breaker_open: set[str] = set()
-        self._cache = Cache()
-        self._cache.setup("mem://")
-        early_ttl = ttl * 0.8
+        self._runners: dict[str, Callable[..., Awaitable[Any]]] = {}
 
-        @self._cache.circuit_breaker(
+    def _runner_for(self, key: str) -> Callable[..., Awaitable[Any]]:
+        if key in self._runners:
+            return self._runners[key]
+        cache = Cache()
+        cache.setup("mem://")
+
+        @cache.circuit_breaker(
             errors_rate=_CB_ERRORS_RATE,
             period=_CB_PERIOD,
-            ttl=cb_cooldown,
-            half_open_ttl=cb_cooldown,
+            ttl=self._cb_cooldown,
+            half_open_ttl=self._cb_cooldown,
             min_calls=_CB_MIN_CALLS,
             key="cb:{key}",
         )
-        @self._cache.early(ttl=ttl, early_ttl=early_ttl, key="v:{key}")
-        async def _run(key: str, fetch: Callable[[], Awaitable[Any]]) -> Any:
+        @cache.early(ttl=self._ttl, early_ttl=self._ttl * 0.8, key="v:{key}")
+        async def run(key: str, fetch: Callable[[], Awaitable[Any]]) -> Any:
             return await asyncio.wait_for(fetch(), timeout=self._timeout)
 
-        self._run = _run
+        self._runners[key] = run
+        return run
 
     @staticmethod
     def _norm(key: Any) -> str:
@@ -192,7 +198,7 @@ class ResilientCache:
         k = self._norm(key)
         was_ok = self._last_ok.get(k)
         try:
-            value = await self._run(k, fetch)
+            value = await self._runner_for(k)(k, fetch)
         except CircuitBreakerOpen:
             self._last_ok[k] = False
             if k not in self._breaker_open:
@@ -232,11 +238,6 @@ class ResilientCache:
     async def invalidate(self, key: Any) -> None:
         """Drop key's cached value and reset its breaker, forcing a retry now."""
         k = self._norm(key)
-        breaker = f"circuit_breaker:cb:{k}"
-        await self._cache.delete_many(
-            f"early:v2:v:{k}",
-            f"early:v2:v:{k}:lock",
-            *(f"{breaker}:{state}" for state in ("total", "fails", "open", "halfopen")),
-        )
+        self._runners.pop(k, None)
         self._last_ok.pop(k, None)
         self._breaker_open.discard(k)
