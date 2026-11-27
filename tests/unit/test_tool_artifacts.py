@@ -149,3 +149,14 @@ async def test_stream_gets_the_agents_tool_artifacts():
         adapter = await respond.await_args.args[0]()
 
     assert (adapter.tool_artifacts, adapter.thread_id) == ({"lookup": spec}, "t")
+
+
+def test_each_stream_has_its_own_tool_artifacts():
+    from haystack import Pipeline
+
+    first = Stream(pipeline=Pipeline(), generator=AsyncMock())
+    second = Stream(pipeline=Pipeline(), generator=AsyncMock())
+
+    first.tool_artifacts["lookup"] = ToolArtifact(FileArtifact, AsyncMock(return_value=None))
+
+    assert second.tool_artifacts == {}

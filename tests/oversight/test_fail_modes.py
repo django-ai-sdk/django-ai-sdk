@@ -29,11 +29,11 @@ from tests.oversight.helpers import (
     ENFORCE,
     FnLens,
     broken,
-    closed,
+    fail_closed_mode,
     closed_turn,
     gate,
     gate_flag,
-    opened,
+    fail_open_mode,
     policy,
     slow_no,
     slow_yes,
@@ -145,7 +145,7 @@ class TestFailModeAtEachStage:
         refusing = await start(name)
         gate = await refusing.gate()
         assert gate.blocked if kind == "block" else refusing.restrict == []
-        with opened():
+        with fail_open_mode():
             guard = await start(name)
             passed = await guard.gate()
         assert not passed.blocked and guard.restrict is None
@@ -209,7 +209,7 @@ class TestFailModeAtEachStage:
             [Rule("r", when=~L("safe").is_true, then=Block(), mode=ENFORCE)],
         )
         assert (await (await start(name)).gate()).blocked
-        with opened():
+        with fail_open_mode():
             assert not (await (await start(name)).gate()).blocked
 
     async def test_a_failed_lens_does_not_overturn_what_answered(self):
@@ -299,7 +299,7 @@ class TestFailModeAtEachStage:
             ],
             [Rule("r", when=L("g").is_true & L("f").is_true, then=Block("no"), mode=ENFORCE)],
         )
-        with closed():
+        with fail_closed_mode():
             guard = await start(name)
             assert not (await guard.gate()).blocked
             assert (await guard.finish("answer")).blocked
@@ -332,7 +332,7 @@ class TestFailModeAtEachStage:
         )
         call = ToolCall(id="1", name="x", arguments={})
         assert await (await start(name)).tool_call(call) is not None
-        with opened():
+        with fail_open_mode():
             assert await (await start(name)).tool_call(call) is None
 
 

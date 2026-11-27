@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +20,7 @@ from haystack_integrations.components.embedders.fastembed import (
 )
 from haystack_integrations.components.retrievers.qdrant import QdrantHybridRetriever
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
+from haystack_integrations.document_stores.qdrant.document_store import QdrantStoreError
 from pydantic import Field
 from tenacity import (
     Retrying,
@@ -33,7 +33,7 @@ from django_ai_sdk.generators.base import build_kwargs, resolve_secret
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
 from django_ai_sdk.rags.components import CANDIDATES_PER_QUERY, MultiQueryDeduplicationMixin
-from django_ai_sdk.rags.config import QdrantStorageConfig
+from django_ai_sdk.rags.config import DEFAULT_EMBEDDING_DIM, QdrantStorageConfig
 from django_ai_sdk.rags.utils import to_document
 from django_ai_sdk.utils import resolve_setting
 
@@ -48,6 +48,12 @@ DEFAULT_DENSE_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-
 def _created_meanwhile(exc: BaseException) -> bool:
     """Qdrant's 409 for a collection another worker created after this one looked."""
     return getattr(exc, "status_code", None) == 409 and "already exists" in str(exc)
+
+
+def _collection_missing(exc: QdrantStoreError) -> bool:
+    # count_documents wraps a local client's ValueError or a server's 404.
+    cause = exc.__cause__
+    return isinstance(cause, ValueError) or getattr(cause, "status_code", None) == 404
 
 
 def _openai_kwargs(**kwargs: Any) -> dict[str, Any]:
@@ -90,9 +96,9 @@ class QdrantBM25HybridRAGConfig(RAGConfig):
     )
     embedding_dim: int = Field(
         default_factory=lambda: (
-            resolve_setting("AI_SDK_EMBEDDINGS_DIM", 384)
+            resolve_setting("AI_SDK_EMBEDDINGS_DIM", DEFAULT_EMBEDDING_DIM)
             if resolve_setting("AI_SDK_EMBEDDINGS_MODEL")
-            else 384
+            else DEFAULT_EMBEDDING_DIM
         ),
         ge=1,
     )
@@ -139,8 +145,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                     similarity=storage.similarity,
                     **extra,
                 )
-                with contextlib.suppress(ValueError):
-                    store.count_documents()
+                store.count_documents()
                 return store
 
             try:
@@ -178,8 +183,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                         similarity=storage.similarity,
                         **extra,
                     )
-                    with contextlib.suppress(ValueError):
-                        store.count_documents()
+                    store.count_documents()
                     return store
             raise RuntimeError("Failed to create QdrantDocumentStore after retries")
         else:
@@ -220,6 +224,10 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             return document_store.count_documents() > 0
         except ValueError:
             return False
+        except QdrantStoreError as exc:
+            if _collection_missing(exc):
+                return False
+            raise
 
     async def add_documents(self, documents: list[RagDocument]) -> None:
         if self._cached_document_store is None:
@@ -396,7 +404,8 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
     async def refresh_documents(self, documents: list[RagDocument]) -> None:
         """Update the indexed documents without releasing the Qdrant file lock.
 
-        Safe to call on a warmed-up instance.
+        Safe to call on a warmed-up instance. Reuses the open store: Qdrant's local
+        file lock is non-blocking, so a second client on the same folder raises.
         """
         self.documents = documents
         logger.info(f"[refresh_documents] Refreshing Qdrant index with {len(documents)} documents")

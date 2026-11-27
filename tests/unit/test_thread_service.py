@@ -260,6 +260,17 @@ class TestDbStorageAdapterUpdateThreadTitle:
         assert thread.title == "Renamed"
         assert thread.file_memory_id == memory.id
 
+    async def test_a_metadata_update_keeps_a_key_written_meanwhile(self):
+        thread = await Thread.objects.acreate(metadata={"agent_id": "a"})
+        stale = await Thread.objects.aget(id=thread.id)
+        await Thread.objects.filter(id=thread.id).aupdate(metadata={"agent_id": "a", "pinned": True})
+
+        with patch.object(Thread.objects, "aget", AsyncMock(return_value=stale)):
+            await DbStorageAdapter.update_thread(str(thread.id), metadata={"model": "m"})
+
+        await thread.arefresh_from_db()
+        assert thread.metadata == {"agent_id": "a", "pinned": True, "model": "m"}
+
 
 @pytest.mark.django_db
 @pytest.mark.asyncio

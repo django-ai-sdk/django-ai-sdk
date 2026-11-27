@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING, TypeVar
 
 from django_ai_sdk.utils import resolve_setting
 
+from .mixins import AGENT_NAMESPACE
+
 if TYPE_CHECKING:
     from .base import Agent
 
 
 T = TypeVar("T", bound="Agent")
-
-AGENT_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 
 class AgentRegistrationError(Exception):
@@ -67,14 +67,15 @@ class AgentRegistry:
             return
 
         if load_from_settings:
+            from django.core.exceptions import ImproperlyConfigured
             from django.utils.module_loading import import_string
 
             agent_paths = resolve_setting("AI_SDK_AGENTS", [])
             for path in agent_paths:
                 try:
                     import_string(path)
-                except ImportError:
-                    pass
+                except ImportError as exc:
+                    raise ImproperlyConfigured(f"AI_SDK_AGENTS: {exc}") from exc
 
         if instantiate:
             for agent_id, agent_class in self._classes.items():

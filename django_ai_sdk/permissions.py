@@ -12,7 +12,8 @@ from pydantic import BaseModel
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
-    from django.db.models import QuerySet
+    from django.contrib.auth.models import Group
+    from django.db.models import Manager, QuerySet
 
     from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.memories.models import Memory
@@ -149,9 +150,10 @@ class IsInAllowedGroups(BasePermission):
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         if user is None or not bool(user.is_authenticated):
             return False
-        if not hasattr(user, "groups"):
+        groups: Manager[Group] | None = getattr(user, "groups", None)
+        if groups is None:
             raise TypeError("IsInAllowedGroups requires a user model with groups support")
-        return await user.groups.filter(name__in=self.groups).aexists()  # ty: ignore[missing-attribute]
+        return await groups.filter(name__in=self.groups).aexists()
 
 
 class IsOwner(BasePermission):
@@ -285,11 +287,11 @@ class MemoryDefaultPermission(BasePermission):
 
         restricted = self.MANAGE | self.DELETE
 
-        ownership = await obj.memory_users.filter(user=user).afirst()  # ty: ignore[invalid-attribute-access]
+        ownership = await obj.memory_users.filter(user=user).afirst()
         if ownership is not None and (operation not in restricted or ownership.can_manage):
             return True
 
-        group_ownership = await obj.memory_groups.filter(group__user=user).afirst()  # ty: ignore[invalid-attribute-access]
+        group_ownership = await obj.memory_groups.filter(group__user=user).afirst()
         if group_ownership is not None and (
             operation not in restricted or group_ownership.can_manage
         ):

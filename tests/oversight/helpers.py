@@ -398,11 +398,11 @@ def found_without_spans(text, context):
     return Answer(value=["person"]) if "Jan" in text else Answer(value=[])
 
 
-def closed(**extra: Any) -> Any:
+def fail_closed_mode(**extra: Any) -> Any:
     return override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "closed", **extra})
 
 
-def opened(**extra: Any) -> Any:
+def fail_open_mode(**extra: Any) -> Any:
     return override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "open", **extra})
 
 

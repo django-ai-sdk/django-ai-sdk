@@ -154,7 +154,9 @@ async def judge_history(
             result.block(one.message)
         if one.restrict is not None:
             guard.restrict = merge_restrict(guard.restrict, one.restrict)
-    recorded = guard.record_aside(Stage.GATE, [o for one in judged for o in one.answered], found)
+    recorded = guard.record_other_text_findings(
+        Stage.GATE, [o for one in judged for o in one.answered], found
+    )
     guard.set_history(earlier)
     if result.blocked:
         result.notice = guard.notices.stage_notice(Stage.GATE, recorded, True, result.message)
@@ -220,7 +222,7 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
             )
             if m.rule.lenses() & tool_lenses
         ]
-        recorded = {m.rule.name for m in guard.matched if not m.aside}
+        recorded = {m.rule.name for m in guard.matched if not m.on_other_text}
         guard.matched.extend(m for m in matched if m.rule.name not in recorded)
         block = first_block_message(matched)
         guard.restrict = restricted_tools(matched, guard.restrict)

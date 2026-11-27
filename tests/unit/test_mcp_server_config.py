@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import socket
+
 import pytest
 from django_ai_sdk.integrations.api.base import APIIntegration
 from django_ai_sdk.integrations.mcp.loader import DynamicMCPIntegration
 from django_ai_sdk.integrations.mcp.models import MCPServerConfig
+from django_ai_sdk.integrations.mcp.schemas import StaticMCPIntegrationConfig
 from django_ai_sdk.integrations.registry import (
     get_all_integrations,
     get_integrations,
@@ -15,7 +18,7 @@ from django_ai_sdk.integrations.registry import (
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
-pytestmark = pytest.mark.django_db
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 @pytest.fixture(autouse=True)
@@ -49,7 +52,16 @@ class TestToIntegration:
 
         integration = row.to_integration()
 
-        assert integration._needs_setup is not None
+        assert integration.detail is not None
+
+    def test_detail_can_be_set_like_on_any_integration(self):
+        integration = DynamicMCPIntegration(
+            "zendesk-x", StaticMCPIntegrationConfig(url="https://x", label="Zendesk")
+        )
+
+        integration.detail = "token revoked"
+
+        assert integration.detail == "token revoked"
 
 
 class TestRegistryMerge:
@@ -212,6 +224,17 @@ class TestUrlValidation:
                 name="ssrf-4",
                 url="http://169.254.169.254/latest/meta-data/",
                 auth="static",
+            )
+
+    async def test_rejects_a_hostname_that_resolves_to_a_private_ip(self, monkeypatch):
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 0))],
+        )
+        with pytest.raises(ValueError):
+            await MCPServerConfig.objects.acreate(
+                name="ssrf-6", url="https://rebind.example.com/mcp", auth="static"
             )
 
     async def test_allows_a_public_hostname(self):

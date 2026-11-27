@@ -262,6 +262,13 @@ async def aget_thread_history(thread_id: str, user: UserType) -> dict[str, Any]:
 get_thread_history = async_to_sync(aget_thread_history)
 
 
+def keep_own_feedback(history: dict[str, Any], user: UserType) -> None:
+    user_pk = str(user.pk) if user and user.is_authenticated else None
+    for message in history.get("messages", []):
+        feedbacks = message.pop("feedbacks", [])
+        message["feedback"] = next((fb for fb in feedbacks if fb.get("user_id") == user_pk), None)
+
+
 async def aget_thread_file_meta(thread_id: str, *, user: UserType) -> dict[str, Any]:
     """Return a thread's file_count and file_memory_id (0 and None without a file memory)."""
     thread = await _get_thread(thread_id)

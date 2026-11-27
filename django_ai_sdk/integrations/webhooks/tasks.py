@@ -124,7 +124,7 @@ async def _load_conversation(
             await storage_class.create_thread(
                 title=f"{integration.label}: {event.conversation_id}",
                 metadata={
-                    **thread_metadata(agent.__class__._agent_id, agent, "webhook"),
+                    **thread_metadata(agent.agent_id, agent, "webhook"),
                     "integration": event.integration,
                     "conversation_id": event.conversation_id,
                     "thread_ref": event.thread_ref,
@@ -138,7 +138,7 @@ async def _load_conversation(
             if await storage_class.get_thread(thread_id) is None:
                 raise
         else:
-            await MemoryService.link_memories(agent.__class__._agent_id, thread_id, user=principal)
+            await MemoryService.link_memories(agent.agent_id, thread_id, user=principal)
 
     storage = storage_class(thread_id)
     history = await storage.get_messages()

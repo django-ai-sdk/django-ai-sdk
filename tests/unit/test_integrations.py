@@ -248,7 +248,7 @@ class TestResilientCache:
         assert await cache.get("k", fetch) == ["tools-2"]
         assert calls == 2
 
-    async def test_invalidate_clears_the_whole_instance_not_just_one_key(self):
+    async def test_invalidate_drops_only_that_key(self):
         cache = ResilientCache(ttl=60, timeout=1)
         calls = {"a": 0, "b": 0}
 
@@ -268,7 +268,7 @@ class TestResilientCache:
 
         await cache.get("user-a", fetch_a)
         await cache.get("user-b", fetch_b)
-        assert calls == {"a": 2, "b": 2}
+        assert calls == {"a": 2, "b": 1}
 
 
 class TestResilientCacheRecovery:

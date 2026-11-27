@@ -6,7 +6,7 @@ from django_ai_sdk.workflows.listeners import RunListener, get_listener_registry
 from django_ai_sdk.workflows.models import WorkflowRun, StepRun
 from django_ai_sdk.workflows.runner import run_steps
 from django_ai_sdk.workflows.runs import RunRecorder
-from django_ai_sdk.workflows.steps import RunSuperseded, StepOutcome, StepRecorded, WorkflowContext
+from django_ai_sdk.workflows.steps import RunSuperseded, StepOutcome, StepAlreadyRecorded, WorkflowContext
 from tests.mocks.workflow import FakeStep
 
 CTX = WorkflowContext()
@@ -163,7 +163,7 @@ class TestTheRecorderHoldsTheRun:
         await recorder.on_step_start(CTX, ocr)
         await recorder.on_step_end(CTX, ocr, StepOutcome(output="the text"))
 
-        with pytest.raises(StepRecorded) as recorded:
+        with pytest.raises(StepAlreadyRecorded) as recorded:
             await recorder.on_step_start(CTX, ocr)
 
         assert recorded.value.outcome.output == "the text"

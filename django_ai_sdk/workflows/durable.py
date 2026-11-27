@@ -22,7 +22,8 @@ QUEUE = "workflows"
 
 
 def workflow_id(run_id: str, attempt: int) -> str:
-    return run_id if attempt == 0 else f"{run_id}:{attempt + 1}"
+    next_attempt = attempt + 1
+    return run_id if attempt == 0 else f"{run_id}:{next_attempt}"
 
 
 def enqueue(run_id: str) -> str:
@@ -90,18 +91,18 @@ async def fire_cron(scheduled_at: str, context: dict[str, Any]) -> str | None:
 async def perform(label: str, unit: Callable[[], Awaitable[Any]]) -> Any:
     async def checkpointed() -> Any:
         async with runtime.fresh_connections():
-            return _dump(await unit())
+            return to_checkpoint(await unit())
 
-    return _load(await DBOS.run_step_async({"name": label}, checkpointed))
+    return from_checkpoint(await DBOS.run_step_async({"name": label}, checkpointed))
 
 
-def _dump(value: Any) -> Any:
+def to_checkpoint(value: Any) -> Any:
     if isinstance(value, StepOutcome):
         return {"outcome": {**asdict(value), "output": serialize(value.output)}}
     return {"value": serialize(value)}
 
 
-def _load(value: Any) -> Any:
+def from_checkpoint(value: Any) -> Any:
     if "outcome" in value:
         return StepOutcome(**value["outcome"])
     return value["value"]
@@ -110,5 +111,7 @@ def _load(value: Any) -> Any:
 __all__ = [
     "QUEUE",
     "RUN_WORKFLOW",
+    "from_checkpoint",
     "runs_under_other_versions",
+    "to_checkpoint",
 ]

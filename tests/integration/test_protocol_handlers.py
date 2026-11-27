@@ -323,33 +323,30 @@ class TestVercelProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_state_reset_on_new_stream(self, handler):
-        async def stream1():
+        import json
+
+        async def cut_off():
             yield MessageStartEvent(message_id="msg_1")
             yield TextChunkEvent(content="First")
-            yield MessageEndEvent(finish_reason="stop")
 
-        chunks1 = []
-        async for chunk in handler.handle_stream(stream1()):
-            chunks1.append(chunk)
-
+        chunks1 = [chunk async for chunk in handler.handle_stream(cut_off())]
         first_text_id = [c for c in chunks1 if isinstance(c, TextStartPart)][0].id
+        assert handler.text_started
 
-        async def stream2():
-            yield MessageStartEvent(message_id="msg_2")
-            yield TextChunkEvent(content="Second")
-            yield MessageEndEvent(finish_reason="stop")
+        class Second:
+            async def stream(self, messages):
+                yield MessageStartEvent(message_id="msg_2")
+                yield TextChunkEvent(content="Second")
+                yield MessageEndEvent(finish_reason="stop")
 
-        handler.text_started = False
-        handler.text_id = None
-        handler.message_id = None
+        chunks2 = [
+            json.loads(raw.decode().removeprefix("data: "))
+            async for raw in handler.sse(Second(), [])
+        ]
 
-        chunks2 = []
-        async for chunk in handler.handle_stream(stream2()):
-            chunks2.append(chunk)
-
-        second_text_id = [c for c in chunks2 if isinstance(c, TextStartPart)][0].id
-
-        assert first_text_id != second_text_id
+        text = [c for c in chunks2 if c["type"].startswith("text-")]
+        assert text[0]["type"] == "text-start"
+        assert {c["id"] for c in text} == {text[0]["id"]} != {first_text_id}
 
     @pytest.fixture
     def handler(self):

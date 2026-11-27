@@ -48,6 +48,10 @@ async def _call(module_path: str, args: list[Any], kwargs: dict[str, Any]) -> An
         value = await sync_to_async(_in_fresh_connections, thread_sensitive=False)(
             task.func, args, kwargs
         )
+    return _to_json(value)
+
+
+def _to_json(value: Any) -> Any:
     return json.loads(json.dumps(value))
 
 

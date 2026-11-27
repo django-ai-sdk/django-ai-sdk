@@ -18,6 +18,7 @@ from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import Group
+    from django.db.models.fields.related_descriptors import RelatedManager
 
 
 class Memory(models.Model):
@@ -32,9 +33,9 @@ class Memory(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
-    entries: models.Manager[Entry]
-    memory_users: models.Manager[MemoryUser]
-    memory_groups: models.Manager[MemoryGroup]
+    entries: RelatedManager[Entry]
+    memory_users: RelatedManager[MemoryUser]
+    memory_groups: RelatedManager[MemoryGroup]
 
     document_count: int
 
@@ -97,7 +98,7 @@ class MemoryUser(models.Model):
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    memory_id: int
+    memory_id: uuid.UUID
     user_id: int
 
     objects = NaturalKeyManager("memory", "user")
@@ -124,7 +125,7 @@ class MemoryGroup(models.Model):
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    memory_id: int
+    memory_id: uuid.UUID
     group_id: int
 
     objects = NaturalKeyManager("memory", "group")

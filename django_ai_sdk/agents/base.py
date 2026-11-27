@@ -82,6 +82,15 @@ def _unavailable_part(stage: str, detail: str) -> dict[str, Any]:
     }
 
 
+def _claim_tool_name(name: str, used_names: set[str], suffix: str) -> str:
+    if name in used_names:
+        renamed = f"{name}_{suffix}"
+        logger.warning(f"Tool name {name!r} collided, renamed to {renamed!r}")
+        name = renamed
+    used_names.add(name)
+    return name
+
+
 def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
     """Haystack needs unique tool names per agent, and two MCP servers may both define one."""
     try:
@@ -406,11 +415,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             haystack_agent, subagent = built
             agent_id = subagent.agent_id
 
-            name = subagent_tool_name(subagent_cls)
-            if name in used_names:
-                original, name = name, f"{name}_{agent_id.replace('-', '')[:6]}"
-                logger.warning(f"Subagent tool name {original!r} collided, renamed to {name!r}")
-            used_names.add(name)
+            name = _claim_tool_name(
+                subagent_tool_name(subagent_cls), used_names, agent_id.replace("-", "")[:6]
+            )
             logger.info(
                 f"Enabled subagent tool {name!r} ({subagent_cls.__name__}) on coordinator {self.__class__.__name__}"
             )
@@ -509,14 +516,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                     f"'the file I just uploaded'."
                 )
 
-            if spec.name in used_names:
-                spec.name = f"{spec.name}_{str(memory.id).replace('-', '')[:6]}"
-                logger.warning(
-                    "Tool name collision for memory '{}', renamed to '{}'",
-                    memory.name,
-                    spec.name,
-                )
-            used_names.add(spec.name)
+            spec.name = _claim_tool_name(spec.name, used_names, str(memory.id).replace("-", "")[:6])
 
             tool = await self.rag_provider.get_tool(
                 self,

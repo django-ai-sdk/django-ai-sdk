@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import sync_to_async
@@ -20,7 +20,7 @@ from django_ai_sdk.workflows.models import StepRun, WorkflowRun
 from django_ai_sdk.workflows.registry import ADHOC, is_registered
 from django_ai_sdk.workflows.runner import perform_now, run_steps
 from django_ai_sdk.workflows.schemas import WorkflowDefinition
-from django_ai_sdk.workflows.steps import RunSuperseded, StepOutcome, StepRecorded
+from django_ai_sdk.workflows.steps import RunSuperseded, StepAlreadyRecorded, StepOutcome
 
 if TYPE_CHECKING:
     import uuid
@@ -179,21 +179,27 @@ def fail_stale_runs() -> int:
     return failed
 
 
-async def claim_run(run_id: str, *, workflow_id: str | None = None) -> WorkflowRun | None:
-    now = timezone.now()
-    claimed = await WorkflowRun.objects.filter(
-        pk=run_id, status=WorkflowRun.Status.PENDING
-    ).aupdate(
+async def _start_pending_run(run_id: str, workflow_id: str | None, now: datetime) -> int:
+    return await WorkflowRun.objects.filter(pk=run_id, status=WorkflowRun.Status.PENDING).aupdate(
         status=WorkflowRun.Status.RUNNING,
         attempt=F("attempt") + 1,
         heartbeat_at=now,
         started_at=Coalesce(F("started_at"), now),
         **({"task_id": workflow_id} if workflow_id else {}),
     )
+
+
+async def _renew_own_claim(run_id: str, workflow_id: str, now: datetime) -> int:
+    return await WorkflowRun.objects.filter(
+        pk=run_id, status=WorkflowRun.Status.RUNNING, task_id=workflow_id
+    ).aupdate(heartbeat_at=now)
+
+
+async def claim_run(run_id: str, *, workflow_id: str | None = None) -> WorkflowRun | None:
+    now = timezone.now()
+    claimed = await _start_pending_run(run_id, workflow_id, now)
     if not claimed and workflow_id:
-        claimed = await WorkflowRun.objects.filter(
-            pk=run_id, status=WorkflowRun.Status.RUNNING, task_id=workflow_id
-        ).aupdate(heartbeat_at=now)
+        claimed = await _renew_own_claim(run_id, workflow_id, now)
     if not claimed:
         return None
     return await WorkflowRun.objects.aget(pk=run_id)
@@ -315,7 +321,7 @@ class RunRecorder(RunListener):
         self.closed = True
 
     async def on_step_start(self, ctx: WorkflowContext, step: Step) -> None:
-        """A completed row means the worker died before DBOS recorded it: raise `StepRecorded`."""
+        """A completed row means the worker died before DBOS recorded it: raise `StepAlreadyRecorded`."""
         await self.beat()
         sequence = self.sequence[step.name]
         await StepRun.objects.abulk_create(
@@ -337,7 +343,7 @@ class RunRecorder(RunListener):
         )
         if not claimed:
             row = await StepRun.objects.aget(run=self.run, sequence=sequence)
-            raise StepRecorded(
+            raise StepAlreadyRecorded(
                 StepOutcome(output=row.output, detail=row.detail, turn_id=row.turn_id)
             )
 

@@ -9,6 +9,8 @@ from django_ai_sdk.utils import resolve_setting
 
 logger = get_logger(__name__)
 
+DEFAULT_EMBEDDING_DIM = 384
+
 
 class BaseStorageConfig(BaseModel):
     model_config = ConfigDict(extra="allow")

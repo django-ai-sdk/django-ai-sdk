@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from django.http import StreamingHttpResponse
 
+from django_ai_sdk.adapters.base import get_error_chunk, get_error_event
 from django_ai_sdk.common import StreamWriter
 from django_ai_sdk.errors import describe_error
 from django_ai_sdk.events import MessageStartEvent, StreamEndEvent
@@ -59,8 +60,6 @@ async def _ensure_adapter(
             factory = cast("Callable[[], Coroutine[None, None, Streamable]]", adapter)
             adapter = await factory()
     except Exception as exc:
-        from django_ai_sdk.adapters.base import get_error_chunk, get_error_event
-
         info = describe_error(exc)
         logger.opt(exception=exc).error(
             "Adapter initialization failed [{}] {}: {}: {}",

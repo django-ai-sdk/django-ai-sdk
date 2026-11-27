@@ -268,9 +268,14 @@ def _field_from_info(model: type[BaseModel], name: str, info: FieldInfo) -> Fiel
             f"{where} has a default_factory, which does not cross into a declared schema."
         )
     annotation, optional = _split_optional(info.annotation)
+    if optional and info.is_required():
+        raise ValueError(
+            f"{where} is `X | None` without a default, which a declared schema does not "
+            f"express. Give it a default, such as `= None`."
+        )
     return FieldDefinition(
         description=info.description or "",
-        required=info.is_required() and not optional,
+        required=info.is_required(),
         default=None if info.default is PydanticUndefined else info.default,
         **_type_kwargs(annotation, where),
     )

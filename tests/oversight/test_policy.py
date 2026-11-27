@@ -344,15 +344,15 @@ class TestRuleEvaluation:
         resolved = build_policy("test-parent")
         broken = {"mentions_x": ans(None, error="timeout")}
 
-        def closed():
+        def match_fail_closed():
             return match_rules(
                 resolved, broken, Stage.GATE, done=set(), errored={"mentions_x"}, fail_closed=True
             )
 
-        assert not closed()
+        assert not match_fail_closed()
         resolved.rules["block_x"].mode = Mode.ENFORCE
         assert not match_rules(resolved, broken, Stage.GATE, done=set())
-        assert [m.rule.name for m in closed()] == ["block_x"]
+        assert [m.rule.name for m in match_fail_closed()] == ["block_x"]
 
     def test_fail_closed_never_raises_an_alert(self):
         resolved = build_policy("test-parent")

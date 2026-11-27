@@ -259,23 +259,25 @@ class TurnGuard:
     def errored_lenses(self) -> set[str]:
         return {name for name, errored in self._lens_errored.items() if errored}
 
-    def record_aside(
+    def record_other_text_findings(
         self, stage: Stage, answered: list[Answered], matched: list[Matched]
     ) -> list[Matched]:
-        seen = {(o.lens.name, o.stage) for o in self.answered if o.aside}
+        seen = {(o.lens.name, o.stage) for o in self.answered if o.on_other_text}
         for item in answered:
             found = (item.answer.ok and item.answer.value) or item.errored
             if found and (item.lens.name, stage) not in seen:
                 seen.add((item.lens.name, stage))
                 answer = item.answer.model_copy(update={"spans": []})
-                self.answered.append(Answered(item.lens, stage, answer, item.failed, aside=True))
-        recorded = {(m.rule.name, m.stage) for m in self.matched if m.aside}
+                self.answered.append(
+                    Answered(item.lens, stage, answer, item.failed, on_other_text=True)
+                )
+        recorded = {(m.rule.name, m.stage) for m in self.matched if m.on_other_text}
         added: list[Matched] = []
         for match in matched:
             if (match.rule.name, stage) not in recorded:
                 recorded.add((match.rule.name, stage))
                 added.append(
-                    Matched(match.rule, stage, match.acted, aside=True, failed=match.failed)
+                    Matched(match.rule, stage, match.acted, on_other_text=True, failed=match.failed)
                 )
         self.matched.extend(added)
         return added

@@ -115,7 +115,7 @@ class LimitToolChoiceHook(OversightHook):
 REPLACED_META_KEY = "django_ai_sdk.oversight.replaced"
 
 
-JOINED = "joined"
+JOINED_QUESTION_CALL_ID = "joined"
 
 
 class GateQuestionHook(OversightHook):
@@ -179,7 +179,7 @@ async def mask_joined_question(state: State, guard: TurnGuard) -> StageResult:
     text = said_text(messages[asked]) if asked is not None else ""
     if asked is None or not text:
         return StageResult(Stage.GATE, text=text)
-    masked = await guard.mask_result(JOINED, text)
+    masked = await guard.mask_result(JOINED_QUESTION_CALL_ID, text)
     if masked != text:
         messages[asked] = masked_message(messages[asked], masked)
         state.set("messages", messages, handler_override=replace_values)
@@ -263,7 +263,7 @@ class JudgeToolCallHook(OversightHook):
             return
         guard, messages = step
         # A model may use a call id again; only this step's own stubs go unjudged.
-        guard.masks.answered_here.difference_update(c.id for c in messages[-1].tool_calls)
+        guard.masks.blocked_call_ids.difference_update(c.id for c in messages[-1].tool_calls)
         block_messages: dict[int, str] = {}
         for index, call in enumerate(messages[-1].tool_calls):
             seen = _as_tool_call(call, state)
@@ -273,7 +273,7 @@ class JudgeToolCallHook(OversightHook):
                 block_messages[index] = reason
         if not block_messages:
             return
-        guard.masks.answered_here.update(call.id for call in messages[-1].tool_calls if call.id)
+        guard.masks.blocked_call_ids.update(call.id for call in messages[-1].tool_calls if call.id)
         streamed = guard.on_tool_results is not None
         stubs = _block_tool_step(state, messages, block_messages, streamed=streamed)
         if streamed:

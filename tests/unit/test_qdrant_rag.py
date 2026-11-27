@@ -355,6 +355,16 @@ class TestQdrantServerCollectionRace:
         assert [c.kwargs["recreate_index"] for c in store.call_args_list] == [True, False]
 
 
+class TestQdrantCollectionDeletedExternally:
+    def test_a_missing_collection_counts_as_no_index(self):
+        rag = QdrantBM25HybridRAG(documents=[], config=QdrantBM25HybridRAGConfig())
+        store = rag._create_document_store()
+        store.count_documents()
+        store._client.delete_collection(store.index)
+
+        assert rag._has_existing_index(store) is False
+
+
 class TestQdrantRealFileLock:
     @staticmethod
     def rag(path, lock_timeout):
@@ -391,6 +401,20 @@ class TestQdrantRealFileLock:
             holder.close()
 
         assert raised.value.code == ErrorCode.KNOWLEDGE_UNAVAILABLE
+
+
+class TestQdrantIndexMismatch:
+    @staticmethod
+    def store(path, dim):
+        storage = QdrantStorageConfig(backend="persistent", persist_path=str(path))
+        config = QdrantBM25HybridRAGConfig(storage=storage, embedding_dim=dim)
+        return QdrantBM25HybridRAG(documents=[], config=config)._create_document_store()
+
+    def test_an_index_of_another_dimension_surfaces(self, tmp_path):
+        self.store(tmp_path, 3).close()
+
+        with pytest.raises(ValueError, match="vector size"):
+            self.store(tmp_path, 4)
 
 
 class TestQdrantMissingEmbeddings:

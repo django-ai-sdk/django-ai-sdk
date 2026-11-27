@@ -29,6 +29,7 @@ from django_ai_sdk.storage.services import (
     aget_thread_file_meta,
     aget_thread_history,
     aget_thread_sources,
+    keep_own_feedback,
 )
 from django_ai_sdk.tracing.schemas import TokenUsage
 from django_ai_sdk.tracing.services import TraceService
@@ -75,10 +76,7 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
 @routes.get("/threads/{thread_id}/", response=ThreadDetailResponse)
 async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
     data = await aget_thread_history(thread_id, user=request.user)
-    user_pk = str(request.user.pk) if request.user.is_authenticated else None
-    for message in data.get("messages", []):
-        feedbacks = message.pop("feedbacks", [])
-        message["feedback"] = next((fb for fb in feedbacks if fb.get("user_id") == user_pk), None)
+    keep_own_feedback(data, request.user)
     perms = await athread_permissions(request.user, thread_id)
     return ThreadDetailResponse(**data, permissions=perms)
 

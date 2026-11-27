@@ -383,13 +383,13 @@ class TestForgettingRacesAClose:
     def test_a_close_during_a_forget_stores_no_content(self):
         from asgiref.sync import async_to_sync
 
-        async def opened() -> TurnGuard:
+        async def open_finished_guard() -> TurnGuard:
             guard = await start("test-guard", QUESTION, thread_id="t-race")
             await guard.gate()
             await guard.finish(ANSWER)
             return guard
 
-        guard = async_to_sync(opened)()
+        guard = async_to_sync(open_finished_guard)()
         forgot = threading.Event()
 
         def forget() -> None:

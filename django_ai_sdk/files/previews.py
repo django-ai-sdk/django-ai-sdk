@@ -70,7 +70,7 @@ def get_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-CONVERTERS = {
+PDF_CONVERTERS_BY_EXTENSION = {
     "pdf": lambda data: data,
     "docx": get_office("docx"),
     "pptx": get_office("pptx"),
@@ -81,13 +81,13 @@ CONVERTERS = {
     "json": lambda data: get_pdf_engine().Pdf.from_text(get_text(data)),
 }
 
-PREVIEW_EXTENSIONS = frozenset(CONVERTERS)
+PREVIEW_EXTENSIONS = frozenset(PDF_CONVERTERS_BY_EXTENSION)
 IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "webp", "gif"})
 
 
 def to_pdf(data: bytes, extension: str) -> bytes | None:
     """The file as a PDF, or None if the extension is not supported."""
-    convert = CONVERTERS.get(extension.lower().lstrip("."))
+    convert = PDF_CONVERTERS_BY_EXTENSION.get(extension.lower().lstrip("."))
     if convert is None:
         return None
     pdf = convert(data)

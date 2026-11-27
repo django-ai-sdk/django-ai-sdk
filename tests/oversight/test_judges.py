@@ -27,7 +27,7 @@ from django_ai_sdk.oversight.types import Answer, Source, Stage, Subject, ToolCa
 from tests.oversight.helpers import (
     ENFORCE,
     gate_flag,
-    opened,
+    fail_open_mode,
     policy,
     slow_yes,
     start,
@@ -1004,7 +1004,7 @@ class TestTooLongToJudge:
         guard = await start(name, "x" * 7_000)
         gate = await guard.gate()
         assert gate.blocked and guard.answered[0].answer.error == TOO_LONG
-        with opened():
+        with fail_open_mode():
             assert not (await (await start(name, "x" * 7_000)).gate()).blocked
 
 

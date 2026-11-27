@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 _required: contextvars.ContextVar[str] = contextvars.ContextVar(
     "django_ai_sdk_oversight_turn_required", default=""
 )
-_settled: contextvars.ContextVar[bool] = contextvars.ContextVar(
+_calls_covered: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "django_ai_sdk_oversight_settled", default=False
 )
 _warned: set[str] = set()
@@ -34,12 +34,12 @@ def requires_turn(where: str) -> AbstractContextManager[None]:
 
 
 def settled() -> AbstractContextManager[None]:
-    return scoped(_settled, True)
+    return scoped(_calls_covered, True)
 
 
 def _check_model_call(generator: Any) -> None:
     where = _required.get()
-    if not where or _settled.get() or not is_enabled():
+    if not where or _calls_covered.get() or not is_enabled():
         return
     from django_ai_sdk.oversight.guard import current_guard, is_unguarded
 

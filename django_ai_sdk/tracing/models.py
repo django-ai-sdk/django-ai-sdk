@@ -5,7 +5,7 @@ from typing import ClassVar
 
 from django.db import models
 
-from django_ai_sdk.tracing.managers import TraceManager, TraceQuerySet
+from django_ai_sdk.tracing.managers import TraceManager
 
 
 class Trace(models.Model):
@@ -52,7 +52,7 @@ class Trace(models.Model):
     completion_tokens = models.IntegerField(null=True, blank=True)
     total_tokens = models.IntegerField(null=True, blank=True)
 
-    objects: ClassVar[TraceQuerySet] = TraceManager()  # ty: ignore[invalid-assignment]
+    objects: ClassVar[TraceManager] = TraceManager()
 
     class Meta:
         app_label = "django_ai_sdk_tracing"

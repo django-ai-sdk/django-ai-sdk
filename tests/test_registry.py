@@ -149,6 +149,14 @@ class TestAgentRegistry:
 
         assert first_instance is second_instance
 
+    def test_a_wrong_path_in_the_agents_setting_is_refused(self, settings):
+        from django.core.exceptions import ImproperlyConfigured
+
+        settings.AI_SDK_AGENTS = ["myapp.agents.Missing"]
+
+        with pytest.raises(ImproperlyConfigured, match="myapp"):
+            registry.setup()
+
     def test_get_before_setup_raises(self):
         @auto_register
         class EarlyAgent(Agent):

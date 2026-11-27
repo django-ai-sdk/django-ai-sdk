@@ -544,7 +544,7 @@ class TestOverLengthResults:
 
             async def answer(self, lens, context):
                 text = context.input
-                return Answer(error=TOO_LONG) if len(text) > 100 else fn(text)
+                return Answer(error=TOO_LONG) if len(text) > self.TEXT_CHARS else fn(text)
 
         return Short()
 

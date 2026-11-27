@@ -278,7 +278,7 @@ class Block(Action):
     outcome = Outcome.BLOCKED
     effective = (Stage.GATE, Stage.TOOL, Stage.FINISH)
 
-    DEFAULT_MESSAGE = _("This request can't be answered here.")
+    DEFAULT_MESSAGE: ClassVar[Promise] = _("This request can't be answered here.")
 
     def __init__(self, message: str | Promise = "") -> None:
         self.message = message or self.DEFAULT_MESSAGE

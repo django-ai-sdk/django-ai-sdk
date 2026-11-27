@@ -28,11 +28,11 @@ from tests.oversight.helpers import (
     ENFORCE,
     FnLens,
     broken,
-    closed,
+    fail_closed_mode,
     closed_turn,
     gate_flag,
     log_lines,
-    opened,
+    fail_open_mode,
     policy,
     start,
     yes,
@@ -49,7 +49,7 @@ class TestRecordingFailures:
         )
         side = RuntimeError("bug")
         with (
-            closed(),
+            fail_closed_mode(),
             patch("django_ai_sdk.oversight.guard.judging.match_rules", side_effect=side),
         ):
             guard = await start(name)
@@ -65,7 +65,7 @@ class TestRecordingFailures:
         )
         side = RuntimeError("bug")
         with (
-            closed(),
+            fail_closed_mode(),
             patch("django_ai_sdk.oversight.guard.judging.match_rules", side_effect=side),
         ):
             guard = await start(name)
@@ -166,11 +166,11 @@ class TestRecordingFailures:
             ChatMessage(role="assistant", content="ok"),
             ChatMessage(role="user", content="now"),
         ]
-        with opened():
+        with fail_open_mode():
             guard = await start(name, "now")
             checked = await guard.gate_history(messages[:-1], messages[-1])
         assert not checked.blocked and messages[0].content == "earlier a@b.nl"
-        assert [o.lens.name for o in guard.answered if o.aside and o.errored] == ["pii"]
+        assert [o.lens.name for o in guard.answered if o.on_other_text and o.errored] == ["pii"]
 
     async def test_history_that_could_not_be_checked_is_withheld_when_closed(self):
         name = policy(
@@ -178,7 +178,7 @@ class TestRecordingFailures:
             [FnLens(name="pii", answer=Entities, stages=[Stage.GATE], fn=broken)],
             [Rule("m", when=L("pii").is_true, then=Mask(), mode=ENFORCE)],
         )
-        with closed():
+        with fail_closed_mode():
             guard = await start(name, "now")
             messages = [ChatMessage(role="user", content="earlier"), ChatMessage(role="user")]
             await guard.gate_history(messages[:-1], messages[-1])
