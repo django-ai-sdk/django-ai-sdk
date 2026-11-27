@@ -1,6 +1,12 @@
 pre-commit:
+  parallel: true
   commands:
     lint:
-      run: make lint
+      run: uv run ruff check && uv run ruff format --check
     typecheck:
       run: make typecheck
+
+pre-push:
+  commands:
+    test:
+      run: make test && make test-demos
