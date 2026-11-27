@@ -21,6 +21,8 @@ INSTALLED_APPS = [
     "apps.agents",
     "apps.memories",
     "apps.integrations",
+    "django_ai_sdk.oversight",
+    "django_ai_sdk.oversight.authoring",
 ]
 
 AUTH_USER_MODEL = "users.User"
@@ -48,6 +50,29 @@ AI_SDK_AGENTS = [
     "apps.agents.deep_research.DeepResearchAgent",
 ]
 
+OVERSIGHT_CLASSIFIER_MODEL = env("OVERSIGHT_CLASSIFIER_MODEL", default="openai/gpt-oss-120b")
+OVERSIGHT_JUDGE_MODEL = env("OVERSIGHT_JUDGE_MODEL", default="google/gemma-4-31B-it")
+# gpt-oss at its default effort overruns the classifier's 2.5 s and fails closed.
+_CLASSIFIER_KWARGS = (
+    {"generation_kwargs": {"reasoning": {"effort": "low"}}}
+    if "gpt-oss" in OVERSIGHT_CLASSIFIER_MODEL
+    else {}
+)
+AI_SDK_OVERSIGHT = {
+    "DEFAULT_POLICY": "studio",
+    "JUDGES": {
+        "classifier": {
+            "class": "LLMJudge",
+            "model": OVERSIGHT_CLASSIFIER_MODEL,
+            "timeout": 2.5,
+            **_CLASSIFIER_KWARGS,
+        },
+        "judge": {"class": "LLMJudge", "model": OVERSIGHT_JUDGE_MODEL},
+    },
+    "DEADLINE_MS": {"gate": 3000, "tool": 3000, "finish": 5000},
+    "NOTIFIERS": ["LogNotifier", {"class": "LogNotifier", "name": "legal"}],
+}
+
 AI_SDK_RUNTIME_AGENT_BASES = [
     "apps.agents.runtime.DefaultRuntimeAgent",
 ]
@@ -72,6 +97,7 @@ AI_SDK_WORKFLOWS = {
 AI_SDK_PERMISSIONS = {
     "memory": ["apps.memories.permissions.AllowAnonymousMemoryPermission"],
     "thread": ["apps.agents.permissions.DemoThreadPermission"],
+    "oversight": ["apps.agents.permissions.StudioOversightPermission"],
     "workflow": ["apps.agents.permissions.StudioWorkflowPermission"],
 }
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from django_ai_sdk.oversight.permissions import OversightDefaultPermission
 from django_ai_sdk.permissions import (
     Operation,
     ThreadDefaultPermission,
@@ -25,6 +26,21 @@ class DemoThreadPermission(ThreadDefaultPermission):
             return False
 
         return obj.user_id is not None and str(obj.user_id) == str(getattr(user, "pk", ""))
+
+
+def is_overseer(user: UserType) -> bool:
+    return bool(
+        user
+        and user.is_authenticated
+        and (getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+    )
+
+
+class StudioOversightPermission(OversightDefaultPermission):
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
+        if is_overseer(user):
+            return True
+        return await super().has_permission(user, operation, **kwargs)
 
 
 class StudioWorkflowPermission(WorkflowDefaultPermission):
