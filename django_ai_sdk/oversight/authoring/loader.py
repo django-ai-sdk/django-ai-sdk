@@ -1,10 +1,3 @@
-"""Keep each process's policy registry in sync with the authored policies in the database.
-
-A definition that no longer validates is unregistered, so turns naming it are
-blocked rather than running without it; if the database cannot be read, the
-registered policies stay.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -23,11 +16,7 @@ logger = get_logger(__name__)
 
 
 class AuthoredPolicyLoader:
-    """One instance per process."""
-
     def __init__(self) -> None:
-        # name -> updated_at of every row at the last read. Each row is compared, so a
-        # save that commits late or with a skewed clock counts.
         self.stamp: dict[str, Any] | None = None
         self.loaded: dict[str, Any] = {}
         self.broken: dict[str, str] = {}
@@ -51,7 +40,6 @@ class AuthoredPolicyLoader:
         name = row.name
         definition = row.definition()
         if not row.active:
-            # Off: its own lenses and rules go, what it extends keeps running.
             definition |= {"lenses": [], "rules": []}
         try:
             cls, _ = check_definition(name, definition)
@@ -60,7 +48,6 @@ class AuthoredPolicyLoader:
             logger.error("Authored policy {!r} does not load: {}", name, exc)
             self._unregister(name, keep_broken=True)
             return
-        # Explicitly: the registry keeps the first of two classes with one name.
         if is_authored(get_policy_class(name)):
             unregister_policy(name)
         register_policy(cls)

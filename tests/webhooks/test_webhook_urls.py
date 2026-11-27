@@ -1,9 +1,3 @@
-"""The webhook URL a host mounts, exercised through the real URLconf.
-
-Everything else calls the view directly, so a broken include or a renamed path would
-otherwise only show up against a live Slack app.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -31,8 +25,6 @@ CONFIG = {
 
 @pytest.fixture(autouse=True)
 def _registered():
-    """Registered explicitly: other modules reset the process registry on teardown, so
-    the app's own ready() cannot be relied on to have survived."""
     reset_registry()
     cache.clear()
     register(SlackIntegration())

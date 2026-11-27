@@ -1,6 +1,3 @@
-"""Per-object permission flags: the calculators in django_ai_sdk.views.permissions and
-the memory response schema that carries them."""
-
 import uuid
 
 import pytest
@@ -70,12 +67,9 @@ class TestMemoryOutResponsePermissions:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestObjectPermissionsCalculators:
-    """Integration tests for memory/thread/agent permission calculators."""
-
     async def _make_user(self):
         return await get_user_model().objects.acreate(email=f"{uuid.uuid4().hex}@example.com")
 
-    # --- amemory_permissions ---
 
     async def test_memory_permissions_owner_gets_all(self):
         from django_ai_sdk.memories.models import Memory, MemoryUser
@@ -98,7 +92,6 @@ class TestObjectPermissionsCalculators:
         memory = await Memory.objects.acreate(name="Public Mem", is_public=True)
 
         perms = await amemory_permissions(user, str(memory.id))
-        # MemoryDefaultPermission: a public memory is read-only to non-members.
         assert perms.can_read is True
         assert perms.can_write is False
         assert perms.can_manage is False
@@ -124,7 +117,6 @@ class TestObjectPermissionsCalculators:
         assert perms.can_write is False
         assert perms.can_manage is False
 
-    # --- athread_permissions ---
 
     async def test_thread_permissions_owner_gets_all(self):
         from uuid import uuid4
@@ -177,7 +169,6 @@ class TestObjectPermissionsCalculators:
         assert perms.can_write is False
         assert perms.can_manage is False
 
-    # --- aagent_permissions ---
 
     async def test_agent_permissions_owner_gets_all(self):
         from django_ai_sdk.agents.models import AgentSettings, AgentUser
@@ -230,8 +221,3 @@ class TestObjectPermissionsCalculators:
         perms = await aagent_permissions(user, str(config.id))
         assert perms.can_read is True
         assert perms.can_manage is True
-
-
-# ============================================================================
-# AgentDefaultPermission — creator-as-manager, upserts
-# ============================================================================

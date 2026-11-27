@@ -1,10 +1,4 @@
-"""django-tasks on DBOS: one queue system for workflows and every other task.
-
-    TASKS = {"default": {"BACKEND": "django_ai_sdk.durable.tasks.DBOSTaskBackend"}}
-
-A task runs as a one-step DBOS workflow on its `queue_name` queue. A task cut off by a
-dead worker runs again on recovery, so it must be safe to repeat.
-"""
+"""A task cut off by a dead worker runs again on recovery, so it must be safe to repeat."""
 
 from __future__ import annotations
 
@@ -54,12 +48,10 @@ async def _call(module_path: str, args: list[Any], kwargs: dict[str, Any]) -> An
         value = await sync_to_async(_in_fresh_connections, thread_sensitive=False)(
             task.func, args, kwargs
         )
-    # A task's result must be JSON; a round trip turns tuples into lists and refuses the rest.
     return json.loads(json.dumps(value))
 
 
 def _in_fresh_connections(func: Any, args: list[Any], kwargs: dict[str, Any]) -> Any:
-    """`func` between closes of this thread's broken or expired connections."""
     close_old_connections()
     try:
         return func(*args, **kwargs)
@@ -133,7 +125,6 @@ class DBOSTaskBackend(BaseTaskBackend):
 
         if status.input is None:
             raise TaskResultDoesNotExist(status.workflow_id)
-        # run_task(module_path, args, kwargs), as aenqueue queued it.
         module_path, args, kwargs = status.input["args"]
         state = _STATUSES.get(str(status.status), TaskResultStatus.FAILED)
         finished = _moment(status.updated_at) if state in _DONE else None

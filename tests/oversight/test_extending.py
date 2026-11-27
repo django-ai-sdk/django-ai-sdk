@@ -1,5 +1,3 @@
-"""Extending oversight: your own classifier, a judge on your own server, holding when needed."""
-
 from __future__ import annotations
 
 import asyncio
@@ -28,8 +26,6 @@ from django_ai_sdk.oversight.types import Answer, Source, Stage, Subject, TurnCo
 
 
 class Echo(Classifier):
-    """A classifier as a host would write one: yes/no and labels, one call per stage."""
-
     external = "Echo"
 
     def __init__(self, yes: float = 0.9) -> None:
@@ -54,15 +50,12 @@ class Echo(Classifier):
 
 
 class FakeRunner:
-    """The ONNX model's place: entailment by keyword, so no download in a test."""
-
     labels = ["entailment", "neutral", "contradiction", "injection"]
 
     def label_index(self, label):
         return self.labels.index(label.lower())
 
     def run(self, pairs):
-        # Probabilities per label; only "injection" matters to a fixed classifier.
         return [
             [0.0, 0.0, 0.1, 0.9] if "ignore" in text.lower() else [0.0, 0.0, 0.95, 0.05]
             for text, _ in pairs
@@ -90,7 +83,6 @@ class TestYourOwnClassifier:
         answer = await ask_judge(echo, flag, context)
         assert answer.value is True
         assert answer.confidence == pytest.approx(0.8)
-        # Secrets are masked before anything leaves.
         assert "sk-proj" not in echo.calls[0]["state"]["user_message"]
         assert await ask_judge(echo, JudgeLens(name="s", answer=Score), context) is None
 
@@ -106,7 +98,6 @@ class TestYourOwnClassifier:
         assert [a.value for a in answers] == [True, "y"]
         assert len(echo.calls) == 1
         assert set(echo.calls[0]["questions"]) == {"a", "b"}
-        # Inline, the call gets the time the stage has left, not a retry's worth.
         assert 0 < echo.calls[0]["timeout"] <= 1
 
     async def test_a_failing_call_is_unavailable_so_reflect_asks_again(self):
@@ -275,7 +266,6 @@ class TestALocalClassifierSaysWhatItCannotRead:
             output="You get 25 days.",
             sources=[Source(key="k1", title="CAO", content="25 days of leave.")],
         )
-        # Sources, tool calls and the answer beside its grounding need more than one text.
         assert await ask_judge(local, TakenFrom(), context) is None
         assert await ask_judge(local, Groundedness(), context) is None
         on_sources = JudgeLens(name="s", subject=Subject.SOURCES)
@@ -303,7 +293,6 @@ class TestLocalClassifierLoading:
             patch.object(local, "load_in_background", start),
         ):
             answer = await ask_judge(LocalClassifier(), self.lens, TurnContext(input="x"))
-            # A lens it could never read still goes to the next judge.
             on_sources = JudgeLens(name="s", subject=Subject.SOURCES)
             assert await ask_judge(LocalClassifier(), on_sources, TurnContext(input="x")) is None
         assert answer.error == "unavailable: loading"
@@ -330,7 +319,6 @@ class TestLocalClassifierLoading:
             answer = await ask_judge(judge, self.lens, TurnContext(input="x"))
             assert answer.error == "unavailable: does not load: OSError"
             assert log.opt.return_value.warning.called
-            # After LOAD_RETRY_SECONDS it loads again.
             local._load_errors[key] = ("OSError", 0.0)
             answer = await ask_judge(judge, self.lens, TurnContext(input="x"))
             assert answer.error == "unavailable: loading"

@@ -23,31 +23,22 @@ logger = get_logger(__name__)
 
 
 class MemoryMessage(BaseModel):
-    """
-    In-memory representation of a conversation message.
-    """
-
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     thread_id: str
     result: dict
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    # Message management fields
-    feedbacks: list[dict] = Field(default_factory=list)  # List of {user_id, rating, feedback}
+    feedbacks: list[dict] = Field(default_factory=list)
     is_deleted: bool = False
     deleted_at: datetime | None = None
 
     def to_chat_message(self) -> ChatMessage:
-        """Convert stored data to ChatMessage object."""
-        # ID is already in self.result from model_dump(), model_validate restores it
         chat_message = ChatMessage.model_validate(self.result)
-        # Include feedbacks in metadata
         chat_message.metadata["feedbacks"] = self.feedbacks
         return chat_message
 
     @classmethod
     def from_chat_message(cls, thread_id: str, chat_message: ChatMessage) -> MemoryMessage:
-        """Create MemoryMessage from a ChatMessage - ID must be provided by adapter."""
         return cls(
             id=chat_message.id,
             thread_id=thread_id,
@@ -56,8 +47,6 @@ class MemoryMessage(BaseModel):
 
 
 class MemoryThread(BaseModel):
-    """In-memory representation of a conversation thread."""
-
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: str = ""
     agent_id: str = ""
@@ -69,18 +58,10 @@ class MemoryThread(BaseModel):
 
 
 class MemoryStore:
-    """
-    Singleton in-memory store for threads and messages.
-    """
-
     MAX_THREADS: ClassVar[int] = 1000
 
     threads: ClassVar[dict[str, MemoryThread]] = {}
     messages: ClassVar[dict[str, list[MemoryMessage]]] = {}
-
-    # ============================================================================
-    # Thread Operations
-    # ============================================================================
 
     @classmethod
     def create_thread(
@@ -92,7 +73,6 @@ class MemoryStore:
         user_id: str | None = None,
         metadata: dict | None = None,
     ) -> MemoryThread:
-        """Create and store a new thread."""
         thread = MemoryThread(
             id=thread_id,
             title=title,
@@ -103,7 +83,6 @@ class MemoryStore:
         )
         cls.threads[thread_id] = thread
         cls.messages.setdefault(thread_id, [])
-        # Evict oldest thread when over the cap
         while len(cls.threads) > cls.MAX_THREADS:
             oldest = next(iter(cls.threads))
             del cls.threads[oldest]
@@ -112,7 +91,6 @@ class MemoryStore:
 
     @classmethod
     def get_thread(cls, thread_id: str) -> MemoryThread | None:
-        """Get thread by ID."""
         return cls.threads.get(thread_id)
 
     @classmethod
@@ -123,7 +101,6 @@ class MemoryStore:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[MemoryThread]:
-        """List all threads, optionally filtered by user."""
         threads = list(cls.threads.values())
         if user_id:
             threads = [t for t in threads if t.user_id == user_id]
@@ -135,7 +112,6 @@ class MemoryStore:
     def update_thread(
         cls, thread_id: str, title: str | None = None, metadata: dict | None = None
     ) -> MemoryThread | None:
-        """Update thread metadata."""
         thread = cls.threads.get(thread_id)
         if not thread:
             return None
@@ -143,7 +119,6 @@ class MemoryStore:
         if title is not None:
             thread.title = title
         if metadata is not None:
-            # Merge metadata
             thread.metadata.update(metadata)
 
         thread.updated_at = datetime.now(UTC)
@@ -151,7 +126,6 @@ class MemoryStore:
 
     @classmethod
     def delete_thread(cls, thread_id: str) -> bool:
-        """Delete thread and all its messages."""
         if thread_id in cls.threads:
             del cls.threads[thread_id]
             if thread_id in cls.messages:
@@ -159,33 +133,24 @@ class MemoryStore:
             return True
         return False
 
-    # ============================================================================
-    # Message Operations
-    # ============================================================================
-
     @classmethod
     def add_message(cls, thread_id: str, message: MemoryMessage) -> None:
-        """Add message to thread."""
         cls.messages.setdefault(thread_id, [])
         cls.messages[thread_id].append(message)
-        # Update thread timestamp, is needed to handle ordering
         thread = cls.threads.get(thread_id)
         if thread:
             thread.updated_at = datetime.now(UTC)
 
     @classmethod
     def get_messages(cls, thread_id: str, include_deleted: bool = False) -> list[MemoryMessage]:
-        """Get messages for thread, optionally including deleted ones."""
         messages = cls.messages.get(thread_id, [])
 
-        # Filter out soft-deleted messages
         if not include_deleted:
             messages = [m for m in messages if not m.is_deleted]
         return messages
 
     @classmethod
     def get_message(cls, thread_id: str, message_id: str) -> MemoryMessage | None:
-        """Find a message by ID within one thread."""
         for msg in cls.messages.get(thread_id, []):
             if msg.id == message_id:
                 return msg
@@ -200,11 +165,9 @@ class MemoryStore:
         feedback: str = "",
         user_id: str | None = None,
     ) -> bool:
-        """Rate a message."""
         message = cls.get_message(thread_id, message_id)
         if message:
             if rating is not None:
-                # Update or create feedback for this user
                 existing_feedback = None
                 for fb in message.feedbacks:
                     if fb.get("user_id") == user_id:
@@ -219,7 +182,6 @@ class MemoryStore:
                         {"user_id": user_id, "rating": rating, "feedback": feedback}
                     )
             else:
-                # Delete feedback when rating is None
                 message.feedbacks[:] = [
                     fb for fb in message.feedbacks if fb.get("user_id") != user_id
                 ]
@@ -228,7 +190,6 @@ class MemoryStore:
 
     @classmethod
     def delete_message(cls, thread_id: str, message_id: str) -> bool:
-        """Soft delete a message."""
         message = cls.get_message(thread_id, message_id)
         if message:
             message.is_deleted = True
@@ -238,7 +199,6 @@ class MemoryStore:
 
     @classmethod
     def restore_message(cls, thread_id: str, message_id: str) -> bool:
-        """Restore a soft-deleted message."""
         message = cls.get_message(thread_id, message_id)
         if message:
             message.is_deleted = False
@@ -248,29 +208,14 @@ class MemoryStore:
 
     @classmethod
     def clear(cls) -> None:
-        """Clear all stored threads and messages."""
         cls.threads.clear()
         cls.messages.clear()
 
 
 class MemoryStorageAdapter(BaseStorageAdapter):
-    """
-    Store conversations in in-memory Pydantic models.
-    """
-
     def __init__(self, thread_id: str) -> None:
-        """
-        Initialize memory storage for a specific thread.
-
-        Args:
-            thread_id: Unique identifier for the conversation thread
-        """
         super().__init__(thread_id)
         self._thread: MemoryThread | None = None
-
-    # ============================================================================
-    # CLASS METHODS - Thread Management
-    # ============================================================================
 
     @classmethod
     async def create_thread(
@@ -280,18 +225,6 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         user: AbstractBaseUser | AnonymousUser | None = None,
         thread_id: str | None = None,
     ) -> str:
-        """
-        Create a new thread in memory.
-
-        Args:
-            title: Thread title
-            metadata: Should include agent_id, model
-            user: Optional user
-            thread_id: Optional custom thread ID
-
-        Returns:
-            Thread ID (UUID string)
-        """
         thread_id = thread_id or str(uuid.uuid4())
         agent_id = metadata.get("agent_id", "") if metadata else ""
         model = metadata.get("model", "") if metadata else ""
@@ -310,7 +243,6 @@ class MemoryStorageAdapter(BaseStorageAdapter):
 
     @classmethod
     async def get_thread(cls, thread_id: str) -> ThreadInfo | None:
-        """Get thread metadata by ID."""
         thread = MemoryStore.get_thread(thread_id)
         if not thread:
             return None
@@ -336,7 +268,6 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         limit: int | None = None,
         offset: int = 0,
     ) -> list[ThreadInfo]:
-        """List all threads in memory."""
         user_id = str(user.pk) if user and user.is_authenticated else None
         threads = MemoryStore.list_threads(user_id, limit=limit, offset=offset)
         result = []
@@ -361,21 +292,14 @@ class MemoryStorageAdapter(BaseStorageAdapter):
     async def update_thread(
         cls, thread_id: str, title: str | None = None, metadata: dict | None = None
     ) -> bool:
-        """Update thread metadata."""
         thread = MemoryStore.update_thread(thread_id, title, metadata)
         return thread is not None
 
     @classmethod
     async def delete_thread(cls, thread_id: str) -> bool:
-        """Delete thread and all its messages."""
         return MemoryStore.delete_thread(thread_id)
 
-    # ============================================================================
-    # INSTANCE METHODS - Thread-Specific Operations
-    # ============================================================================
-
     async def load_thread(self) -> MemoryThread:
-        """Lazy-load the MemoryThread. Raises error if thread doesn't exist."""
         if self._thread is None:
             logger.debug(f"Loading thread from memory store: {self.thread_id}")
             self._thread = MemoryStore.get_thread(self.thread_id)
@@ -387,7 +311,6 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         return self._thread
 
     async def get_messages(self) -> list[ChatMessage]:
-        """Retrieve all ChatMessages for this thread (excluding deleted)."""
         logger.debug(f"Fetching conversation history from memory: {self.thread_id}")
         await self.load_thread()
         messages = MemoryStore.get_messages(self.thread_id, include_deleted=False)
@@ -396,7 +319,6 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         return chat_messages
 
     async def store_chat_message(self, chat_message: ChatMessage) -> str:
-        """Store ChatMessage to this thread."""
         logger.debug(
             f"Direct message storage: role={chat_message.role}, content_length={len(chat_message.content)}"
         )
@@ -407,7 +329,6 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         return message.id
 
     async def storage_callback(self, chat_message: ChatMessage) -> str | None:
-        """Callback for StreamWriter to auto-store messages."""
         logger.debug(
             f"Storing message via callback: role={chat_message.role}, content_length={len(chat_message.content)}"
         )
@@ -428,7 +349,6 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         feedback: str = "",
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> bool:
-        """Rate a message in this thread."""
         user_id = str(user.pk) if user and user.is_authenticated else None
         success = MemoryStore.rate_message(self.thread_id, message_id, rating, feedback, user_id)
         if success:
@@ -436,19 +356,16 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         return success
 
     async def delete_message(self, message_id: str) -> bool:
-        """Soft delete a message in this thread."""
         success = MemoryStore.delete_message(self.thread_id, message_id)
         if success:
             logger.debug(f"Soft deleted message {message_id}")
         return success
 
     async def restore_message(self, message_id: str) -> bool:
-        """Restore a soft-deleted message."""
         success = MemoryStore.restore_message(self.thread_id, message_id)
         if success:
             logger.debug(f"Restored message {message_id}")
         return success
 
 
-# Register with StorageAdapterRegistry
 StorageAdapterRegistry.register(MemoryStorageAdapter, StorageType.MEMORY)

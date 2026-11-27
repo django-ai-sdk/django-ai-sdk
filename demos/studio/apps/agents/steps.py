@@ -1,12 +1,3 @@
-"""Registered workflow step types for the demo.
-
-Both are named by `AI_SDK_WORKFLOWS["STEPS"]` and composed by the `thread-digest`
-definition in workflows.py. The package ships no step types; these are the host's.
-
-Two namespaces, so nothing collides: `ctx.input(...)` is what the caller supplied,
-`ctx.step(...)` is what an earlier step produced.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -26,13 +17,9 @@ class ThreadDigest(BaseModel):
 
 
 class GatherStep(Step):
-    """The non-agent step: plain Python over the thread's own rows."""
-
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
         from django_ai_sdk.conversation.models import Message
 
-        # A run's inputs cross the queue as JSON, so the subject arrives as an id
-        # and the step resolves it.
         rows = [
             row
             async for row in Message.objects.filter(thread_id=ctx.input("thread"), is_deleted=False)
@@ -46,8 +33,6 @@ class GatherStep(Step):
 
 
 class DigestStep(AgentStep):
-    """The agent step: condenses the transcript and writes the thread's title."""
-
     agent = PirateExtractionAgent
     schema = ThreadDigest
     instructions = (
@@ -65,8 +50,6 @@ class DigestStep(AgentStep):
         if outcome.status != "completed":
             return outcome
 
-        # Writing the title is this host's business, not the runner's: the step
-        # returns the digest, and does what its own product needs.
         title = outcome.output["title"]
         await Thread.objects.filter(id=ctx.input("thread")).aupdate(title=title)
         return StepOutcome(output=outcome.output, detail=title)

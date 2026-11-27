@@ -1,5 +1,3 @@
-"""Which history a turn judges: the client's copy, or the stored thread that vouches for it."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
@@ -36,21 +34,12 @@ async def history_for(
 
 
 def takes_stored_history(policy: ResolvedPolicy | None) -> bool:
-    """Only under enforced gate masking: then the stored copy is the masked one.
-
-    Otherwise the client's history is judged, so a report-mode policy changes nothing.
-    """
     return policy is not None and bool(gate_masking_lenses(policy))
 
 
 async def thread_history(
     policy: ResolvedPolicy | None, storage_adapter: BaseStorageAdapter, messages: list[ChatMessage]
 ) -> list[ChatMessage] | None:
-    """The history the stored thread vouches for, or None if it must be judged.
-
-    A sent history matching the stored thread was already judged; one that differs
-    was edited or made up.
-    """
     if takes_stored_history(policy):
         return await stored_history(storage_adapter, messages)
     if await _as_stored(storage_adapter, messages):
@@ -65,7 +54,6 @@ async def policy_for(
     user: Any = None,
     oversight: type[Policy] | str | Literal[False] | None = None,
 ) -> ResolvedPolicy | None:
-    """The policy a turn would run under. Never raises: None judges history as sent (safe)."""
     if oversight in (False, "") or not is_enabled():
         return None
     try:
@@ -79,11 +67,6 @@ async def policy_for(
 async def stored_history(
     storage_adapter: BaseStorageAdapter, messages: list[ChatMessage]
 ) -> list[ChatMessage]:
-    """Replace the history with the stored thread (the client's copy is untrusted).
-
-    By id when all have one, else by position up to the client's length, so a
-    regenerated or edited turn still drops what came after.
-    """
     earlier, newest = _split_question(messages)
     kept = await _stored_for(storage_adapter, earlier)
     return [*kept, newest] if newest is not None else kept
@@ -98,7 +81,6 @@ async def thread_storage(agent: Any, thread_id: str | None) -> BaseStorageAdapte
         if storage is not None and await type(storage).get_thread(thread_id):
             return storage
     except Exception:
-        # Without a stored thread, the history is judged as sent.
         logger.opt(exception=True).debug("No stored thread {}", thread_id)
     return None
 
@@ -108,7 +90,6 @@ async def _as_stored(storage_adapter: BaseStorageAdapter, messages: list[ChatMes
     if not earlier:
         return True
     kept = await _stored_for(storage_adapter, earlier)
-    # A shorter match means the client sent more history than the thread holds.
     return len(kept) == len(earlier) and all(
         k.role == m.role and (k.content or "") == (m.content or "")
         for k, m in zip(kept, earlier, strict=True)
@@ -126,7 +107,6 @@ def _split_question(
 async def _stored_for(
     storage_adapter: BaseStorageAdapter, earlier: list[ChatMessage]
 ) -> list[ChatMessage]:
-    """By id, else by position (fewer when the thread is shorter)."""
     if not earlier:
         return []
     stored = [m for m in await storage_adapter.get_messages() if m.role in ("user", "assistant")]

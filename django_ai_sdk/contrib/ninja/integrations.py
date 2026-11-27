@@ -1,9 +1,3 @@
-"""Integrations: list with live status, connect (OAuth), disconnect, reconnect.
-
-The OAuth *callback* is not here: it must sit at a fixed URL, so the SDK ships it as a
-plain Django view (``include("django_ai_sdk.integrations.mcp.urls")``).
-"""
-
 from __future__ import annotations
 
 from collections.abc import Collection

@@ -1,5 +1,3 @@
-"""Read-only admin for authored policies; saves go through the validating `AuthoringService`."""
-
 from __future__ import annotations
 
 from django.contrib import admin

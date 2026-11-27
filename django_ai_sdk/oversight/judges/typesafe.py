@@ -1,8 +1,3 @@
-"""TypeSafe, a hosted commercial classification service, as an optional judge.
-
-This module never logs what was sent or what came back.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +23,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.lenses import JudgeLens
     from django_ai_sdk.oversight.types import Source
 
-# Seconds per request, retries included. Inline stages pass their remaining time instead.
 TYPESAFE_TIMEOUT = 20.0
 # Keeps every question inside TypeSafe's 32k tokens per question, 64k per request.
 REQUEST_CHARS = 100_000
@@ -57,11 +51,7 @@ def api_client(api_key: str) -> Any:
 
 
 class TypeSafe(Classifier):
-    """Answer with TypeSafe. Abstains without the `typesafe` extra and TYPESAFE_API_KEY.
-
-    `model` defaults to TYPESAFE_MODEL, then the SDK's default. Flag, Choice and
-    Score lenses become TypeSafe questions (a yes/no is a "noul", a probability of yes).
-    """
+    """Abstains without the `typesafe` extra and TYPESAFE_API_KEY."""
 
     external: ClassVar[str] = "TypeSafe"
     timeout = TYPESAFE_TIMEOUT
@@ -113,7 +103,6 @@ class TypeSafe(Classifier):
         if timeout is not None:
             from typesafe_sdk import RetryPolicy
 
-            # Inline, a retry would land after the deadline, so make one attempt.
             options = {"timeout": timeout, "retry": RetryPolicy(max_retries=0)}
         response = await api_client(secret_setting("TYPESAFE_API_KEY")).system_one(
             state=state, questions=questions, model=self.model or typesafe_model(), **options
@@ -136,7 +125,6 @@ def judgment_answer(
     if (choice := getattr(response, "choices", {}).get(name)) is not None:
         return _rated(choice.choice, choice, question, model)
     if (score := getattr(response, "scores", {}).get(name)) is not None:
-        # A level index from 0 to levels - 1, scaled to 0..1.
         value = float(score.score)
         levels = len(score.legend or {}) or len(question.get("criteria") or [])
         if levels > 1:

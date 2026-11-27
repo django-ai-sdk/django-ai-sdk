@@ -1,10 +1,3 @@
-"""The contrib Ninja layer as an HTTP caller sees it, through tests/urls.py.
-
-Services have their own tests; these prove the wiring: the request's user reaches the
-service, errors come back as the right status with an error code, and the router
-factories can be trimmed and mounted more than once.
-"""
-
 import json
 
 import pytest
@@ -13,7 +6,6 @@ from ninja import NinjaAPI
 from django_ai_sdk.contrib import ninja as ai_sdk_routers
 from tests.urls import api
 
-# DRF serves the same workflow endpoints, so the workflow tests run on both mounts.
 MOUNTS = {"ninja": "/api/workflows/", "drf": "/drf/workflows/"}
 VALID = {"name": "acl-wf", "steps": [{"name": "result", "agent_id": "a"}]}
 NO_STEPS = {"name": "empty-wf", "steps": []}
@@ -80,7 +72,6 @@ class TestThreads:
         assert response.json()["code"] == "not_found"
 
     def test_pages_are_bounded(self, client, users):
-        """Services take limit=None (everything); over HTTP a page is at most 100."""
         client.force_login(users[0])
         assert client.get("/api/threads/?limit=100").status_code == 200
         assert client.get("/api/threads/?limit=101").status_code == 422
@@ -124,7 +115,6 @@ class TestWorkflowAccess:
 
         for user in (stranger, staff):
             client.force_login(user)
-            # 404 and not 403 on every door, because a 403 would confirm the id exists.
             assert client.get(f"{workflows}{workflow_id}/").status_code == 404
             assert client.delete(f"{workflows}{workflow_id}/").status_code == 404
             patch = client.patch(

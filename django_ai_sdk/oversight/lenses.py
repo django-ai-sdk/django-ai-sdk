@@ -1,9 +1,3 @@
-"""Lenses: one typed question about a turn each, answered by patterns, a check or judges.
-
-A lens only answers; a `Rule` on the policy acts. `answer` picks Flag, Choice, Score or
-Entities; answer options (`yes`, `labels`, `low`) belong to the type that reads them.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -58,10 +52,7 @@ DEFAULT_STAGES: dict[Subject, tuple[Stage, ...]] = {
 
 
 class AnswerType:
-    """How a lens's answer is shaped, parsed and described to a judge. Never instantiated."""
-
     kind: ClassVar[str] = ""
-    # The lens attributes this type reads, with their defaults.
     options: ClassVar[dict[str, Any]] = {}
 
     @classmethod
@@ -79,7 +70,6 @@ class AnswerType:
 
     @classmethod
     def value_type(cls, lens: Lens) -> Any:
-        """The Python type a structured-output judge returns for `value`."""
         raise NotImplementedError
 
     @classmethod
@@ -92,7 +82,6 @@ class AnswerType:
 
 
 def _yes_no(value: Any) -> bool:
-    """A bool, a probability of yes (0.5 and up), or a word."""
     if isinstance(value, bool):
         return value
     if isinstance(value, int | float):
@@ -105,7 +94,7 @@ def _yes_no(value: Any) -> bool:
 
 
 class Flag(AnswerType):
-    """Yes or no. Found labels mean yes. `yes` and `no` say what each means, for judges."""
+    """Yes or no. Found labels mean yes."""
 
     kind = "flag"
     options: ClassVar[dict[str, Any]] = {"yes": "Yes.", "no": "No."}
@@ -124,13 +113,9 @@ class Flag(AnswerType):
 
 
 class Choice(AnswerType):
-    """Exactly one of `labels`. Patterns that find none give `default`, or the last label.
-
-    `criteria` optionally says what a label means.
-    """
+    """Exactly one of `labels`. Patterns that find none give `default`, or the last label."""
 
     kind = "choice"
-    # `default` is read only on the pattern path, so a judge-only lens can leave it unset.
     options: ClassVar[dict[str, Any]] = {"labels": [], "default": "", "criteria": {}}
 
     @classmethod
@@ -170,7 +155,7 @@ class Choice(AnswerType):
 
 
 class Score(AnswerType):
-    """0 to 1. `low` and `high` say what 0 and 1 mean; `middle` serves level classifiers."""
+    """0 to 1."""
 
     kind = "score"
     options: ClassVar[dict[str, Any]] = {
@@ -204,10 +189,7 @@ class Score(AnswerType):
 
 
 class Entities(AnswerType):
-    """Which of `labels` occur, and where. No `labels` means any.
-
-    With `per_source`, judges that support it rate each source separately.
-    """
+    """Which of `labels` occur, and where. No `labels` means any."""
 
     kind = "entities"
     options: ClassVar[dict[str, Any]] = {"labels": [], "per_source": False}
@@ -256,27 +238,18 @@ class Violation(Exception):  # noqa: N818 - read like Django's ValidationError
 
 
 class Lens:
-    """Base lens. Subclass PatternLens, CheckLens or JudgeLens."""
-
     kind: ClassVar[str] = ""
     answer: type[AnswerType] = Flag
 
-    # Answers are stored under it, so renaming starts a new series.
     name: str = ""
     label: str = ""
     subject: Subject = Subject.QUESTION
-    # Empty means the first stage that reads the subject.
     stages: tuple[Stage, ...] = ()
-    # Fraction of turns the reflect stage judges. Inline stages always run.
     sample: float = 1.0
     enabled: bool = True
-    # Only ask when there are sources or tool results (this turn or earlier) to judge against.
     needs_grounding: bool = False
-    # Whether the question can be asked of what a tool returned. False for a question about
-    # the person writing, which a tool's text can't answer.
     judges_tool_results: bool = True
 
-    # Answer options, set only when the answer type reads them.
     yes: str
     no: str
     labels: list[str]
@@ -339,17 +312,12 @@ class Lens:
         self.answer.validate(self)
 
     def steps(self) -> list[Any]:
-        """What answers the lens, in order: judges, or specs for `ask_judge`."""
         raise NotImplementedError
 
     def is_final(self, answer: Answer) -> bool:
         return answer.ok
 
     def reports_kinds(self, answer: Answer) -> bool:
-        """Whether `answer` names pattern kinds the record may keep as is.
-
-        Other names may quote the turn, so the record keeps only declared labels.
-        """
         return any(
             isinstance(step, PatternJudge) and step.display_name == answer.answerer
             for step in self.steps()
@@ -370,13 +338,7 @@ class Lens:
 
 
 class PatternLens(Lens):
-    """Answers Entities by regexes and keywords, with spans a Mask can mask. Always sure.
-
-    `patterns` maps a label to regexes (a plain list labels hits with the lens's
-    name), `keywords` a label to whole words, `verify` a label to a check such as
-    a checksum, `not_after` a label to a regex for the text right before a match
-    that makes it something else.
-    """
+    """Answers Entities by regexes and keywords, with spans a Mask can mask. Always sure."""
 
     kind = "pattern"
     answer = Entities
@@ -409,7 +371,7 @@ class PatternLens(Lens):
                 f"Pattern lens {self.name!r} has no `patterns` or `keywords`."
             )
         try:
-            self.finder  # noqa: B018 - compiling is the check
+            self.finder
         except re.error as exc:
             raise ImproperlyConfigured(f"Pattern lens {self.name!r}: bad regex: {exc}") from None
 
@@ -421,13 +383,6 @@ _validators: dict[str, Callable[..., Any]] = {}
 
 
 def register_validator(name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorator that lets check lenses, and lenses from JSON, name a validator::
-
-    @register_validator("even_amount")
-    def validate_even(text):
-        ...
-    """
-
     def register(validator: Callable[..., Any]) -> Callable[..., Any]:
         _validators[name] = validator
         return validator
@@ -436,7 +391,6 @@ def register_validator(name: str) -> Callable[[Callable[..., Any]], Callable[...
 
 
 def get_validator(validator: Callable[..., Any] | str) -> Callable[..., Any]:
-    """Never imports a name as a path, so JSON cannot run code a developer did not register."""
     if callable(validator):
         return validator
     if validator not in _validators:
@@ -451,12 +405,7 @@ def get_validators() -> dict[str, Callable[..., Any]]:
 
 
 class CheckLens(Lens):
-    """Answered by plain Python, in `check(text, context)`.
-
-    By default `check` runs `validators` (`fn(text)`, `fn(text, context)` or a
-    registered name) and answers yes when any raises `Violation`. Override `check`
-    to return a value, an Answer, or None to abstain. A sync `check` runs in a thread.
-    """
+    """Override `check` to return a value, an Answer, or None to abstain. A sync `check` runs in a thread."""
 
     kind = "check"
     validators: list[Callable[..., Any] | str] = []  # noqa: RUF012
@@ -492,8 +441,6 @@ class CheckLens(Lens):
 
 
 class _Checker(Judge):
-    """Runs `check` as a judge, for the same timeout and error handling."""
-
     name = "check"
 
     def __init__(self, timeout: float) -> None:
@@ -524,21 +471,15 @@ def _takes_context(validator: Callable[..., Any]) -> bool:
 
 
 class JudgeLens(Lens):
-    """Answered by judges, asked in order, quick to thorough.
-
-    The first answer at or above `min_confidence` stands, else the last (unsure), so order by
-    trust; confidences are never compared between judges. No answer at all: FAIL_MODE decides.
-    `judges`: Judge instances, JUDGES aliases (`Maybe` skips undefined ones), or configs.
+    """The first answer at or above `min_confidence` stands, else the last (unsure);
+    confidences are never compared between judges.
     """
 
     kind = "judge"
     judges: list[Judge | str | Maybe | dict[str, Any]] = []  # noqa: RUF012
     min_confidence: float = 0.75
-    # Sent verbatim to a judge. Keep it to one question.
     question: str = ""
-    # Extra instructions for a judge, such as scale anchors and edge cases.
     guidance: str = ""
-    # Judge a tool call together with the question that led to it.
     reads_question: bool = True
 
     def usable_judges(self) -> list[Any]:
@@ -586,10 +527,7 @@ LENS_KINDS: dict[str, type[Lens]] = {cls.kind: cls for cls in (PatternLens, Chec
 
 
 def lens_from_dict(node: Mapping[str, Any]) -> Lens:
-    """Build a lens from JSON: {"kind" | "preset", "answer", ...attributes}.
-
-    Check lens validators must be registered: JSON never names code to run.
-    """
+    """Check lens validators must be registered: JSON never names code to run."""
     node = dict(node)
     preset = node.pop("preset", "")
     if preset:
@@ -606,9 +544,6 @@ def lens_from_dict(node: Mapping[str, Any]) -> Lens:
     lens.validate()
     return lens
 
-
-# Built-in lenses, named in `PRESETS` for the JSON form. None of the check presets
-# calls a model, so they cost nothing and send no data out.
 
 MIN_LANGUAGE_WORDS = 3
 
@@ -639,23 +574,18 @@ class PIILens(PatternLens):
 
 
 class SecretsLens(PatternLens):
-    """API keys, tokens and private keys."""
-
     name = "secrets"
     patterns = SECRET_PATTERNS
     flags = 0
 
 
 class RefusalLens(JudgeLens):
-    """Whether the answer declines. Many refusals signal poor quality, not safety."""
-
     name = "refusal"
     label = "Refusal"
     question = "Does the assistant decline to answer?"
     yes = "Declines, deflects or says it cannot help."
     no = "Answers, even partly."
     subject = Subject.ANSWER
-    # The shipped patterns answer a plain refusal, so this works without a classifier.
     judges = [PatternJudge(REFUSAL_PATTERNS), Maybe("classifier")]  # noqa: RUF012
 
 
@@ -717,7 +647,6 @@ class EmptyRetrievalLens(CheckLens):
     subject = Subject.SOURCES
 
     def applies(self, context: TurnContext) -> bool:
-        # Runs on any tool call: an empty search leaves no grounding to judge.
         return bool(context.tool_calls)
 
     async def check(self, text: str, context: TurnContext) -> Answer:

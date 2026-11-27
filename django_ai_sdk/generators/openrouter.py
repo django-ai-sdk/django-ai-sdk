@@ -11,7 +11,6 @@ from django_ai_sdk.utils import resolve_setting
 
 @watched_factory
 def openrouter_chat(**kwargs: Any) -> OpenRouterChatGenerator:
-    """OpenRouter chat generator wired to Django settings."""
     return OpenRouterChatGenerator(
         **build_kwargs(
             {

@@ -1,5 +1,3 @@
-"""The DBOS database URL follows DATABASES, connection options included."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -11,7 +9,7 @@ from django_ai_sdk.durable.conf import _postgres_url, database_url
 
 
 def _url(**db: Any) -> str:
-    # The builder itself: overriding DATABASES mid-run would disturb other tests' connections.
+    # Overriding DATABASES mid-run would disturb other tests' connections.
     return _postgres_url({"NAME": "app", "USER": "u", "PASSWORD": "p@ss", **db})
 
 

@@ -11,9 +11,7 @@ from django_ai_sdk.utils import resolve_setting
 
 @watched_factory
 def ollama_chat(**kwargs: Any) -> OllamaChatGenerator:
-    """Ollama chat generator wired to Django settings."""
-    # Ollama takes reasoning as an init param, so lift it out of the generation
-    # kwargs an agent declares in `llm_kwargs`.
+    # Ollama takes reasoning as an init param.
     generation_kwargs = dict(kwargs.pop("generation_kwargs", None) or {})
     think = kwargs.pop("think", generation_kwargs.pop("think", None))
     return OllamaChatGenerator(

@@ -1,5 +1,3 @@
-"""`turn()` for model calls of your own, and model calls no policy saw."""
-
 from __future__ import annotations
 
 import copy
@@ -27,8 +25,6 @@ from tests.oversight.helpers import INJECTION, log_lines, make_agent, opened
 
 
 class Model:
-    """A generator as Haystack builds one: run() and run_async() on the class."""
-
     def __init__(self) -> None:
         self.calls = 0
 
@@ -93,7 +89,6 @@ class TestTurn:
         async with turn(agent, channel="api", messages=messages) as t:
             await t.gate()
         assert [m.content for m in t.messages] == ["I am [EMAIL]", "Hello.", "Mail [EMAIL]"]
-        # Only the question is masked in the caller's list.
         assert messages[0].content == "I am jan@example.com"
         assert messages[-1].content == "Mail [EMAIL]"
 
@@ -285,7 +280,6 @@ def subagent(policy: str, reply: str) -> type:
         oversight = policy or None
 
         def get_llm(self, **kwargs):
-            # Watched, as the SDK's own generators are.
             return watched(MockChatGenerator(responses=[reply]))
 
     return Sub
@@ -318,7 +312,6 @@ class TestSubagentsWhereATurnIsRequired:
 
     async def test_a_subagent_joining_the_coordinators_turn_calls_its_model_in_it(self):
         async with turn(make_agent([], None), channel="chat", input="x") as t:
-            # Before the coordinator's gate ran, no policy saw anything yet.
             with pytest.raises(UnguardedModelCall):
                 await self.ask(subagent("test-guard", "Done."))
             await t.gate()

@@ -1,5 +1,3 @@
-"""The non-streaming `Run` adapter, used by workflow agent steps and title generation."""
-
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,8 +12,6 @@ from django_ai_sdk.common import ChatMessage
 
 @component
 class Scripted:
-    """A chat generator that answers `reply` and counts its calls. Run runs it as a Haystack Agent."""
-
     def __init__(self, reply: str | HaystackChatMessage) -> None:
         self.reply = reply if isinstance(reply, HaystackChatMessage) else HaystackChatMessage.from_assistant(reply)
         self.calls = 0
@@ -61,7 +57,6 @@ class TestWithoutTools:
         class Out(BaseModel):
             value: str
 
-        # E.g. the token limit spent on reasoning: a reply without text.
         reply = HaystackChatMessage.from_assistant(None, meta={"finish_reason": "length"})
         generator = Scripted(reply)
 
@@ -70,9 +65,6 @@ class TestWithoutTools:
 
 @pytest.mark.django_db(transaction=True)
 class TestAgentRunToolsDefault:
-    """Agent.run(tools=...) defaults to False: a one-shot call must not reach
-    every configured integration unless it explicitly opts in."""
-
     async def test_a_plain_call_does_not_resolve_tools_by_default(self):
         from uuid import uuid4
 
@@ -97,8 +89,6 @@ class TestAgentRunToolsDefault:
     async def test_tools_true_resolves_and_runs_them_via_the_real_agent_builder(
         self, installs_as_is
     ):
-        """Agent.run(tools=True) is governed like a streamed delegation: the
-        loop gets the agent's own steps and default_hooks, as build_subagent does."""
         from uuid import uuid4
 
         from django_ai_sdk.agents.models import AgentSettings
@@ -128,10 +118,7 @@ class TestAgentRunToolsDefault:
         assert result == "done"
         tools.assert_awaited_once()
         assert agent_cls.call_args.kwargs["tools"] == [tool]
-        # run_with_oversight installs oversight on the agent it built (see test_haystack_native).
         installs_as_is.assert_called_once_with(fake_agent)
-        # Governed by RuntimeAgent's own (default) max_agent_steps=6, not a
-        # generic constant.
         assert agent_cls.call_args.kwargs["max_agent_steps"] == 6
         budget = [
             h
@@ -143,9 +130,6 @@ class TestAgentRunToolsDefault:
 
     @pytest.mark.usefixtures("installs_as_is")
     async def test_a_non_default_max_agent_steps_is_honored(self):
-        """The exact regression: a subagent with a deliberately tight budget
-        (e.g. ResearchPlannerAgent's max_agent_steps=4) must keep that budget
-        when run headless via tools=True, not fall back to a generic default."""
         from django_ai_sdk import Agent
         from django_ai_sdk.adapters.base import Run
 
@@ -176,16 +160,12 @@ class TestAgentRunToolsDefault:
             await agent.run([user_message("hi")], response_format=None, tools=True)
 
         assert agent_cls.call_args.kwargs["max_agent_steps"] == 3
-        # max_tool_calls=None disables the budget hook, same as build_subagent.
         hooks = agent_cls.call_args.kwargs["hooks"]["before_tool"]
         assert all(type(h).__name__ != "ToolCallBudgetHook" for h in hooks)
 
 
 @pytest.mark.django_db(transaction=True)
 class TestStructuredCallsDoNotResolveTools:
-    """A workflow step with output_fields must not reach out to every integration,
-    even if the caller passed tools=True — response_format wins (see Run.run)."""
-
     async def test_a_response_format_call_neither_resolves_nor_warns(self):
         from uuid import uuid4
 
@@ -213,7 +193,6 @@ class TestStructuredCallsDoNotResolveTools:
         log.warning.assert_not_called()
 
     async def test_an_adapter_that_is_no_run_is_refused(self):
-        # Oversight runs as hooks on the Run's Haystack Agent: anything else would go unchecked.
         from uuid import uuid4
 
         from django_ai_sdk.agents.models import AgentSettings

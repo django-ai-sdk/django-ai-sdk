@@ -1,26 +1,3 @@
-"""Check and record the turns of agents that have a policy.
-
-Add "django_ai_sdk.oversight" to INSTALLED_APPS and give an agent a policy::
-
-    from django_ai_sdk import Agent
-    from django_ai_sdk.oversight import L, LensPack, Mask, Mode, Policy, Rule, SecurityPack
-
-    class SupportPolicy(Policy):
-        name = "support"
-        lenses = [LensPack(SecurityPack.lenses, "pii_question")]
-        rules = [Rule("mask_pii", when=L("pii_question").is_true, then=Mask(), mode=Mode.ENFORCE)]
-
-    class SupportAgent(Agent):
-        oversight = SupportPolicy
-
-Every turn the agent runs through the SDK is then judged by the policy's lenses,
-acted on by its rules, and recorded. See docs/content/oversight.md.
-
-Everything an app uses imports from here; plumbing (running a turn by hand,
-building hooks) imports from the submodule that defines it. The declaration API
-loads with the package and needs no app registry; the rest loads on first use.
-"""
-
 # ruff: noqa: F401  (re-exports: ruff cannot read the derived __all__ below)
 
 from __future__ import annotations
@@ -122,8 +99,6 @@ if typing.TYPE_CHECKING:
     from django_ai_sdk.oversight.retention import prune
     from django_ai_sdk.oversight.trial import DryRunResult, dry_run
 
-# Loading these with the package would import model clients, Haystack and the app's
-# models with a policy file.
 _LAZY = {
     "DEFAULT_CHANNEL": "agents",
     **dict.fromkeys(["forget_actor", "forget_thread", "forget_turns"], "content"),

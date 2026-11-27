@@ -29,27 +29,9 @@ logger = get_logger(__name__)
 
 
 class DbStorageAdapter(BaseStorageAdapter):
-    """
-    Store conversations in Django Thread/Message models.
-
-    This adapter provides automatic storage of ChatMessages in the Django
-    database using the Thread and Message models. It provides callbacks to
-    StreamWriter for automatic storage after streaming completes.
-    """
-
     def __init__(self, thread_id: str) -> None:
-        """
-        Initialize database storage for a specific thread.
-
-        Args:
-            thread_id: UUID string of the Thread model instance
-        """
         super().__init__(thread_id)
         self._thread: Thread | None = None
-
-    # ============================================================================
-    # CLASS METHODS - Thread Management
-    # ============================================================================
 
     @classmethod
     async def create_thread(
@@ -59,23 +41,9 @@ class DbStorageAdapter(BaseStorageAdapter):
         user: AbstractBaseUser | AnonymousUser | None = None,
         thread_id: str | None = None,
     ) -> str:
-        """
-        Create a new thread in the database.
-
-        Args:
-            title: Thread title
-            metadata: Should include agent_id, model
-            user: Optional user
-            thread_id: Optional custom thread ID
-
-        Returns:
-            Thread ID (UUID string)
-        """
-        # Use provided thread_id or generate new UUID
         thread_id = thread_id or str(uuid.uuid4())
         user_id = str(user.pk) if user and user.is_authenticated else None
 
-        # Create in database
         thread = await Thread.objects.acreate(
             id=thread_id, title=title, metadata=metadata or {}, user_id=user_id
         )
@@ -84,7 +52,6 @@ class DbStorageAdapter(BaseStorageAdapter):
 
     @classmethod
     async def get_thread(cls, thread_id: str) -> ThreadInfo | None:
-        """Get thread metadata by ID."""
         try:
             thread = await Thread.objects.annotate(
                 msg_count=Count("messages", filter=models.Q(messages__is_deleted=False))
@@ -113,7 +80,6 @@ class DbStorageAdapter(BaseStorageAdapter):
         limit: int | None = None,
         offset: int = 0,
     ) -> list[ThreadInfo]:
-        """List all threads from database."""
         queryset = Thread.objects.all()
         user_id = str(user.pk) if user and user.is_authenticated else None
         if user_id:
@@ -150,17 +116,14 @@ class DbStorageAdapter(BaseStorageAdapter):
     async def update_thread(
         cls, thread_id: str, title: str | None = None, metadata: dict | None = None
     ) -> bool:
-        """Update thread metadata."""
         try:
             thread = await Thread.objects.aget(id=thread_id)
 
             if title is not None:
                 thread.title = title[:THREAD_TITLE_MAX_LENGTH]
             if metadata is not None:
-                # Merge metadata
                 thread.metadata.update(metadata)
 
-            # Only these fields: a full save would write back a stale file_memory.
             await thread.asave(update_fields=["title", "metadata", "updated_at"])
             return True
         except (Thread.DoesNotExist, ValidationError):
@@ -168,23 +131,15 @@ class DbStorageAdapter(BaseStorageAdapter):
 
     @classmethod
     async def delete_thread(cls, thread_id: str) -> bool:
-        """Delete thread and all its messages from database."""
         try:
             thread = await Thread.objects.aget(id=thread_id)
-            # Delete all messages first (cascade or manually)
             await thread.messages.all().adelete()
-            # Delete thread
             await thread.adelete()
             return True
         except (Thread.DoesNotExist, ValidationError):
             return False
 
-    # ============================================================================
-    # INSTANCE METHODS - Thread-Specific Operations
-    # ============================================================================
-
     async def load_thread(self) -> Thread:
-        """Lazy-load Thread model to avoid database queries during init."""
         if self._thread is None:
             logger.debug(f"Loading thread from database: {self.thread_id}")
             try:
@@ -196,14 +151,6 @@ class DbStorageAdapter(BaseStorageAdapter):
         return self._thread
 
     async def get_messages(self) -> list[ChatMessage]:
-        """
-        Retrieve all ChatMessages for this thread from database.
-        Excludes deleted messages. Includes all feedbacks in metadata.
-
-        Returns:
-            List of ChatMessage objects ordered by creation time
-        """
-
         logger.debug(f"Fetching conversation history from database: {self.thread_id}")
         thread = await self.load_thread()
 
@@ -212,7 +159,6 @@ class DbStorageAdapter(BaseStorageAdapter):
         async for msg in qs:
             messages_list.append(msg)
 
-        # Batch-fetch all feedbacks for these messages
         message_ids = [msg.id for msg in messages_list]
         all_feedbacks = {}
         if message_ids:
@@ -240,15 +186,6 @@ class DbStorageAdapter(BaseStorageAdapter):
         return messages
 
     async def store_chat_message(self, chat_message: ChatMessage) -> str:
-        """
-        Store ChatMessage in database.
-
-        Args:
-            chat_message: ChatMessage instance to store
-
-        Returns:
-            String UUID of the created Message instance
-        """
         logger.debug(
             f"Direct message storage: role={chat_message.role}, content_length={len(chat_message.content)}"
         )
@@ -259,9 +196,6 @@ class DbStorageAdapter(BaseStorageAdapter):
         return str(message.id)
 
     async def storage_callback(self, chat_message: ChatMessage) -> str | None:
-        """
-        Store agent ChatMessage in database when called by StreamWriter.finalize().
-        """
         logger.debug(
             f"Storing message via callback: role={chat_message.role}, content_length={len(chat_message.content)}, tool_calls={len(chat_message.tool_calls)}"
         )
@@ -288,15 +222,12 @@ class DbStorageAdapter(BaseStorageAdapter):
         feedback: str = "",
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> bool:
-        """Rate a message in this thread."""
         from django_ai_sdk.conversation.models import MessageFeedback
 
         user = user if (user and user.is_authenticated) else None
         try:
-            # Verify message exists and belongs to this thread
             await Message.objects.aget(id=message_id, thread_id=self.thread_id)
             if rating is not None:
-                # One call, not get-then-create: a double-click would hit the unique constraint.
                 await MessageFeedback.objects.aupdate_or_create(
                     message_id=message_id,
                     user=user,
@@ -304,7 +235,6 @@ class DbStorageAdapter(BaseStorageAdapter):
                 )
                 logger.debug(f"Saved feedback for message {message_id}: rating={rating}")
             else:
-                # Delete feedback when rating is None
                 await MessageFeedback.objects.filter(message_id=message_id, user=user).adelete()
                 logger.debug(f"Deleted feedback for message {message_id}")
             return True
@@ -312,7 +242,6 @@ class DbStorageAdapter(BaseStorageAdapter):
             return False
 
     async def delete_message(self, message_id: str) -> bool:
-        """Soft delete a message in this thread."""
         try:
             message = await Message.objects.aget(id=message_id, thread_id=self.thread_id)
             message.is_deleted = True
@@ -324,7 +253,6 @@ class DbStorageAdapter(BaseStorageAdapter):
             return False
 
     async def restore_message(self, message_id: str) -> bool:
-        """Restore a soft-deleted message."""
         try:
             message = await Message.objects.aget(id=message_id, thread_id=self.thread_id)
             message.is_deleted = False
@@ -336,5 +264,4 @@ class DbStorageAdapter(BaseStorageAdapter):
             return False
 
 
-# Register with StorageAdapterRegistry
 StorageAdapterRegistry.register(DbStorageAdapter, StorageType.DATABASE)

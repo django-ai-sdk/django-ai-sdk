@@ -20,20 +20,16 @@ _checked_orphans = False
 
 _warned_shadowed: set[str] = set()
 
-#: Live objects per DB row, kept until updated_at changes, so breaker state survives.
 _db_cache: dict[str, tuple[datetime, Integration]] = {}
 
-#: In Django's cache so a shared backend invalidates across workers.
 _ROWS_CACHE_KEY = "django_ai_sdk:mcp_server_config:enabled_rows"
 
 
 def invalidate_db_rows_cache() -> None:
-    """Drop the cached enabled-rows list."""
     cache.delete(_ROWS_CACHE_KEY)
 
 
 def register(service: Integration) -> None:
-    """Register (or replace) an integration; warns when a different class has the name."""
     if not service.name:
         raise ValueError(f"{type(service).__name__} must set a non-empty `name` to register")
     existing = _registry.get(service.name)
@@ -51,7 +47,6 @@ def register(service: Integration) -> None:
 
 
 def _warn_orphaned_config() -> None:
-    """Warn once about AI_SDK_INTEGRATIONS entries whose app was never installed."""
     global _checked_orphans
     if _checked_orphans:
         return
@@ -69,7 +64,6 @@ def _warn_orphaned_config() -> None:
 
 
 async def _db_integrations() -> dict[str, Integration]:
-    """Enabled MCPServerConfig rows; an installed app wins a name clash. Never raises."""
     from django.apps import apps as django_apps
 
     if not django_apps.is_installed("django_ai_sdk.integrations.mcp"):
@@ -111,7 +105,6 @@ async def _db_integrations() -> dict[str, Integration]:
 
 
 async def get_all_integrations() -> dict[str, Integration]:
-    """Return every registered integration service, keyed by name."""
     _warn_orphaned_config()
     merged = dict(_registry)
     merged.update(await _db_integrations())
@@ -119,7 +112,7 @@ async def get_all_integrations() -> dict[str, Integration]:
 
 
 async def get_integrations(names: list[str]) -> dict[str, Integration]:
-    """Return the services named in names. Unknown names are skipped."""
+    """Unknown names are skipped."""
     _warn_orphaned_config()
     merged = dict(_registry)
     if set(names) - set(merged):
@@ -128,7 +121,6 @@ async def get_integrations(names: list[str]) -> dict[str, Integration]:
 
 
 def reset_registry() -> None:
-    """Clear the registry — for tests."""
     global _checked_orphans
     _registry.clear()
     _db_cache.clear()

@@ -1,5 +1,3 @@
-"""The security pack's patterns: what they find, and that they run in linear time."""
-
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -14,8 +12,6 @@ from tests.oversight.helpers import gate, policy
 
 
 class Down(Judge):
-    """A classifier that fails on every question."""
-
     async def answer(self, lens, context):
         raise RuntimeError("down")
 
@@ -45,8 +41,6 @@ def fill(seed: str, size: int = 50_000) -> str:
 
 
 class TestPatterns:
-    """The security pack's patterns find what leaks; TestEveryBuiltInPatternIsLinear times them."""
-
     @pytest.mark.parametrize(
         "answer",
         [
@@ -86,8 +80,6 @@ class TestPatterns:
 
 @pytest.mark.django_db(transaction=True)
 class TestInjectionWithoutAModel:
-    """On a fresh install, with no judge aliases, the quickstart blocks."""
-
     def readme_policy(self) -> str:
         from django_ai_sdk.oversight import SecurityPack
         from django_ai_sdk.oversight.policy import LensPack, RulePack
@@ -147,7 +139,6 @@ class TestInjectionWithoutAModel:
 
 
 def compiled_in(value, found):
-    """Every compiled regex in `value`: a PatternJudge's, lists, tuples and dicts."""
     import re
 
     from django_ai_sdk.oversight.judges.patterns import PatternJudge
@@ -166,7 +157,6 @@ def compiled_in(value, found):
 
 
 def builtin_patterns():
-    """Every regex the SDK ships: personal data and secrets, the packs' lenses, helpers."""
     import re
 
     from django_ai_sdk.oversight import lenses, patterns
@@ -189,7 +179,6 @@ def builtin_patterns():
     return sorted(found, key=lambda p: p.pattern)
 
 
-# Runs of what the patterns above step over: word and digit runs, separators, prefixes.
 SEEDS = [
     "a",
     "1",
@@ -218,8 +207,6 @@ SEEDS = [
 
 
 class TestEveryBuiltInPatternIsLinear:
-    """No built-in pattern backtracks: each reads 50,000 characters of any run quickly."""
-
     def test_the_patterns_are_found(self):
         import re
 

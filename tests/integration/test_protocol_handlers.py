@@ -1,7 +1,3 @@
-"""
-Integration tests for Protocol Handlers.
-"""
-
 import pytest
 import pytest_asyncio
 import uuid
@@ -36,18 +32,12 @@ from tests.factories.schemas import ChatMessageFactory
 
 
 class TestVercelProtocolHandler:
-    """Test suite for VercelProtocolHandler."""
-
     @pytest_asyncio.fixture
     async def handler(self):
-        """Create Vercel protocol handler."""
         return VercelProtocolHandler()
 
     @pytest.mark.asyncio
     async def test_message_conversion_to_chat_messages(self, handler):
-        """Test converting protocol messages to ChatMessages."""
-
-        # Create mock Vercel message objects with .parts attribute
         class MockPart:
             def __init__(self, type, text) -> None:
                 self.type = type
@@ -74,10 +64,8 @@ class TestVercelProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_message_conversion_preserves_id(self, handler):
-        """Test that message ID is preserved during conversion."""
         msg_id = str(uuid.uuid4())
 
-        # Create mock message with ID
         class MockPart:
             def __init__(self, type, text) -> None:
                 self.type = type
@@ -93,14 +81,11 @@ class TestVercelProtocolHandler:
 
         chat_messages = handler.to_chat_messages(protocol_messages)
 
-        # Note: Our implementation might not preserve ID from protocol format
-        # This test verifies the basic conversion works
         assert len(chat_messages) == 1
         assert chat_messages[0].content == "Hello!"
 
     @pytest.mark.asyncio
     async def test_message_conversion_from_chat_messages(self, handler):
-        """Test converting ChatMessages back to protocol format."""
         chat_messages = [
             ChatMessageFactory.build(role="user", content="User msg"),
             ChatMessageFactory.build(role="assistant", content="Agent msg"),
@@ -110,7 +95,6 @@ class TestVercelProtocolHandler:
 
         assert len(protocol_messages) == 2
         assert protocol_messages[0]["role"] == "user"
-        # Content is in parts array, not direct content key
         assert len(protocol_messages[0]["parts"]) == 1
         assert protocol_messages[0]["parts"][0]["type"] == "text"
         assert protocol_messages[0]["parts"][0]["text"] == "User msg"
@@ -118,8 +102,6 @@ class TestVercelProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_from_chat_messages_reconstructs_reasoning_part(self, handler):
-        """Persisted reasoning must round-trip into a history reasoning part.
-        """
         chat_messages = [
             ChatMessageFactory.build(
                 role="assistant", content="Answer!", reasoning="Let me think..."
@@ -133,7 +115,6 @@ class TestVercelProtocolHandler:
         assert len(reasoning_parts) == 1
         assert reasoning_parts[0]["text"] == "Let me think..."
         assert reasoning_parts[0]["state"] == "done"
-        # Reasoning precedes the text part, matching the live-streaming order.
         assert parts.index(reasoning_parts[0]) < next(
             i for i, p in enumerate(parts) if p["type"] == "text"
         )
@@ -148,8 +129,6 @@ class TestVercelProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_handle_stream_message_start_event(self, handler):
-        """Test handling message start event."""
-
         async def event_generator():
             yield MessageStartEvent(message_id="msg_123")
 
@@ -159,12 +138,10 @@ class TestVercelProtocolHandler:
 
         assert len(chunks) == 1
         assert isinstance(chunks[0], MessageStartPart)
-        assert chunks[0].message_id == "msg_123"  # Use snake_case for Python attribute
+        assert chunks[0].message_id == "msg_123"
 
     @pytest.mark.asyncio
     async def test_handle_stream_text_events(self, handler):
-        """Test handling text chunk events."""
-
         async def event_generator():
             yield MessageStartEvent(message_id="msg_123")
             yield TextChunkEvent(content="Hello ")
@@ -175,7 +152,6 @@ class TestVercelProtocolHandler:
         async for chunk in handler.handle_stream(event_generator()):
             chunks.append(chunk)
 
-        # Should have: start, text-start, text-delta, text-delta, text-end, finish
         assert any(isinstance(c, TextStartPart) for c in chunks)
         text_deltas = [c for c in chunks if isinstance(c, TextDeltaPart)]
         assert len(text_deltas) == 2
@@ -185,8 +161,6 @@ class TestVercelProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_text_ends_before_the_citations_that_follow_it(self, handler):
-        """A client shows the answer as done while its citations are placed."""
-
         async def event_generator():
             yield MessageStartEvent(message_id="msg_123")
             yield TextChunkEvent(content="Hello")
@@ -203,8 +177,6 @@ class TestVercelProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_handle_stream_reasoning_events(self, handler):
-        """Test handling reasoning chunk events."""
-
         async def event_generator():
             yield MessageStartEvent(message_id="msg_123")
             yield ReasoningChunkEvent(content="Let me think...")
@@ -216,7 +188,6 @@ class TestVercelProtocolHandler:
         async for chunk in handler.handle_stream(event_generator()):
             chunks.append(chunk)
 
-        # Should have reasoning parts
         reasoning_starts = [c for c in chunks if isinstance(c, ReasoningStartPart)]
         reasoning_deltas = [c for c in chunks if isinstance(c, ReasoningDeltaPart)]
         reasoning_ends = [c for c in chunks if isinstance(c, ReasoningEndPart)]
@@ -225,14 +196,12 @@ class TestVercelProtocolHandler:
         assert len(reasoning_deltas) == 2
         assert len(reasoning_ends) == 1
 
-        # Reasoning should end before text starts
         reasoning_end_idx = next(i for i, c in enumerate(chunks) if isinstance(c, ReasoningEndPart))
         text_start_idx = next(i for i, c in enumerate(chunks) if isinstance(c, TextStartPart))
         assert reasoning_end_idx < text_start_idx
 
     @pytest.mark.asyncio
     async def test_handle_stream_tool_events(self, handler):
-        """Test handling tool call events."""
         from django_ai_sdk.protocols.vercel import (
             ToolInputStartPart,
             ToolInputAvailablePart,
@@ -250,18 +219,16 @@ class TestVercelProtocolHandler:
         async for chunk in handler.handle_stream(event_generator()):
             chunks.append(chunk)
 
-        # Should have tool input start and available parts
         tool_starts = [c for c in chunks if isinstance(c, ToolInputStartPart)]
         tool_inputs = [c for c in chunks if isinstance(c, ToolInputAvailablePart)]
 
         assert len(tool_starts) == 1
-        assert tool_starts[0].tool_name == "search"  # Use snake_case
+        assert tool_starts[0].tool_name == "search"
         assert len(tool_inputs) == 1
         assert tool_inputs[0].input == {"query": "test"}
 
     @pytest.mark.asyncio
     async def test_handle_stream_tool_output_error_sends_a_code(self, handler):
-        """A failed tool call is a tool-output-error with a code, not the tool's error text."""
         from django_ai_sdk.protocols.vercel import ToolOutputAvailablePart, ToolOutputErrorPart
 
         async def event_generator():
@@ -287,7 +254,6 @@ class TestVercelProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_handle_stream_data_event(self, handler):
-        """Test handling data events."""
         from django_ai_sdk.protocols.vercel import DataPart
 
         async def event_generator():
@@ -306,7 +272,6 @@ class TestVercelProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_handle_stream_error_event(self, handler):
-        """Test handling error events."""
         from django_ai_sdk.protocols.vercel import DataPart, ErrorPart
 
         async def event_generator():
@@ -330,8 +295,6 @@ class TestVercelProtocolHandler:
 
     @pytest.mark.asyncio
     async def test_handle_stream_finishes_with_done(self, handler):
-        """Test that stream always ends with DonePart."""
-
         async def event_generator():
             yield MessageStartEvent(message_id="msg_123")
             yield TextChunkEvent(content="Hello")
@@ -341,33 +304,25 @@ class TestVercelProtocolHandler:
         async for chunk in handler.handle_stream(event_generator()):
             chunks.append(chunk)
 
-        # Last chunk should be DonePart (but it's excluded from model_dump)
-        # Instead check for finish part
         finish_parts = [c for c in chunks if isinstance(c, FinishPart)]
         assert len(finish_parts) == 1
         assert (
             finish_parts[0].finishReason == "stop"
-        )  # Note: FinishPart has no alias, uses camelCase
+        )
 
     @pytest.mark.asyncio
     async def test_sse_format_generation(self, handler):
-        """Test that SSE format is generated correctly."""
         from django_ai_sdk.protocols.vercel import format_sse
 
-        # Test format_sse helper function
         data = {"type": "test", "content": "Hello"}
         formatted = format_sse(data)
 
-        # Should be bytes with proper SSE format
         assert isinstance(formatted, bytes)
         assert b"data: {" in formatted
         assert b"}\n\n" in formatted
 
     @pytest.mark.asyncio
     async def test_state_reset_on_new_stream(self, handler):
-        """Test that state is reset for each new stream."""
-
-        # First stream
         async def stream1():
             yield MessageStartEvent(message_id="msg_1")
             yield TextChunkEvent(content="First")
@@ -379,13 +334,11 @@ class TestVercelProtocolHandler:
 
         first_text_id = [c for c in chunks1 if isinstance(c, TextStartPart)][0].id
 
-        # Second stream - should get new IDs
         async def stream2():
             yield MessageStartEvent(message_id="msg_2")
             yield TextChunkEvent(content="Second")
             yield MessageEndEvent(finish_reason="stop")
 
-        # Reset state before second stream (this happens in sse() method)
         handler.text_started = False
         handler.text_id = None
         handler.message_id = None
@@ -396,7 +349,6 @@ class TestVercelProtocolHandler:
 
         second_text_id = [c for c in chunks2 if isinstance(c, TextStartPart)][0].id
 
-        # IDs should be different
         assert first_text_id != second_text_id
 
     @pytest.fixture
@@ -431,7 +383,6 @@ class TestVercelProtocolHandler:
         available = next(c for c in chunks if isinstance(c, ToolInputAvailablePart))
         assert start.provider_metadata == {"sdk": {"agent": "Research Planner"}}
         assert available.provider_metadata == {"sdk": {"agent": "Research Planner"}}
-        # Serialized under the name the AI SDK reads.
         assert start.model_dump(exclude_none=True, by_alias=True)["providerMetadata"] == {
             "sdk": {"agent": "Research Planner"}
         }

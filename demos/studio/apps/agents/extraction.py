@@ -13,8 +13,6 @@ if TYPE_CHECKING:
 
 
 class PirateExtractionAgent(Agent):
-    """Extraction agent for the demo."""
-
     name = "Extraction Agent"
     model = settings.AI_SDK_DEFAULT_MODEL
     hidden = True

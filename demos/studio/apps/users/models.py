@@ -1,12 +1,3 @@
-"""Email-only custom user model for the demo.
-
-Switching to a real email-only user removes the unique ``username`` column that
-stock ``django.contrib.auth.User`` enforces. The previous demo kept allauth's
-``ACCOUNT_USER_MODEL_USERNAME_FIELD = None`` (no-username signup) while still
-writing to a ``username`` column, so every registration created ``username=""``
-and the second signup tripped ``UNIQUE constraint failed: auth_user.username``.
-"""
-
 from __future__ import annotations
 
 from typing import ClassVar
@@ -17,8 +8,6 @@ from django.db import models
 
 
 class UserManager(BaseUserManager["User"]):
-    """Manager that authenticates by email instead of username."""
-
     use_in_migrations = True
 
     def _create_user(self, email: str, password: str | None, **extra_fields: object) -> User:
@@ -79,9 +68,7 @@ class UserManager(BaseUserManager["User"]):
 
 
 class User(AbstractUser):
-    """Custom user whose unique identifier is the email address."""
-
-    username = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]  # remove the username column
+    username = None  # ty: ignore[invalid-assignment]
     email = models.EmailField("email address", unique=True)
 
     USERNAME_FIELD = "email"

@@ -26,11 +26,8 @@ class RagToolsAgent(Agent):
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestAgentGetRagTools:
-    """Tests for Agent.get_rag_tools()."""
-
     @pytest.fixture(autouse=True)
     def _anonymous_can_read_memories(self):
-        # These tests run as user=None; permissions are not what they test.
         with memory_permissions("django_ai_sdk.permissions.AllowAll"):
             yield
 
@@ -140,8 +137,6 @@ class TestAgentGetRagTools:
         assert result[1] is tool_b
 
     async def test_colliding_tool_names_are_disambiguated(self):
-        # Both names truncate to the same tool name, which would be rejected as
-        # a duplicate for the whole tool list.
         mem_a = await MemoryFactory.acreate(name="Product Documentation 2024")
         mem_b = await MemoryFactory.acreate(name="Product Documentation 2025")
         await Entry.objects.acreate(memory=mem_a, content="doc")

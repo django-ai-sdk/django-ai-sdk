@@ -1,9 +1,3 @@
-"""HTTP request payloads and the error body, shared by the SDK's views and the contrib
-Ninja/DRF layers.
-
-Success responses are the services' own ``*Out`` models.
-"""
-
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,7 +8,6 @@ class MessagePart(BaseModel):
 
     type: str
     text: str | None = None
-    # file parts
     url: str | None = None
     media_type: str | None = Field(default=None, alias="mediaType")
     filename: str | None = None
@@ -49,9 +42,6 @@ class ErrorResponse(BaseModel):
     retryable: bool
     ref: str
     errors: list[dict] | None = None
-
-
-# Memories
 
 
 class MemoryIn(BaseModel):
@@ -101,15 +91,9 @@ class AddMemoryGroupIn(BaseModel):
     can_manage: bool = False
 
 
-# Threads
-
-
 class PatchThreadPayload(BaseModel):
     agent_id: str | None = None
     title: str | None = None
-
-
-# Runtime agents
 
 
 class AgentSettingsCreateUserEntry(BaseModel):

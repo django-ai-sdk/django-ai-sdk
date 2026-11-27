@@ -1,5 +1,3 @@
-"""The authoring app: its setting, its system checks, and what it adds to oversight on start."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -14,7 +12,6 @@ PREFIX = "ai_sdk.oversight.authoring"
 SETTING = "AI_SDK_OVERSIGHT_AUTHORING"
 
 AUTHORING_DEFAULTS: dict[str, Any] = {
-    # Policies every authored policy must extend, such as ["security"].
     "MUST_EXTEND": [],
 }
 
@@ -50,7 +47,6 @@ class AuthoringConfig(AppConfig):
 
 
 def check_authoring(app_configs: Any = None, **kwargs: Any) -> list[Any]:
-    """E012, then E001."""
     from django_ai_sdk.oversight.authoring.definitions import is_authored
     from django_ai_sdk.oversight.registry import get_policy_class
 
@@ -104,7 +100,6 @@ def settings_checks() -> list[Error]:
 
 
 def check_authoring_deploy(app_configs: Any = None, **kwargs: Any) -> list[Any]:
-    """W001. Registered with deploy=True: Django passes no deploy flag to the check."""
     if not isinstance(configured(SETTING), dict) or authoring_setting("MUST_EXTEND"):
         return []
     return [

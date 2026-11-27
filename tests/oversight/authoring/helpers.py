@@ -1,5 +1,3 @@
-"""A code policy to extend, operators who may author, and definitions to save."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -31,8 +29,6 @@ class ShortLived(Policy):
 
 
 class OffX(Policy):
-    """Declares `block_x` again, turned off."""
-
     name = "au-off-x"
     lenses = [PatternLens(name="never", stages=["gate"], keywords=["zzzq"])]
     rules = [Rule("block_x", when=L("never").is_true, then=Alert(), mode="off")]
@@ -42,7 +38,6 @@ AUTHORING_POLICIES = [Base, Metadata, ShortLived, OffX]
 
 
 def refunds(**changes: Any) -> dict[str, Any]:
-    """A definition that blocks refund requests on top of au-base."""
     definition: dict[str, Any] = {
         "label": "Refunds",
         "extends": ["au-base"],

@@ -1,14 +1,3 @@
-"""Settings every demo shares. A demo's own settings start with::
-
-    BASE_DIR = Path(__file__).resolve().parent.parent
-    environ.Env.read_env(BASE_DIR / ".env")  # before the import: DEBUG etc. come from it
-
-    from demo_base.settings import *
-
-and then add what depends on its own folder (database, storage, URLs) and its own apps,
-agents and permissions.
-"""
-
 from __future__ import annotations
 
 import environ
@@ -16,7 +5,6 @@ from corsheaders.defaults import default_headers
 
 env = environ.Env(DEBUG=(bool, False))
 
-# SECURITY WARNING: demo projects only; never deploy these settings.
 SECRET_KEY = env(
     "SECRET_KEY", default="django-insecure-bu5o)x@7lydjdtfn92=mtwc4sobt=7(*-l)pc_s@-pqqnj97(2"
 )
@@ -35,18 +23,15 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    # auth
     "allauth",
     "allauth.account",
     "allauth.headless",
     "allauth.usersessions",
-    # third-party
     "corsheaders",
     "django_watchfiles",
     "rest_framework",
     "django_tasks",
     "django_tasks_db",
-    # sdk
     "django_ai_sdk",
     "django_ai_sdk.tracing",
     "django_ai_sdk.workflows",
@@ -82,8 +67,6 @@ TEMPLATES = [
     },
 ]
 
-# Dev: ImmediateBackend runs tasks inline (no worker needed).
-# DEBUG=False: DatabaseBackend, run `python manage.py db_worker`.
 TASKS = {
     "default": {
         "BACKEND": (
@@ -93,7 +76,6 @@ TASKS = {
         ),
     }
 }
-# Chat uploads jump bulk memory imports waiting in the queue.
 AI_SDK_THREAD_FILE_PRIORITY = 10
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -103,7 +85,6 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# Authentication: allauth headless, for the frontend in ../web on port 3000.
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
@@ -134,24 +115,18 @@ STATIC_URL = "static/"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
-    # Error codes for every DRF view, not only the SDK's viewsets.
     "EXCEPTION_HANDLER": "django_ai_sdk.contrib.drf.exception_handler",
 }
 
 
-# AI SDK
-
 OPENAI_API_KEY = env("OPENAI_API_KEY", default=None)
 OPENAI_API_URL = env("OPENAI_API_URL", default=None)
 
-# Default LLM model
 AI_SDK_DEFAULT_MODEL = env("AI_SDK_DEFAULT_MODEL", default="openai/gpt-oss-120b")
 
-# Dense RAG embeddings through the OpenAI-compatible API
 AI_SDK_EMBEDDINGS_MODEL = env("AI_SDK_EMBEDDINGS_MODEL", default=None)
 AI_SDK_EMBEDDINGS_DIM = env.int("AI_SDK_EMBEDDINGS_DIM", default=384)
 
-# Relative to the working directory: each demo keeps its own vector stores.
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
 AI_SDK_ALLOWED_FILES = {
@@ -165,24 +140,19 @@ AI_SDK_ALLOWED_FILES = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 
-# MCP OAuth discovery (RFC 9728)
-AI_SDK_MCP_DISCOVERY_TIMEOUT = 10  # seconds
-AI_SDK_MCP_DISCOVERY_CACHE_TTL = 3600  # seconds
+AI_SDK_MCP_DISCOVERY_TIMEOUT = 10
+AI_SDK_MCP_DISCOVERY_CACHE_TTL = 3600
 AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
 
-# Integration caching, timeouts and circuit breaker (see
-# django_ai_sdk.integrations.base.ResilientCache). Together these bound the worst case
-# a slow or dead integration can add to a chat response.
-AI_SDK_INTEGRATION_CACHE_TTL = 900  # seconds a discovered tool list stays fresh
-AI_SDK_INTEGRATION_TIMEOUT = 3  # seconds; hard bound on a cache-miss fetch
-AI_SDK_INTEGRATION_CB_COOLDOWN = 60  # seconds a failing integration is skipped
+AI_SDK_INTEGRATION_CACHE_TTL = 900
+AI_SDK_INTEGRATION_TIMEOUT = 3
+AI_SDK_INTEGRATION_CB_COOLDOWN = 60
 
 AI_SDK_TRACING_EXCLUDED_TAGS = [
     "haystack.agent.tools",
     "haystack.agent.state_schema",
 ]
 
-# HuggingFace models to pre-download for offline embedding use
 HF_PRELOAD_MODELS = [
     "Qdrant/bm42-all-minilm-l6-v2-attentions",
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",

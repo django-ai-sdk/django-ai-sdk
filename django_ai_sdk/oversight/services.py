@@ -1,10 +1,3 @@
-"""The review API over the oversight record, which the HTTP layers are built on.
-
-METRICS shows a turn's columns, labels, answer values and matches; its content
-(text, reasons, notes, who asked) also needs CONTENT for that turn. Lists are
-keyset-paged with opaque cursors that survive rows being added in between.
-"""
-
 from __future__ import annotations
 
 import base64
@@ -59,9 +52,7 @@ if TYPE_CHECKING:
 MAX_LIMIT = 100
 MAX_DAYS = 365
 PREVIEW_CHARS = 160
-# Label filters become part of an ORM lookup, so only allow plain lens names.
 LABEL = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,99}")
-# Content keys shown on a turn. Answer texts are shown with their answer instead.
 CONTENT_KEYS = frozenset(
     {
         "agent",
@@ -96,10 +87,8 @@ class OversightService(OversightAccess):
         limit = max(1, min(limit, MAX_LIMIT))
         filters = filters or TurnFilter()
         qs = await cls.scoped(user, METRICS, Turn.objects.all())
-        # Asked once: a custom permission class may query for it.
         may_content = await cls.has_perms(user, CONTENT, raise_on_deny=False)
         if filters.thread_id:
-            # A thread id links turns to a conversation, so it needs content access.
             if not may_content:
                 raise PermissionDenied("Filtering by thread takes VIEW_OVERSIGHT_CONTENT.")
             qs = await cls.scoped(user, CONTENT, qs)
@@ -174,7 +163,6 @@ class OversightService(OversightAccess):
         shown = await cls.content_ids(user, [t.id for t in turns], allowed=may_content)
         rows = {}
         if with_rows:
-            # A turn's row is metrics: only for the turns in the reader's METRICS scope.
             metric = Turn.objects.filter(pk__in=[t.id for t in turns])
             in_scope = {
                 pk
@@ -200,7 +188,6 @@ class OversightService(OversightAccess):
 
     @classmethod
     async def list_queues(cls, *, user: UserType) -> dict[str, int]:
-        """Open items per queue, for reviewers who may lack METRICS."""
         from django_ai_sdk.oversight.models import ReviewItem
 
         await cls.has_perms(user, REVIEW)
@@ -213,9 +200,7 @@ class OversightService(OversightAccess):
     async def resolve_review(
         cls, item_id: str, verdict: ResolveIn, *, user: UserType
     ) -> ReviewOut | None:
-        """Close a review item with the reviewer's verdict, or dismiss it.
-
-        None outside the reader's scope. A conditional update claims the item, so a
+        """None outside the reader's scope. A conditional update claims the item, so a
         concurrent close raises ConflictError. Nobody reviews a turn of their own.
         """
         from django_ai_sdk.oversight.models import ReviewItem
@@ -252,7 +237,6 @@ class OversightService(OversightAccess):
     async def get_metrics(
         cls, *, user: UserType, days: int = 14, agent_id: str = "", policy: str = ""
     ) -> MetricsOut:
-        """SQL aggregates over the last `days` of turns the reader may reach."""
         from django_ai_sdk.oversight.models import ReviewItem, RuleMatch, Turn
 
         await cls.has_perms(user, METRICS)
@@ -263,7 +247,6 @@ class OversightService(OversightAccess):
         turns = await cls.scoped(
             user, METRICS, Turn.objects.filter(created_at__gte=since, **narrow)
         )
-        # Open reviews are counted regardless of age.
         matches = RuleMatch.objects.filter(turn__in=turns.values("pk"))
         waiting = await cls.scoped(
             user,
@@ -305,7 +288,6 @@ async def _keyset_page(
     fields = [key.lstrip("-") for key in order]
     if cursor:
         values = _decode_cursor(cursor, qs.model, fields)
-        # Rows after the cursor: equal on the leading fields, past it on the next one.
         after = Q()
         for i, (key, name) in enumerate(zip(order, fields, strict=True)):
             past = "lt" if key.startswith("-") else "gt"
@@ -334,7 +316,6 @@ def _decode_cursor(cursor: str, model: Any, fields: list[str]) -> list[Any]:
         values = []
         for name, value in zip(fields, raw, strict=True):
             field = model._meta.pk if name == "pk" else model._meta.get_field(name)
-            # Coerced here, so a tampered value is a bad cursor, not an error in the query.
             if isinstance(field, DateTimeField):
                 moment = datetime.fromisoformat(value)
                 values.append(moment if timezone.is_aware(moment) else timezone.make_aware(moment))
@@ -346,7 +327,6 @@ def _decode_cursor(cursor: str, model: Any, fields: list[str]) -> list[Any]:
 
 
 def _filter_turns(qs: QuerySet, f: TurnFilter) -> QuerySet:
-    """Apply `f` to `qs`. Rule and review filters use Exists so rows do not repeat."""
     from django_ai_sdk.oversight.models import ReviewItem, RuleMatch
 
     simple = {
@@ -359,7 +339,6 @@ def _filter_turns(qs: QuerySet, f: TurnFilter) -> QuerySet:
     }
     qs = qs.filter(**{field: value for field, value in simple.items() if value})
     if f.report_outcome:
-        # "Would have been X" only counts when the real outcome was not X.
         qs = qs.filter(report_outcome=f.report_outcome).exclude(outcome=f.report_outcome)
     if f.channel:
         qs = qs.filter(channel__startswith=f.channel)
@@ -371,7 +350,6 @@ def _filter_turns(qs: QuerySet, f: TurnFilter) -> QuerySet:
         open_items = ReviewItem.objects.filter(turn=OuterRef("pk"), status=ReviewItem.Status.OPEN)
         qs = qs.filter(Exists(open_items))
     elif f.review in {"reviewed", "unreviewed"}:
-        # Reviewed means a person closed a review.
         person = Exists(
             ReviewItem.objects.filter(turn=OuterRef("pk")).exclude(status=ReviewItem.Status.OPEN)
         )
@@ -384,7 +362,6 @@ def _filter_turns(qs: QuerySet, f: TurnFilter) -> QuerySet:
 
 
 def _filter_by_label(qs: QuerySet, label: str, value: str) -> QuerySet:
-    """Filter turns that have `label`, optionally equal to `value`."""
     if not LABEL.fullmatch(label) or "__" in label:
         raise UserError("A label filter names a lens: letters, digits, - and _.")
     if value == "":
@@ -409,7 +386,6 @@ def _typed_value(value: str) -> Any:
 
 
 async def _turn_rows(turns: list[Turn], shown: set[Any], reviews: QuerySet) -> list[TurnOut]:
-    """Feed rows, with content only for ids in `shown`."""
     from django_ai_sdk.oversight.models import ReviewItem, RuleMatch
 
     ids = [t.id for t in turns]
@@ -488,7 +464,6 @@ def visible_content(content: dict[str, Any] | None) -> dict[str, Any] | None:
 def _answer_out(
     row: Any, resolved: ResolvedPolicy | None, texts: dict[str, Any] | None
 ) -> LensAnswerOut:
-    """`texts` None for a reader who may not see the content."""
     lens = resolved.lenses.get(row.lens) if resolved else None
     kept: dict[str, Any] = (texts or {}).get(str(row.id)) or {}
     trail = row.trail
@@ -517,11 +492,6 @@ def _answer_out(
 
 
 def _close_review(item_id: Any, turn_id: Any, closed: dict[str, Any]) -> dict[str, Any] | None:
-    """Close the item if it is still open; returns what was written, else None.
-
-    The note is content, kept only while the turn's content is. The turn is locked as
-    `forget_turns` locks it, so a forget can't delete the content between check and write.
-    """
     from django_ai_sdk.oversight.models import ReviewItem, Turn
 
     with transaction.atomic():
@@ -532,7 +502,6 @@ def _close_review(item_id: Any, turn_id: Any, closed: dict[str, Any]) -> dict[st
 
 
 def _review_out(item: Any, row: TurnOut | None = None, *, shown: bool) -> ReviewOut:
-    """`shown`: the reader may see the turn's content, which includes the note, and it is kept."""
     return ReviewOut(
         id=str(item.id),
         turn_id=str(item.turn_id),

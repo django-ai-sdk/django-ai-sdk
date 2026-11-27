@@ -13,11 +13,8 @@ from django_ai_sdk.utils import resolve_setting
 
 @watched_factory
 def huggingface_api_chat(**kwargs: Any) -> HuggingFaceAPIChatGenerator:
-    """Hugging Face Inference API generator wired to Django settings.
-
-    A `model` is turned into serverless inference params; `HUGGINGFACE_API_URL`
-    selects a dedicated inference endpoint instead.
-    """
+    """A `model` is turned into serverless inference params; `HUGGINGFACE_API_URL`
+    selects a dedicated inference endpoint instead."""
     url = resolve_setting("HUGGINGFACE_API_URL")
     model = kwargs.pop("model", None)
     defaults = {

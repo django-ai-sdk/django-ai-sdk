@@ -1,8 +1,3 @@
-"""DBOS in this process: launched in the worker, a client everywhere else.
-
-Web processes only read and write DBOS's tables through a `DBOSClient`; they run nothing.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -34,7 +29,6 @@ _lock = threading.Lock()
 
 
 def serializer() -> Any:
-    """JSON, never pickle: what is stored can be read, and loading it runs no code."""
     from dbos import DBOSPortableJSONSerializer
 
     return DBOSPortableJSONSerializer()
@@ -53,7 +47,6 @@ def config() -> DBOSConfig:
 
 @asynccontextmanager
 async def fresh_connections() -> AsyncGenerator[None]:
-    """Close broken or expired DB connections around a durable unit, as Django does per request."""
     await sync_to_async(close_old_connections)()
     try:
         yield
@@ -62,7 +55,6 @@ async def fresh_connections() -> AsyncGenerator[None]:
 
 
 def launch() -> None:
-    """Start DBOS here: recover unfinished runs, dequeue, fire schedules. The worker's job."""
     from dbos import DBOS
 
     for module in WORKFLOW_MODULES:
@@ -74,7 +66,6 @@ def launch() -> None:
 
 
 def destroy() -> None:
-    """Stop DBOS here and drop the client, such as between tests."""
     global _client
     from dbos import DBOS
 
@@ -86,7 +77,6 @@ def destroy() -> None:
 
 
 def client() -> DBOSClient:
-    """The process's DBOSClient, made on first use."""
     global _client
     with _lock:
         if _client is None:
@@ -108,10 +98,7 @@ async def enqueue(
     queue: str,
     delay_seconds: float | None = None,
 ) -> str:
-    """Queue a run of the DBOS workflow named `workflow`. Returns its workflow id.
-
-    The id is the idempotency key: an existing id is returned and nothing runs.
-    """
+    """The id is the idempotency key: an existing id is returned and nothing runs."""
     options: EnqueueOptions = {
         "queue_name": queue,
         "workflow_name": workflow,
@@ -125,17 +112,16 @@ async def enqueue(
 
 
 async def send(workflow_id: str, message: Any, *, topic: str, idempotency_key: str) -> None:
-    """Deliver `message` to a run waiting on `topic`. A repeated key is delivered once."""
+    """A repeated key is delivered once."""
     await client().send_async(workflow_id, message, topic, idempotency_key)
 
 
 async def cancel(workflow_id: str) -> None:
-    """Stop a run at its next step. The step in flight finishes."""
+    """The step in flight finishes."""
     await client().cancel_workflow_async(workflow_id)
 
 
 async def status(workflow_id: str) -> Any:
-    """DBOS's WorkflowStatus for `workflow_id`, or None."""
     if not workflow_id:
         return None
     handle = await client().retrieve_workflow_async(workflow_id)

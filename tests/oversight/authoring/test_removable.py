@@ -1,5 +1,3 @@
-"""Authoring is opt-in: without the app, policies are code's alone and nothing imports it."""
-
 from __future__ import annotations
 
 from tests.removable import run_without

@@ -36,7 +36,6 @@ class TestProtocol:
 
         [chat] = handler.to_chat_messages([msg])
 
-        # image-only message is kept, url from the client is not carried
         assert chat.content == ""
         assert chat.attachments[0].document_id == "doc-1"
         assert chat.attachments[0].url == ""
@@ -96,7 +95,6 @@ class TestResolveAttachments:
     def _agent(**formatters):
         from django_ai_sdk.permissions import AllowAll
 
-        # The thread's own permissions decide in these tests.
         return SimpleNamespace(permissions=[AllowAll], is_runtime=False, **formatters)
 
     async def _thread_with_image(self, user=None):
@@ -144,7 +142,6 @@ class TestResolveAttachments:
         assert last.attachments[0].filename == "cat.png"
         assert last.attachments[0].context == "[cat.png inline=True]"
         assert base64.b64decode(last.attachments[0].data) == PNG
-        # older turns get the hint only
         assert first.attachments[0].data == ""
         assert first.attachments[0].context == "[cat.png inline=False]"
 
@@ -180,7 +177,6 @@ class TestResolveAttachments:
             await MemoryService.resolve_attachments(
                 str(thread.id), messages, user=stranger, agent=agent, inline_images=True
             )
-        # Nothing was read or rewritten.
         assert messages[0].attachments[0].data == ""
         assert messages[0].attachments[0].filename != "cat.png"
 
@@ -257,10 +253,10 @@ class TestVisionFallback:
         assert "x" * 10 + "…" in Agent.format_image_attachment(None, doc, inline=False)
         assert "x" * 11 not in Agent.format_image_attachment(None, doc, inline=False)
 
-        settings.AI_SDK_IMAGE_CAPTION_LIMIT = 0  # off
+        settings.AI_SDK_IMAGE_CAPTION_LIMIT = 0
         assert "x" * 50 in Agent.format_image_attachment(None, doc, inline=False)
 
-        settings.AI_SDK_IMAGE_CAPTION_LIMIT = None  # off too, like AI_SDK_MAX_INLINE_IMAGE_BYTES
+        settings.AI_SDK_IMAGE_CAPTION_LIMIT = None
         assert "x" * 50 in Agent.format_image_attachment(None, doc, inline=False)
 
     def test_no_run_required_tools_by_default(self):

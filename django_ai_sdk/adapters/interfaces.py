@@ -15,8 +15,6 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class Runnable(Protocol):
-    """An LLM runner"""
-
     model: str | None = None
     instructions: str | None = None
 
@@ -29,8 +27,6 @@ class Runnable(Protocol):
 
 
 class Streamable(Protocol):
-    """Stream an LLM response as normalized events."""
-
     model: str | None = None
     instructions: str | None = None
     suggestion_generator: SuggestionGenerator | None = None

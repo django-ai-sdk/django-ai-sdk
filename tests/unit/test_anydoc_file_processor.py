@@ -170,7 +170,6 @@ class TestAnyDocFileProcessor:
         assert result is None
 
     async def test_run_returns_none_on_unexpected_error(self, processor, tmp_path, monkeypatch):
-        """Anything anydoc's runtime throws must not hard-fail the pipeline."""
         import anydoc
 
         file = tmp_path / "test.docx"

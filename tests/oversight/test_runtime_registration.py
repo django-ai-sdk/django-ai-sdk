@@ -1,6 +1,3 @@
-"""The seams for policies registered at runtime: loaders, withdrawing a policy, and
-building or dry-running a draft before it is registered."""
-
 from __future__ import annotations
 
 import pytest
@@ -95,7 +92,6 @@ class TestLoaders:
 
 
 async def test_lookups_during_a_load_wait_for_it(registry_snapshot):
-    """A lookup that starts while the loaders run loads too, instead of finding nothing."""
     import asyncio
 
     from django_ai_sdk.oversight import Policy

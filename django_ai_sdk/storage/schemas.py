@@ -24,12 +24,5 @@ class ThreadInfo(BaseModel):
 
 
 class ThreadDetail(BaseModel):
-    """Full thread information including messages for API responses.
-
-    Returned by Agent.history() for complete thread views.
-    Contains both thread metadata and the conversation messages
-    formatted according to the protocol handler.
-    """
-
     thread: ThreadInfo
     messages: list[dict[str, Any]]

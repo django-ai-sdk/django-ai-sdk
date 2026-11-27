@@ -10,9 +10,7 @@ from django_ai_sdk.oversight.calls import watched_factory
 
 @watched_factory
 def anthropic_chat(**kwargs: Any) -> AnthropicChatGenerator:
-    """Anthropic Messages API generator wired to Django settings."""
-    # AnthropicChatGenerator has no base-URL parameter, so there is no
-    # ANTHROPIC_API_URL setting to honour.
+    # AnthropicChatGenerator has no base-URL parameter.
     return AnthropicChatGenerator(
         **build_kwargs({"api_key": resolve_secret("ANTHROPIC_API_KEY")}, kwargs)
     )

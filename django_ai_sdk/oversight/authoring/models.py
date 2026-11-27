@@ -1,5 +1,3 @@
-"""Authored policies: one row per policy, edited in place."""
-
 from __future__ import annotations
 
 import uuid
@@ -14,15 +12,11 @@ class AuthoredPolicy(models.Model):
     name = models.SlugField(max_length=100, unique=True)
     label = models.CharField(max_length=200, blank=True)
     description = models.TextField(blank=True)
-    # Names of parent policies: code policies and packs, never another authored policy.
     extends = models.JSONField(default=list, blank=True)
-    # Lens and rule dicts in the shape `definitions.build_policy_class` reads.
     lenses = models.JSONField(default=list, blank=True)
     rules = models.JSONField(default=list, blank=True)
-    # capture, stream_mode, fail_mode and retention. A missing key is inherited.
     options = models.JSONField(default=dict, blank=True)
     active = models.BooleanField(default=True)
-    # A plain id, not a foreign key, so deleting a user keeps the policy.
     updated_by_id = models.CharField(max_length=64, blank=True)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
 

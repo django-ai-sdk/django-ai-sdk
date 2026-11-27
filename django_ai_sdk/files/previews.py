@@ -25,15 +25,10 @@ __all__ = [
     "to_pdf",
 ]
 
-# letters of a cited passage looked up in the PDF
 QUOTE_LETTERS = (12, 80)
-# cited passages per lookup, each cut short: they come from the query string
 MAX_QUOTES = 8
-# num of characters of a cited passage looked up in the PDF
 QUOTE_CHARS = 400
-# sharp enough to read on a phone and to zoom in a little
 PAGE_DPI = 110
-# marker yellow, multiplied over the page so the print stays readable
 HIGHLIGHT = (255, 255, 0)
 
 # a word's box: x, y (from the bottom of the page), width, height, in points
@@ -42,12 +37,7 @@ Box = tuple[float, float, float, float]
 
 @cache
 def get_pdf_engine() -> Any:
-    """pdf_oxide, its logging off.
-
-    With its logging on, converting an Office file deadlocks. Pages render with
-    the system's fonts: on a server without any, letters render as boxes
-    (install ``fonts-liberation``).
-    """
+    """With its logging on, converting an Office file deadlocks."""
     import pdf_oxide
 
     pdf_oxide.disable_logging()
@@ -55,7 +45,6 @@ def get_pdf_engine() -> Any:
 
 
 def csv_to_xlsx(data: bytes) -> bytes:
-    """A CSV as a one-sheet workbook, so it renders as a table."""
     from openpyxl import Workbook
 
     workbook = Workbook()
@@ -81,7 +70,6 @@ def get_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-# extension
 CONVERTERS = {
     "pdf": lambda data: data,
     "docx": get_office("docx"),
@@ -94,7 +82,6 @@ CONVERTERS = {
 }
 
 PREVIEW_EXTENSIONS = frozenset(CONVERTERS)
-# no text to mark: an image source is shown as itself, not as a page
 IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "webp", "gif"})
 
 
@@ -108,17 +95,14 @@ def to_pdf(data: bytes, extension: str) -> bytes | None:
 
 
 def letters(text: str) -> str:
-    """``text`` as letters and digits only, lowercased."""
     return re.sub(r"[\W_]+", "", (text or "").lower())
 
 
 def clean_quotes(quotes: list[str]) -> list[str]:
-    """At most MAX_QUOTES quotes, each at most QUOTE_CHARS long."""
     return [quote[:QUOTE_CHARS] for quote in quotes[:MAX_QUOTES]]
 
 
 def quote_page(pdf: bytes, quotes: list[str]) -> int | None:
-    """The page of ``pdf`` that holds most of ``quotes``"""
     shortest, longest = QUOTE_LETTERS
     needles = {
         needle
@@ -138,7 +122,6 @@ def quote_page(pdf: bytes, quotes: list[str]) -> int | None:
 
 
 def passage_areas(words: list, quote: str) -> list[Box]:
-    """Where ``quote`` is printed among ``words``."""
     from django_ai_sdk.adapters.citations.grounding import get_locate_passage
 
     text, ranges = "", []
@@ -158,7 +141,6 @@ def passage_areas(words: list, quote: str) -> list[Box]:
 
 
 def render_page(pdf: bytes, page: int, quotes: list[str]) -> tuple[bytes, str] | None:
-    """Page ``page`` of ``pdf`` as a PNG with ``quotes`` marked."""
     from PIL import Image, ImageChops, ImageDraw
 
     quotes = clean_quotes(quotes)
@@ -169,9 +151,7 @@ def render_page(pdf: bytes, page: int, quotes: list[str]) -> tuple[bytes, str] |
         words = document.extract_words(page - 1) if quotes else []
     size = (pixmap.width, pixmap.height)
 
-    # rendered on white
     image = Image.frombuffer("RGBa", size, pixmap.data).convert("RGB")
-    # boxes in pixels from the top
     scale = PAGE_DPI / 72
     boxes = [
         (

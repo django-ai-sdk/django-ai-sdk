@@ -1,12 +1,9 @@
-"""Workflows are an opt-in app: the SDK runs without it, and with it the app sets itself up."""
-
 from __future__ import annotations
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from tests.removable import run_without
 
-# The durable app runs workflows on DBOS: it goes with them.
 WORKFLOW_APPS = ["django_ai_sdk.workflows", "django_ai_sdk.durable"]
 
 WITHOUT_WORKFLOWS = """
@@ -44,7 +41,6 @@ def test_the_sdk_runs_without_the_workflows_app(tmp_path):
         tmp_path,
         WORKFLOW_APPS,
         WITHOUT_WORKFLOWS,
-        # tests.urls mounts the workflow endpoints on purpose; this process has none.
         settings='ROOT_URLCONF = "no_urls"',
         files={"no_urls.py": "urlpatterns = []\n"},
     )
@@ -94,10 +90,6 @@ class TestTheAppConfig:
         assert not [name for name in core.__all__ if "Workflow" in name]
 
 
-# What may import the workflows package from outside it: the opt-in HTTP contrib
-# packages, which mount its routes, the default workflow permission, which reads its
-# models lazily (a follow-up moves it into the app), and the opt-in durable app,
-# which runs workflows on DBOS.
 MAY_IMPORT_WORKFLOWS = (
     "django_ai_sdk.contrib",
     "django_ai_sdk.permissions",

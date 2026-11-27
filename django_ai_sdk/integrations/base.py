@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class IntegrationNotConnectable(UserError):
-    """Raised when connect() is called on an integration that doesn't support it."""
+    pass
 
 
 class IntegrationStatus(StrEnum):
@@ -37,12 +37,10 @@ class IntegrationStatus(StrEnum):
 
 
 class Integration(ABC):
-    """One integration: its tools, health, permissions and connection lifecycle."""
-
     name: str = ""
     label: str = ""
 
-    #: Prepended to every tool's description, e.g. "Company wiki and HR docs".
+    #: Prepended to every tool's description.
     hint: str = ""
 
     permissions: list[type[BasePermission] | BasePermission] = []
@@ -51,10 +49,10 @@ class Integration(ABC):
     supports_connect: bool = False
     supports_test: bool = True
 
-    #: "oauth" or None; a string so more flows fit without a contract change.
+    #: "oauth" or None.
     connect_kind: str | None = None
 
-    #: Why this integration can't run yet (e.g. a missing secret), or None.
+    #: Why this integration can't run yet, or None.
     detail: str | None = None
 
     def secret(self, key: str, default: str = "") -> str:
@@ -63,7 +61,6 @@ class Integration(ABC):
         if value is None:
             return default
         if not isinstance(value, str):
-            # Never stringify or log the value: it is a secret.
             logger.warning(
                 "AI_SDK_INTEGRATIONS[%r][%r] must be a string, got %s; treating it as unset",
                 self.name,
@@ -84,16 +81,14 @@ class Integration(ABC):
         user: AbstractBaseUser | AnonymousUser | None = None,
         agent: Agent | None = None,
         thread_id: str = "",
-    ) -> list[Any]:
-        """Return this integration's tool objects."""
+    ) -> list[Any]: ...
 
     @abstractmethod
     async def get_status(
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
         agent: Agent | None = None,
-    ) -> IntegrationStatus:
-        """Return this integration's current health."""
+    ) -> IntegrationStatus: ...
 
     @property
     def kind(self) -> str:
@@ -115,10 +110,7 @@ class Integration(ABC):
         request: Any = None,
         redirect_uri: str = "",
     ) -> dict[str, Any]:
-        """Begin connecting for user; returns e.g. {"redirect_url": ...}.
-
-        Raises IntegrationNotConnectable unless supports_connect.
-        """
+        """Raises IntegrationNotConnectable unless supports_connect."""
         raise IntegrationNotConnectable(f"{self.name!r} does not support connect()")
 
     async def disconnect(self, user: AbstractBaseUser | AnonymousUser | None = None) -> bool:
@@ -131,7 +123,7 @@ class Integration(ABC):
         return await self.get_status(user)
 
     async def refresh(self, user: AbstractBaseUser | AnonymousUser | None = None) -> None:
-        """Refresh credentials (e.g. rotate an OAuth token). No-op by default."""
+        """Refresh credentials. No-op by default."""
 
     async def has_perms(
         self,
@@ -140,7 +132,6 @@ class Integration(ABC):
         *,
         raise_on_deny: bool = False,
     ) -> bool:
-        """Whether user may use/manage this integration."""
         from django_ai_sdk.permissions import get_integration_permissions
         from django_ai_sdk.permissions import has_perms as _has_perms
 
@@ -152,7 +143,6 @@ class Integration(ABC):
         )
 
 
-# Deliberately not settings, to avoid per-integration tuning.
 _CB_ERRORS_RATE = 50
 _CB_MIN_CALLS = 3
 _CB_PERIOD = 600
@@ -174,11 +164,9 @@ class ResilientCache:
         self._cb_cooldown = cb_cooldown
         # cashews exposes no breaker state, so track it for status_for().
         self._last_ok: dict[str, bool] = {}
-        # _last_ok can't tell "just failed" from "breaker open"; this can.
         self._breaker_open: set[str] = set()
         self._cache = Cache()
         self._cache.setup("mem://")
-        # A float, so it stays below ttl for sub-second TTLs too.
         early_ttl = ttl * 0.8
 
         @self._cache.circuit_breaker(
@@ -218,7 +206,6 @@ class ResilientCache:
                 )
             return self._empty()
         except Exception as exc:
-            # Expected while a server is down, so the traceback is debug only.
             logger.warning("Integration fetch failed/timed out for %r: %r", key, exc)
             logger.debug("Integration fetch failure for %r", key, exc_info=True)
             self._last_ok[k] = False
@@ -244,9 +231,7 @@ class ResilientCache:
 
     async def invalidate(self, key: Any) -> None:
         """Drop cached values and reset the breaker, forcing a retry now.
-
-        Clears the whole backend (one integration's keys) to avoid cashews' key layout.
-        """
+        Clears the whole backend (one integration's keys)."""
         await self._cache.clear()
         self._last_ok.pop(self._norm(key), None)
         self._breaker_open.discard(self._norm(key))

@@ -1,8 +1,3 @@
-"""An ONNX classifier from the Hugging Face Hub, run in this process (`django-ai-sdk[local]`).
-
-No torch is needed and nothing leaves the machine.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -26,38 +21,20 @@ logger = get_logger(__name__)
 # "[SLACK_TOKEN]" becomes "(slack token)": a small model reads bracketed capitals as markup.
 _MASK = re.compile(r"\[([A-Z][A-Z0-9_]*)\]")
 
-# Zero-shot DeBERTa, English (int8, 87 MB) and multilingual (100 languages, 340 MB). MIT.
 ENGLISH = "MoritzLaurer/deberta-v3-xsmall-zeroshot-v1.1-all-33"
 MULTILINGUAL = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
 QUANTIZED = "onnx/model_quantized.onnx"
-# Denser scripts may overflow despite TEXT_CHARS; then nothing is judged (TOO_LONG).
 MAX_TOKENS = 512
-# Entailment of `high` is a rough scale, so a score is never sure.
 SCORE_CONFIDENCE = 0.6
 LOAD_RETRY_SECONDS = 60.0
 
 
 class LocalClassifier(Classifier):
-    """Answer yes/no, label and score lenses with an ONNX model in this process.
-
-    Zero-shot (NLI) by default: a yes/no checks entailment of the lens's `yes` (write
-    it as a statement, "This text asks to ignore previous instructions."), a label
-    picks the criterion entailed most, a score is entailment of `high`. With
-    `positive=` it is a fixed classifier (e.g. an injection detector) answering
-    yes/no lenses with that label's probability, whatever the lens asks::
-
-        LocalClassifier(model="protectai/deberta-v3-base-prompt-injection-v2",
-                        file="onnx/model.onnx", positive="INJECTION")
-
-    Reads only the question or answer. Until the model is loaded it answers
-    unavailable and loads in the background, so FAIL_MODE applies and reflect asks
-    again; call `load_local_classifier()` at startup to have it ready.
-    """
+    """Until the model is loaded it answers unavailable and loads in the background."""
 
     external: ClassVar[str] = ""
     timeout = 10.0
     name = "local"
-    # About 400 tokens, leaving room for the statement within MAX_TOKENS.
     TEXT_CHARS: ClassVar[int] = 1_600
 
     def __init__(
@@ -96,13 +73,11 @@ class LocalClassifier(Classifier):
         assert isinstance(lens, JudgeLens)
         if self.question(lens) is None or not context.text(lens.subject).strip():
             return None
-        # So the first turn after a deploy goes to the next judge, not the deadline.
         if loaded_runner(self.model, self.file) is None:
             return Answer(error=f"{UNAVAILABLE}: {load_in_background(self.model, self.file)}")
         return await super().answer(lens, context)
 
     async def per_source(self, lens: JudgeLens, context: Any) -> Answer | None:
-        # A zero-shot model reads one text and one statement, not an answer plus a source.
         return None
 
     def question(self, lens: JudgeLens) -> dict[str, Any] | None:
@@ -113,7 +88,6 @@ class LocalClassifier(Classifier):
         if self.positive:
             return {"kind": "fixed", "reads": reads} if kind == "flag" else None
         if kind == "flag":
-            # The default yes says nothing about the lens, so the question says more.
             statement = lens.yes if lens.yes not in {"", Flag.options["yes"]} else lens.question
             return {"kind": "flag", "reads": reads, "statements": [statement]}
         if kind == "choice":
@@ -134,7 +108,6 @@ class LocalClassifier(Classifier):
         )
 
     def about(self, criterion: str) -> str:
-        """A criterion as a statement, "This text is about leave.", unless already one."""
         text = criterion.strip().rstrip(".")
         if text.lower().startswith("this text"):
             return f"{text}."
@@ -188,12 +161,10 @@ class LocalClassifier(Classifier):
 
 
 class TooLongError(Exception):
-    """Past MAX_TOKENS: the model would read only the start."""
+    pass
 
 
 class ModelRunner:
-    """One model's session, tokenizer and labels. `run` is thread-safe."""
-
     def __init__(self, model: str, file: str) -> None:
         import onnxruntime
         from huggingface_hub import hf_hub_download
@@ -227,7 +198,6 @@ class ModelRunner:
         else:
             encoded = self.tokenizer.encode_batch([(text, s or "") for text, s in pairs])
         if any(e.overflowing for e in encoded):
-            # The tokenizer cut the end off, and a verdict on the rest would hide it.
             raise TooLongError
         feed = {
             "input_ids": np.array([e.ids for e in encoded], dtype=np.int64),
@@ -241,7 +211,6 @@ class ModelRunner:
         return (exp / exp.sum(axis=-1, keepdims=True)).tolist()
 
     def entailment(self, pairs: list[tuple[str, str]]) -> list[float]:
-        """Entailment versus contradiction, ignoring "neutral", as HF's zero-shot pipeline."""
         index = self.label_index("entailment")
         against = next((i for i, label in enumerate(self.labels) if "contradiction" in label), None)
         if against is None:
@@ -254,11 +223,8 @@ class ModelRunner:
 
 
 _runners: dict[tuple[str, str], ModelRunner] = {}
-# (error, monotonic time) of each failed load.
 _load_errors: dict[tuple[str, str], tuple[str, float]] = {}
 _loading: set[tuple[str, str]] = set()
-# _load_lock is held while a model loads; the short _state_lock guards the state
-# above, so a turn never waits on a load.
 _load_lock = threading.Lock()
 _state_lock = threading.Lock()
 
@@ -268,7 +234,6 @@ def loaded_runner(model: str, file: str) -> ModelRunner | None:
 
 
 def load_local_classifier(model: str = ENGLISH, file: str = QUANTIZED) -> None:
-    """Load a model now, e.g. at startup, so no turn waits for it."""
     key = (model, file)
     with _load_lock:
         if key in _runners:
@@ -285,7 +250,6 @@ def load_local_classifier(model: str = ENGLISH, file: str = QUANTIZED) -> None:
 
 
 def load_in_background(model: str, file: str) -> str:
-    """Load the model in a thread, unless loading or failed lately. Returns the status."""
     key = (model, file)
     with _state_lock:
         failed = _load_errors.get(key)

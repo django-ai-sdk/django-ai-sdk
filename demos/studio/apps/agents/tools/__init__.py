@@ -1,5 +1,3 @@
-"""Agent tools package."""
-
 from __future__ import annotations
 
 from .memories import get_memory_file, get_memory_files

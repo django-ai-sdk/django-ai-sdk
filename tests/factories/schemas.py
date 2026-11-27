@@ -1,13 +1,3 @@
-"""
-Pydantic model factories using polyfactory.
-
-Predictable defaults for all fields; override per test via build() kwargs.
-
-Usage:
-    thread = ThreadInfoFactory.build(user_id="user-1")
-    msg = ChatMessageFactory.build(role="user", content="Hi")
-"""
-
 from datetime import datetime, timezone
 
 from polyfactory.factories.pydantic_factory import ModelFactory
@@ -20,7 +10,6 @@ from django_ai_sdk.storage.schemas import ThreadInfo
 def chat_message(
     role: str, text: str, message_id: str | None = None
 ) -> Message:
-    """Quick message builder for unit tests."""
     return Message(
         role=role,
         parts=[MessagePart(type="text", text=text)],

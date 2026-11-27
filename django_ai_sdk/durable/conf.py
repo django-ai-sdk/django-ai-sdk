@@ -1,5 +1,3 @@
-"""The AI_SDK_DBOS setting, read at call time. docs/content/manual/settings.md lists it."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -11,20 +9,11 @@ from django.core.exceptions import ImproperlyConfigured
 from django_ai_sdk.oversight.conf import setting_from
 
 DEFAULTS: dict[str, Any] = {
-    # Where DBOS keeps its tables, such as postgresql://user:pass@host/db. Empty uses
-    # DATABASES['default'].
     "DATABASE_URL": "",
-    # The Postgres schema DBOS keeps its tables in.
     "SCHEMA": "dbos",
-    # Who owns the workflows, queues and schedules in the system tables.
     "APP_NAME": "django-ai-sdk",
-    # Pinned so a deploy recovers the last one's runs. Change only when unfinished runs
-    # cannot replay new step code: runs under the old version are then left alone.
     "VERSION": "1",
-    # False behind a pooler in transaction mode (PgBouncer), which drops LISTEN.
     "USE_LISTEN_NOTIFY": True,
-    # DBOS register_queue options by name. No cap on "workflows": a run waiting on an
-    # approval holds its slot.
     "QUEUES": {"workflows": {}, "default": {"worker_concurrency": 8}},
 }
 
@@ -40,10 +29,6 @@ DJANGO_ONLY_OPTIONS = frozenset(
 
 
 def database_url() -> str:
-    """Where DBOS keeps its tables: AI_SDK_DBOS['DATABASE_URL'], or the default database.
-
-    Postgres: same database and OPTIONS, own schema. SQLite: a file next to the project's.
-    """
     if url := setting("DATABASE_URL"):
         return url
     db = settings.DATABASES["default"]
@@ -76,7 +61,6 @@ def _postgres_url(db: dict[str, Any]) -> str:
     }
     host, port = str(db.get("HOST") or "localhost"), str(db.get("PORT") or "")
     if host.startswith("/"):
-        # libpq takes a unix socket directory as ?host=, not in the authority.
         params.update(host=host, **({"port": port} if port else {}))
         host, port = "", ""
     if port:

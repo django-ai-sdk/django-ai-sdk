@@ -1,9 +1,3 @@
-"""Tests for the shipped Telegram integration.
-
-Only the sendMessage call is faked. Telegram signs nothing, so the property under
-test is that the shared secret is compared and that an unset one refuses everything.
-"""
-
 from __future__ import annotations
 
 import json
@@ -57,8 +51,6 @@ def telegram():
 
 
 class TestSecretVerification:
-    """An update is answered only if it carries the secret given to setWebhook."""
-
     def test_the_registered_secret_passes(self, telegram, rf):
         assert telegram.verify(_request(rf, _update())) is True
 
@@ -69,14 +61,11 @@ class TestSecretVerification:
         assert telegram.verify(_request(rf, _update(), secret=None)) is False
 
     def test_an_unconfigured_secret_refuses_a_bare_request(self, rf):
-        # Comparing two empty strings would otherwise let every caller in.
         with override_settings(AI_SDK_INTEGRATIONS={"telegram": {"BOT_TOKEN": "x"}}):
             assert TelegramIntegration().verify(_request(rf, _update(), secret=None)) is False
 
 
 class TestParse:
-    """parse answers a message and ignores everything else Telegram sends."""
-
     def test_a_message_becomes_an_event(self, telegram, rf):
         event = telegram.parse(_request(rf, _update()))
         assert isinstance(event, InboundEvent)
@@ -91,7 +80,6 @@ class TestParse:
         assert telegram.parse(_request(rf, payload)).text == "what is the weather"
 
     def test_a_mention_inside_the_question_is_kept(self, telegram, rf):
-        # Only a leading address is markup; a name in the middle is what was said.
         payload = _update(text="ask @ada about the weather")
         assert telegram.parse(_request(rf, payload)).text == "ask @ada about the weather"
 
@@ -119,8 +107,6 @@ class TestParse:
 
 
 class TestReply:
-    """The answer is sent back into the chat that asked."""
-
     @staticmethod
     def _event():
         return InboundEvent(
@@ -198,8 +184,6 @@ class TestReply:
 
 
 class TestConfiguration:
-    """A half-configured bot degrades instead of breaking the site."""
-
     def test_a_fully_configured_integration_has_no_detail(self, telegram):
         assert telegram.detail is None
 

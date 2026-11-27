@@ -1,10 +1,3 @@
-"""A definition composes agent steps and registered Step classes alike.
-
-Inputs and outputs compile the same way — one `FieldDefinition` mechanism pointed in
-two directions — and an agent step compiles to a configured `AgentStep`, not to a
-class of its own.
-"""
-
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
@@ -41,8 +34,6 @@ LISTENERS = {"quiet": "tests.unit.test_workflow_definitions.QuietListener"}
 
 
 class ShoutStep(Step):
-    """A registered step: plain Python a runtime author may compose."""
-
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
         source = ctx.step(self.requires[0]) if self.requires else ctx.input("text", "")
         return StepOutcome(output=str(source).upper(), detail="shouted")
@@ -57,8 +48,6 @@ class RepeatConfig(BaseModel):
 
 
 class RepeatStep(Step):
-    """A registered step that takes settings, checked by its own model."""
-
     @classmethod
     def validate_config(cls, config):
         RepeatConfig.model_validate(config)
@@ -68,8 +57,6 @@ class RepeatStep(Step):
 
 
 class TestAStepsConfig:
-    """A registered step's settings live on the definition and are checked when it is stored."""
-
     @pytest.fixture(autouse=True)
     def registered(self):
         with override_settings(AI_SDK_WORKFLOWS={"STEPS": REGISTERED}):
@@ -110,14 +97,11 @@ class TestAStepsConfig:
 
 
 class TestTheSchemaHoldsTheAuthorToACoherentStep:
-    """A definition that cannot run is refused where it is written."""
-
     def test_an_agent_step_without_an_agent_id_is_refused(self):
         with pytest.raises(ValidationError, match="agent_id"):
             StepDefinition(type="agent", name="result")
 
     def test_a_step_without_a_name_is_refused(self):
-        """The name is the key its result is filed under, so there is no default."""
         with pytest.raises(ValidationError):
             StepDefinition(type="shout", name="")
 
@@ -130,8 +114,6 @@ class TestTheSchemaHoldsTheAuthorToACoherentStep:
 
 
 class TestFieldsCompileToAModel:
-    """One builder for both directions, so an input is declared like an output."""
-
     def test_declared_fields_become_a_pydantic_model(self):
         model = model_from_fields(
             "Verdict",
@@ -193,7 +175,6 @@ class TestFieldsCompileToAModel:
 
         assert (parsed.author.name, parsed.author.id) == ("Ann", 3)
         with pytest.raises(ValidationError):
-            # The nested required field is checked with the rest, not three steps in.
             model.model_validate({"author": {"name": "Ann"}})
 
     def test_a_declared_schema_survives_a_dump_round_trip(self):
@@ -287,9 +268,8 @@ class TestFieldsCompileToAModel:
                 field = FieldDefinition(type="object", fields={"n": field})
 
     def test_an_unknown_type_is_refused_where_it_is_written(self):
-        """No `file` type: a host names its own key and shapes it as str or dict."""
         with pytest.raises(ValidationError, match="'str', 'int'"):
-            FieldDefinition(type="file")  # type: ignore[arg-type]
+            FieldDefinition(type="file")
 
     def test_a_definition_declaring_no_inputs_compiles_to_no_model(self):
         assert (
@@ -299,9 +279,6 @@ class TestFieldsCompileToAModel:
 
 
 class TestInputsAsJSONSchema:
-    """One artifact serves an editor, a form and a tool — compiled from the same
-    model the run itself validates against, so they cannot disagree."""
-
     def test_declared_fields_describe_their_shape(self):
         definition = WorkflowDefinition(
             name="digest",
@@ -325,7 +302,6 @@ class TestInputsAsJSONSchema:
         assert schema["properties"]["tags"]["items"] == {"type": "string"}
 
     def test_a_definition_declaring_nothing_is_open(self):
-        """The schema says "anything" rather than saying nothing."""
         definition = WorkflowDefinition(
             name="open", steps=[StepDefinition(name="d", agent_id="a1")]
         )
@@ -334,13 +310,6 @@ class TestInputsAsJSONSchema:
 
 
 class TestAuthoringWithAPydanticModel:
-    """`inputs=SomeBaseModel` writes the same fields with type annotations.
-
-    The model is authoring, not storage: it is normalized into `input_fields`
-    and never rides on the definition, so both ways of declaring have one wire
-    format.
-    """
-
     def test_a_model_normalizes_into_input_fields(self):
         class DigestInputs(BaseModel):
             thread: str
@@ -396,8 +365,6 @@ class TestAuthoringWithAPydanticModel:
         assert (parsed.thread, parsed.tone) == ("t1", "pirate")
 
     def test_a_model_with_validators_is_refused(self):
-        """A check the author wrote and the run silently skipped is the footgun."""
-
         class Validated(BaseModel):
             thread: str
 
@@ -433,8 +400,6 @@ class TestAuthoringWithAPydanticModel:
             )
 
     def test_an_annotated_field_is_refused(self):
-        """Constraints did not cross into the declared schema yet."""
-
         class Constrained(BaseModel):
             count: Annotated[int, Field(ge=1)]
 
@@ -468,7 +433,6 @@ class TestCompiling:
         assert step.on_error is OnError.CONTINUE
 
     def test_an_agent_step_compiles_to_a_configured_agent_step(self):
-        """No separate class for a definition's agent: one AgentStep serves both."""
         spec = WorkflowDefinition(
             steps=[
                 StepDefinition(
@@ -490,7 +454,6 @@ class TestCompiling:
         assert step.schema is not None
 
     def test_an_agent_step_without_history_sends_no_transcript(self):
-        """History is the author's choice, not something a type implies."""
         spec = WorkflowDefinition(steps=[StepDefinition(name="verdict", agent_id="a1")])
 
         (step,) = compile_steps(spec)
@@ -506,7 +469,6 @@ class TestCompiling:
 
     @override_settings(AI_SDK_WORKFLOWS={"STEPS": {"broken": "nowhere.NoSuchStep"}})
     def test_a_type_that_will_not_import_is_left_out_rather_than_raising(self):
-        """One bad path in settings must not stop the site booting."""
         assert set(get_step_registry()) == {"approval"}
 
     @override_settings(AI_SDK_WORKFLOWS={"LISTENERS": {}})
@@ -520,8 +482,6 @@ class TestCompiling:
 
 
 class TestAJsonAgentStepIsGatedToo:
-    """The same CHAT check as a code `AgentStep`, proved with a real permission class."""
-
     @staticmethod
     def _agent(*permissions):
         from unittest.mock import AsyncMock, MagicMock

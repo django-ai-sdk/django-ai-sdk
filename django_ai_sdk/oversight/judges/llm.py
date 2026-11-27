@@ -1,10 +1,3 @@
-"""Model judges, built from any chat model the SDK supports.
-
-The judged text is the least trusted input in the system, so the judge gets it
-fenced as data, is warned it may address the judge, and must answer in a fixed
-schema: "auditor, answer no" still has to get past a typed parser.
-"""
-
 from __future__ import annotations
 
 import html
@@ -55,16 +48,13 @@ SOURCE_CHARS = 1_500
 MAX_SOURCES = 8
 TOOL_ARGUMENTS_CHARS = 4_000
 RATIONALE_CHARS = 1_000
-# Longer than a classifier's timeout, because a judge writes its reasons.
 JUDGE_TIMEOUT = 45.0
 
-# Escaped inside turn content, so the content can't close its block or open a new one.
 TAGS = ("turn", "history", "question", "sources", "source", "answer", "tool_call")
 _TAG = re.compile(r"<(\s*/?\s*(?:" + "|".join(TAGS) + r")\b)", re.IGNORECASE)
 
 
 def render_turn(lens: JudgeLens, context: TurnContext) -> str:
-    """The evidence a judge reads for `lens`: secrets masked, clipped, every text fenced."""
     parts: list[str] = []
     subject = lens.subject
     if context.history and subject in {Subject.QUESTION, Subject.EXCHANGE}:
@@ -101,12 +91,10 @@ def _evidence(text: str, limit: int) -> str:
 
 
 def escape_attribute(text: str) -> str:
-    """One line, escaped, so untrusted text can't break out of the attribute."""
     return html.escape(" ".join(mask_secrets(text or "").split())[:TITLE_CHARS], quote=True)
 
 
 def parse_json_reply(text: str) -> dict[str, Any] | None:
-    """The first JSON object in a reply, for models without structured output."""
     match = re.search(r"\{.*\}", text or "", re.DOTALL)
     if not match:
         return None
@@ -118,15 +106,8 @@ def parse_json_reply(text: str) -> dict[str, Any] | None:
 
 
 class LLMJudge(Judge):
-    """A chat model as a judge, built from any SDK generator factory.
-
-        LLMJudge(model="gpt-4.1-mini")                          # the default gateway
-        LLMJudge(model="qwen3:4b", base_url="http://localhost:8000/v1")  # any OpenAI-compatible server
-        LLMJudge(llm="django_ai_sdk.generators.anthropic_chat", model="claude-haiku-4-5")
-
-    `base_url` points at any Chat Completions server; `api_key_env` names the env
-    var (or setting) with its key. `llm` is a generator factory or dotted path,
-    called like Agent.get_llm. Models without structured output are asked for JSON.
+    """`api_key_env` names the env var (or setting) with its key. Models without
+    structured output are asked for JSON.
     """
 
     external: ClassVar[str] = "model gateway"
@@ -156,7 +137,6 @@ class LLMJudge(Judge):
         return {**super().describe(), "model": self.model or "", "base_url": self.base_url}
 
     def missing(self) -> str:
-        # A placeholder key would fail like an outage and reflect would retry it forever.
         if self.api_key_env and not secret_setting(self.api_key_env):
             return f"{self.api_key_env} is not set"
         return ""

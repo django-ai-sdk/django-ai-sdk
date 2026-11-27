@@ -21,15 +21,10 @@ if TYPE_CHECKING:
 
 
 def get_step_registry() -> dict[str, type[Step]]:
-    """Step classes a definition may name, by key, from `AI_SDK_WORKFLOWS['STEPS']`.
-
-    The gate: unlisted types cannot be composed. The approval step is always present.
-    """
     return {**registered("STEPS", Step), APPROVAL_STEP: ApprovalStep}
 
 
 def _field_annotation(field: FieldDefinition, label: str) -> Any:
-    """One declared field as an annotation; `label` names nested models for errors."""
     if field.enum is not None:
         # Subscripting with a tuple is the only way to spell a dynamic Literal.
         return Literal[tuple(field.enum)]  # ty: ignore[invalid-type-form]
@@ -43,7 +38,6 @@ def _field_annotation(field: FieldDefinition, label: str) -> Any:
 
 
 def model_from_fields(name: str, fields: dict[str, FieldDefinition]) -> type[BaseModel]:
-    """Declared fields as a pydantic model, for both `input_fields` and `output_fields`."""
     built: dict[str, Any] = {}
     for field_name, field in fields.items():
         annotation = _field_annotation(field, f"{name}_{field_name}")
@@ -51,7 +45,6 @@ def model_from_fields(name: str, fields: dict[str, FieldDefinition]) -> type[Bas
             default = Field(description=field.description) if field.description else ...
             built[field_name] = (annotation, default)
         elif field.default is not None:
-            # A real default, so the field keeps its type rather than unioning None.
             built[field_name] = (
                 annotation,
                 Field(default=field.default, description=field.description),
@@ -65,17 +58,12 @@ def model_from_fields(name: str, fields: dict[str, FieldDefinition]) -> type[Bas
 
 
 def compile_inputs(workflow: WorkflowDefinition) -> type[BaseModel] | None:
-    """The model a run's inputs are validated against, or None if none are declared."""
     if not workflow.input_fields:
         return None
     return model_from_fields(f"Inputs_{workflow.name or 'workflow'}", workflow.input_fields)
 
 
 def inputs_json_schema(workflow: WorkflowDefinition) -> dict[str, Any]:
-    """The run's inputs as a JSON Schema, from the same model the run validates against.
-
-    No declared inputs means an open schema.
-    """
     model = compile_inputs(workflow)
     if model is None:
         return {"type": "object", "additionalProperties": True}
@@ -83,7 +71,6 @@ def inputs_json_schema(workflow: WorkflowDefinition) -> dict[str, Any]:
 
 
 def compile_steps(workflow: WorkflowDefinition) -> list[Step]:
-    """The definition's steps as Step objects, in the order it declares them."""
     registry = get_step_registry()
     listeners = get_listener_registry()
     return [_compile_step(declared, registry, listeners) for declared in workflow.steps]
@@ -94,7 +81,6 @@ def _compile_step(
     registry: dict[str, type[Step]],
     listener_registry: dict[str, type[RunListener]],
 ) -> Step:
-    """One declaration as a fresh Step instance, never a shared registry object."""
     if declared.type == AGENT_STEP:
         step: Step = _agent_step(declared)
     else:
@@ -106,7 +92,6 @@ def _compile_step(
             )
         step = step_class()
         step.config = MappingProxyType(dict(declared.config))
-    # The definition wins; Step class attributes are not fallback defaults.
     step.name = declared.name
     step.requires = tuple(declared.requires)
     step.on_error = OnError(declared.on_error)
@@ -115,12 +100,9 @@ def _compile_step(
 
 
 def _agent_step(declared: StepDefinition) -> AgentStep:
-    """An agent named by id, configured."""
     step = AgentStep()
     step.agent_id = declared.agent_id
-    # Named per step by the author; never inferred from a value's shape.
     step.history = tuple(declared.history)
-    # Compiled now, so a bad schema fails before the first model call.
     step.schema = (
         model_from_fields(f"Output_{declared.name}", declared.output_fields)
         if declared.output_fields
@@ -134,7 +116,6 @@ def compile_listeners(
     where: str,
     registry: dict[str, type[RunListener]] | None = None,
 ) -> list[RunListener]:
-    """Listener instances for the keys a definition names."""
     if registry is None:
         registry = get_listener_registry()
     listeners: list[RunListener] = []

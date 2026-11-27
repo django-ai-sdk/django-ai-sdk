@@ -1,5 +1,3 @@
-"""The authoring checks: its settings, and the floor every authored policy keeps."""
-
 from __future__ import annotations
 
 import pytest

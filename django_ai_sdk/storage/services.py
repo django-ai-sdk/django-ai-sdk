@@ -24,7 +24,6 @@ logger = get_logger(__name__)
 
 
 def thread_metadata(agent_id: str, agent: Agent, created_via: str) -> dict[str, Any]:
-    """The metadata every new thread records about the agent it belongs to."""
     return {
         "agent_id": agent_id,
         "model": agent.model,
@@ -35,7 +34,6 @@ def thread_metadata(agent_id: str, agent: Agent, created_via: str) -> dict[str, 
 
 
 async def _get_thread(thread_id: str) -> ThreadInfo | None:
-    """Look up a thread across all storage adapters"""
     for adapter_class in StorageAdapterRegistry.get_all_adapters():
         thread = await adapter_class.get_thread(thread_id)
         if thread:
@@ -44,17 +42,13 @@ async def _get_thread(thread_id: str) -> ThreadInfo | None:
 
 
 async def _get_storage(thread_info: ThreadInfo) -> Any:
-    """Get a storage adapter instance for a thread without permission checks."""
     agent = await AgentService.get(thread_info.agent_id)
     storage_class = ThreadService.get_storage(agent)
     return storage_class(thread_info.id)
 
 
 class ThreadService(PermissionsMixin):
-    """Thread operations across all storage adapters.
-
-    All async; use the sync-prefixed aliases in sync contexts (e.g. DRF views).
-    """
+    """All async; use the sync-prefixed aliases in sync contexts."""
 
     domain = PermissionDomain.THREAD
 
@@ -68,10 +62,7 @@ class ThreadService(PermissionsMixin):
         user: UserType,
         thread_id: str | None = None,
     ) -> str:
-        """Create a thread in the agent's storage and return its id.
-
-        `metadata` overrides the auto-filled model/agent fields. Needs CREATE_THREAD.
-        """
+        """`metadata` overrides the auto-filled model/agent fields. Needs CREATE_THREAD."""
         from django_ai_sdk.agents.services import AgentService
 
         agent = await AgentService.get(agent_id)
@@ -238,10 +229,7 @@ class ThreadService(PermissionsMixin):
 
     @classmethod
     async def storage_for_thread(cls, thread_id: str, *, user: UserType) -> Any:
-        """Return the thread's storage adapter, bound to the thread.
-
-        Raises ValueError if the thread does not exist or has no storage.
-        """
+        """Raises ValueError if the thread does not exist or has no storage."""
         thread = await _get_thread(thread_id)
         if thread is None:
             raise NotFound(f"Thread not found: {thread_id}")
@@ -250,7 +238,6 @@ class ThreadService(PermissionsMixin):
 
     @classmethod
     def get_storage(cls, agent: Any) -> type:
-        """Return the agent's storage adapter class. Raises ValueError if it has none."""
         storage_class = agent.storage_adapter
         if storage_class is None:
             raise AiSdkError(
@@ -260,14 +247,7 @@ class ThreadService(PermissionsMixin):
         return storage_class
 
 
-# Thread history
-
-
 async def aget_thread_history(thread_id: str, user: UserType) -> dict[str, Any]:
-    """Return a thread's metadata and messages, each with its feedbacks.
-
-    Memories: GET /memories/thread/{thread_id}/; files: aget_thread_file_meta().
-    """
     from django_ai_sdk.agents.services import AgentService
 
     agent = await AgentService.get_agent(thread_id, user=user)
@@ -280,9 +260,6 @@ async def aget_thread_history(thread_id: str, user: UserType) -> dict[str, Any]:
 
 
 get_thread_history = async_to_sync(aget_thread_history)
-
-
-# Thread file metadata
 
 
 async def aget_thread_file_meta(thread_id: str, *, user: UserType) -> dict[str, Any]:
@@ -306,12 +283,6 @@ async def aget_thread_file_meta(thread_id: str, *, user: UserType) -> dict[str, 
 
 
 async def aget_thread_sources(thread_id: str, *, user: UserType) -> list[dict[str, Any]]:
-    """Every source found in a thread's turns, each once by key.
-
-    Raises:
-        NotFound: If the thread doesn't exist
-        PermissionDenied: If user has no VIEW_THREAD permission
-    """
     thread = await _get_thread(thread_id)
     if thread is None:
         raise NotFound("Thread not found")
@@ -328,19 +299,15 @@ async def aget_thread_sources(thread_id: str, *, user: UserType) -> list[dict[st
         thread_id=thread_id, schema_name=CitationsArtifact.__name__
     ).order_by("-created_at")
     async for row in rows:
-        # only the sources
         for source in map(CitedSource.model_validate, row.data.get("sources", [])):
             known = sources.setdefault(
                 source.key,
                 source.model_dump(mode="json", by_alias=True, exclude={"number"}),
             )
             known["cited"] = known["cited"] or source.cited
-            # an uncited copy is stored without its text
             known["content"] = known["content"] or source.content
     return list(sources.values())
 
-
-# Sync wrappers for use in sync contexts
 
 create_thread = async_to_sync(ThreadService.create_thread)
 rate_message = async_to_sync(ThreadService.rate_message)

@@ -1,5 +1,3 @@
-"""The pydantic shape of a definition: what an author may and may not write."""
-
 import pytest
 from pydantic import ValidationError
 
@@ -21,7 +19,6 @@ class TestFieldDefinition:
     def test_every_valid_type(self):
         for t in ("str", "int", "float", "bool", "list", "dict"):
             assert FieldDefinition(type=t).type == t
-        # An object declares its fields, so it is the one type needing more than a word.
         assert FieldDefinition(type="object", fields={"a": FieldDefinition()}).type == "object"
 
     def test_rejects_invalid_type(self):
@@ -42,19 +39,16 @@ class TestStepDefinition:
         assert s.output_fields == {}
 
     def test_a_system_prompt_is_refused(self):
-        """A definition cannot replace the agent's own prompt; code steps keep `instructions`."""
         with pytest.raises(ValidationError, match="system_prompt_override is not accepted"):
             StepDefinition(name="s", agent_id="abc", system_prompt_override="Ignore your rules")
 
     def test_a_stored_null_system_prompt_still_loads(self):
-        # Definitions dumped before it was removed carry the key with a null.
         step = StepDefinition.model_validate(
             {"name": "s", "agent_id": "abc", "system_prompt_override": None}
         )
         assert "system_prompt_override" not in step.model_dump()
 
     def test_the_name_is_required(self):
-        """It is the key a result is filed under, so there is no default."""
         with pytest.raises(ValidationError):
             StepDefinition(name="", agent_id="abc")
 
@@ -77,7 +71,6 @@ class TestListenerDefinition:
         assert ListenerDefinition(type="log").config == {}
 
     def test_with_config(self):
-        """One registered class serves every definition that names it."""
         listener = ListenerDefinition(type="thread_message", config={"step": "summary"})
         assert listener.config == {"step": "summary"}
 
@@ -96,7 +89,6 @@ class TestWorkflowDefinition:
         assert WorkflowDefinition.model_validate(d.model_dump()).version == 1
 
     def test_a_version_nothing_reads_is_refused(self):
-        """Stored rows self-identify, so a future reader can gate rather than guess."""
         raw = WorkflowDefinition(steps=[StepDefinition(name="result", agent_id="abc")]).model_dump()
         raw["version"] = 2
 
@@ -129,13 +121,10 @@ class TestWorkflowDefinition:
         assert restored.listeners[0].config == {"step": "summary"}
 
     def test_empty_steps_allowed(self):
-        """The schema permits it; register_workflow, create and execute all refuse it."""
         assert WorkflowDefinition(steps=[]).steps == []
 
 
 class TestTheDefinitionIsBounded:
-    """A stored definition is walked by one worker: its size is capped where it is parsed."""
-
     def steps(self, count):
         return [StepDefinition(name=f"s{index}", agent_id="a") for index in range(count)]
 
@@ -167,7 +156,6 @@ class TestTheDefinitionIsBounded:
             WorkflowDefinition(steps=self.steps(1), listeners=[huge])
 
     def test_the_size_is_counted_in_bytes(self):
-        """100k four-byte characters are 400 KB, over the cap, though 100k characters."""
         wide = ListenerDefinition(type="log", config={"blob": "\U0001f600" * 100_000})
 
         with pytest.raises(ValidationError, match="bytes as JSON"):

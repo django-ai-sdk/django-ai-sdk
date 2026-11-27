@@ -1,11 +1,3 @@
-"""Per-integration configuration, read from AI_SDK_INTEGRATIONS.
-
-The load-bearing property is that reading config NEVER raises. It runs from
-IntegrationAppConfig.ready(), so an exception is a failed boot rather than one degraded
-integration -- the exact outcome build_mcp_config_safe() and `needs_setup` exist to
-prevent.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -28,8 +20,6 @@ class TestGetIntegrationConfig:
         assert get_integration_config("github") == {"TOKEN": "ghp_secret"}
 
     def test_upper_cases_keys_so_either_style_resolves(self, settings):
-        """The dict should read like the rest of settings.py, but a lower-case key is
-        the obvious mistake and costs nothing to accept."""
         settings.AI_SDK_INTEGRATIONS = {"linear": {"token": "lin", "Tools": ["x"]}}
 
         assert get_integration_config("linear") == {"TOKEN": "lin", "TOOLS": ["x"]}
@@ -46,7 +36,6 @@ class TestGetIntegrationConfig:
 
     @pytest.mark.parametrize("bad", [["github"], "github", 7])
     def test_a_malformed_setting_degrades_instead_of_raising(self, settings, caplog, bad):
-        """A wrong type here would otherwise raise from inside ready() and fail boot."""
         settings.AI_SDK_INTEGRATIONS = bad
 
         assert get_integration_config("github") == {}
@@ -73,9 +62,6 @@ class TestConfiguredNames:
 
 
 class TestIntegrationSecret:
-    """``secret()`` is public and documented: it is what a third-party APIIntegration
-    calls in __init__ to read its own token."""
-
     def test_reads_the_configured_value(self, settings):
         settings.AI_SDK_INTEGRATIONS = {"github": {"TOKEN": "ghp_secret"}}
 
@@ -94,8 +80,6 @@ class TestIntegrationSecret:
         assert ExampleIntegration().secret("token", default="fallback") == "fallback"
 
     def test_a_non_string_value_is_refused_not_stringified(self, settings, caplog):
-        """Stringifying would turn a list into "['a']" and hand that to a remote server
-        as a credential."""
         settings.AI_SDK_INTEGRATIONS = {"github": {"TOKEN": ["ghp_a", "ghp_b"]}}
 
         assert ExampleIntegration().secret("token") == ""
@@ -109,9 +93,6 @@ class TestIntegrationSecret:
         assert "ghp_supersecret" not in caplog.text
 
     def test_ignores_the_environment(self, settings, monkeypatch):
-        """There is deliberately no env-var convention: a derived name appears nowhere
-        in the code that reads it, and GitHub Actions injects its own GITHUB_TOKEN into
-        every workflow step. settings.py names the variable outright."""
         settings.AI_SDK_INTEGRATIONS = {}
         monkeypatch.setenv("AI_SDK_GITHUB_TOKEN", "not-used")
         monkeypatch.setenv("GITHUB_TOKEN", "ci-runner-token")

@@ -1,9 +1,3 @@
-"""Response schemas of the contrib Ninja endpoints.
-
-Request payloads live in ``django_ai_sdk.views.schemas``. Import from here to keep a
-replaced endpoint's response shape.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -17,8 +11,6 @@ from django_ai_sdk.memories.schemas import MemoryOut
 from django_ai_sdk.permissions import ObjectPermissions
 from django_ai_sdk.storage.schemas import ThreadInfo
 from django_ai_sdk.tracing.schemas import TraceOut
-
-# Threads
 
 
 class Success(Schema):
@@ -93,15 +85,11 @@ class MessageResponse(Schema):
 class RunResponse(Schema):
     result: str | None = None
     thread_id: str
-    # True when oversight stopped the run. `result` then holds the policy's message.
     blocked: bool = False
 
 
 class ThreadTracesResponse(Schema):
     traces: list[TraceOut]
-
-
-# Agents
 
 
 class AgentItem(Schema):
@@ -198,9 +186,6 @@ class AgentGroupOut(Schema):
     created_at: str
 
 
-# Memories
-
-
 class MemoryOutResponse(MemoryOut):
     permissions: ObjectPermissions = ObjectPermissions()
 
@@ -225,9 +210,6 @@ class UploadSettingsOut(Schema):
     allowed_mime_types: list[str]
 
 
-# Workflows
-
-
 class WorkflowRunResponse(Schema):
     run_id: str
     status: str
@@ -241,15 +223,11 @@ class WorkflowListenerItem(Schema):
 class StepRunOut(Schema):
     id: str
     sequence: int
-    # The step's name is its key: its output is filed under it.
     step_name: str
-    # Any JSON value the step returned.
     output: Any = None
     status: str
     error: str
-    # Why the step was skipped, the start of its failure text, or what it waits for.
     detail: str = ""
-    # The oversight turn the step's model call opened, if any.
     turn_id: str = ""
     started_at: str | None = None
     completed_at: str | None = None
@@ -258,12 +236,9 @@ class StepRunOut(Schema):
 class WorkflowRunOut(Schema):
     id: str
     workflow_id: str | None = None
-    # The stored workflow's slug, the registered workflow's name, or "adhoc".
     workflow_key: str
     status: str
-    # Number of times a worker has claimed the run.
     attempt: int
-    # What started it: "manual", "cron:<trigger>" or "event:<trigger>".
     trigger: str = "manual"
     outputs: dict | None = None
     error: str
@@ -286,19 +261,15 @@ class WorkflowTriggerPauseIn(Schema):
 
 
 class WorkflowTriggerItem(Schema):
-    # The workflow's key, and its id when it is stored.
     workflow: str
     workflow_id: str | None = None
     name: str
-    # "cron" or "event".
     kind: str
     cron: str = ""
     timezone: str = ""
     event: str = ""
     run_as: str = ""
-    # Off in the definition: it starts nothing.
     enabled: bool
-    # An operator paused its schedule.
     paused: bool = False
     next_run_at: str | None = None
     last_fired_at: str | None = None
@@ -308,13 +279,9 @@ class WorkflowTriggerItem(Schema):
 class WorkflowItem(Schema):
     id: str
     name: str
-    # Run key, as in POST /workflows/{slug}/run/.
     slug: str
     definition: dict
     active: bool
-
-
-# Integrations
 
 
 class DetailOut(Schema):

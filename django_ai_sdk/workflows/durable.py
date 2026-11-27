@@ -1,9 +1,3 @@
-"""A workflow run as a DBOS workflow: each walk unit is a checkpointed step.
-
-A recovered run replays finished units instead of redoing them; approvals wait with
-`DBOS.recv`. Workflow id is the run id, or "<run id>:<attempt>" on resume.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -28,12 +22,10 @@ QUEUE = "workflows"
 
 
 def workflow_id(run_id: str, attempt: int) -> str:
-    """The DBOS workflow id for the next attempt at a run that has had `attempt` claims."""
     return run_id if attempt == 0 else f"{run_id}:{attempt + 1}"
 
 
 def enqueue(run_id: str) -> str:
-    """Queue the run's next attempt on DBOS. Returns the workflow id, also stored as task_id."""
     attempt = WorkflowRun.objects.filter(pk=run_id).values_list("attempt", flat=True).first()
     queued = workflow_id(run_id, attempt or 0)
     runtime.client().enqueue(
@@ -70,7 +62,6 @@ def runs_under_other_versions() -> dict[str, str]:
 
 @DBOS.workflow(name=RUN_WORKFLOW)
 async def run_workflow(run_id: str) -> str:
-    """Claim the run, walk its steps, close it. Returns how it ended."""
     from django_ai_sdk.workflows.runs import execute_run
 
     try:
@@ -78,7 +69,6 @@ async def run_workflow(run_id: str) -> str:
             run_id, perform=perform, wait=DBOS.recv_async, workflow_id=DBOS.workflow_id
         )
     except (WorkflowStopped, RunSuperseded) as exc:
-        # An outcome the rows already record, not a failure of the workflow.
         logger.info("Workflow run %s ended: %s", run_id, exc)
         return "stopped"
     return "not pending" if run is None else "done"
@@ -86,7 +76,6 @@ async def run_workflow(run_id: str) -> str:
 
 @DBOS.workflow(name=FIRE_CRON)
 async def fire_cron(scheduled_at: str, context: dict[str, Any]) -> str | None:
-    """What a cron schedule runs (`workflows.triggers`): open the occurrence's run, once."""
     from django_ai_sdk.workflows.conf import setting
     from django_ai_sdk.workflows.triggers import start_cron
 
@@ -99,8 +88,6 @@ async def fire_cron(scheduled_at: str, context: dict[str, Any]) -> str | None:
 
 
 async def perform(label: str, unit: Callable[[], Awaitable[Any]]) -> Any:
-    """Run `unit` as a DBOS step; JSON round-trip on first run too, so replays match."""
-
     async def checkpointed() -> Any:
         async with runtime.fresh_connections():
             return _dump(await unit())

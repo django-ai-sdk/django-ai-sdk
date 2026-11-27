@@ -1,11 +1,3 @@
-"""DJA-98: a document saved in another process (a task worker) reaches the chat's index.
-
-The worker never serves a chat, so it has no cached RAG. It writes to the memory's
-index itself when that index lives on a server, which every process shares. Only the
-provider's choice is tested here: the RAG is a small fake with a real storage config,
-so no Qdrant server or embedding model is needed.
-"""
-
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -59,8 +51,8 @@ class TestSharedIndex:
         assert await provider.add_documents(FakeAgent(rag), "m1", [DOC])
 
         assert rag.added == [DOC]
-        assert rag.warmups == 1  # opens the existing collection, nothing rebuilt
-        assert provider._cache == {}  # the worker keeps no warm index
+        assert rag.warmups == 1
+        assert provider._cache == {}
 
     async def test_worker_removes_from_the_server_index(self):
         provider, rag = RAGProvider(), FakeRag(SERVER)
@@ -70,7 +62,6 @@ class TestSharedIndex:
         assert rag.removed == ["e1"]
 
     async def test_a_per_process_index_is_left_alone(self):
-        # A local folder or in-memory index belongs to the process that built it.
         provider, rag = RAGProvider(), FakeRag(LOCAL)
 
         assert not await provider.add_documents(FakeAgent(rag), "m1", [DOC])
@@ -89,11 +80,10 @@ class TestSharedIndex:
         assert agent.builds == 0
 
     async def test_a_memory_without_documents_gets_its_index_later(self):
-        # The first chat message came before its first document was processed.
         provider, agent = RAGProvider(), FakeAgent(None)
 
         assert await provider.get_rag_instance(agent, "m1") is None
-        assert provider._cache == {}  # not remembered as "no index"
+        assert provider._cache == {}
 
         agent.rag = FakeRag(SERVER)
         assert await provider.get_rag_instance(agent, "m1") is agent.rag

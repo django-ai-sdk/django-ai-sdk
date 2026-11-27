@@ -1,5 +1,3 @@
-"""OversightService: the turns feed and one turn, review queues and counts."""
-
 from __future__ import annotations
 
 from datetime import timedelta
@@ -117,7 +115,6 @@ class TestTurns:
 
     async def test_pages_follow_a_cursor_without_a_count(self):
         made = [await a_turn(f"question {n}", "ok") for n in range(5)]
-        # Two turns at the same instant still page apart, by id.
         same = timezone.now() - timedelta(hours=1)
         await Turn.objects.filter(id__in=made[:2]).aupdate(created_at=same)
         user = await reader(METRICS)
@@ -175,7 +172,7 @@ class TestTurns:
     async def test_the_feed_reads_a_fixed_number_of_queries(self):
         user = await reader(METRICS, CONTENT)
         await a_turn()
-        await OversightService.list_turns(user=user)  # the permission cache warms up
+        await OversightService.list_turns(user=user)
 
         def counted() -> int:
             # In the thread the ORM calls run in, so the context sees their connection.
@@ -194,8 +191,6 @@ class TestTurns:
 
 
 def queries_of(call) -> int:
-    """How many queries `call()` (a service call's coroutine) makes."""
-
     async def run() -> None:
         await call()
 
@@ -206,12 +201,10 @@ def queries_of(call) -> int:
 
 @pytest.mark.django_db(transaction=True)
 class TestQueryCounts:
-    """However many answers, matches, reviews or items: the same number of queries."""
-
     async def test_one_turn_reads_a_fixed_number_of_queries(self):
         user = await reader(METRICS, CONTENT)
         turn_id = await a_turn()
-        await OversightService.get_turn(turn_id, user=user)  # the permission cache warms up
+        await OversightService.get_turn(turn_id, user=user)
         few = await sync_to_async(queries_of)(lambda: OversightService.get_turn(turn_id, user=user))
         turn = await Turn.objects.aget(id=turn_id)
         for n in range(4):
@@ -276,7 +269,6 @@ class TestReviews:
                 await call
         await item.arefresh_from_db()
         assert item.status == ReviewItem.Status.OPEN
-        # Nor a turn a subagent ran for it, however deep: core copies the outer actor down.
         actor = (await Turn.objects.aget(id=turn_id)).actor_id
         parent = turn_id
         for _ in range(2):
@@ -288,7 +280,6 @@ class TestReviews:
             await OversightService.resolve_review(
                 str(grandchild_item.id), ResolveIn(dismiss=True), user=asker
             )
-        # Someone else may.
         other = await reader(REVIEW)
         done = await OversightService.resolve_review(
             str(item.id), ResolveIn(dismiss=True), user=other
@@ -376,8 +367,6 @@ def test_visible_content_shows_the_turn_as_kept_and_nothing_beside_it():
 
 
 class NoMetricTurns(OversightDefaultPermission):
-    """Reviews every item, but reaches no turn's metrics."""
-
     def scope_turns(self, user, operation, queryset):
         return queryset.none() if operation == Operation.VIEW_OVERSIGHT_METRICS else queryset
 
@@ -386,8 +375,6 @@ class NoMetricTurns(OversightDefaultPermission):
 
 
 class NoReviewItems(OversightDefaultPermission):
-    """Reaches every turn, but no review item."""
-
     def scope_reviews(self, user, operation, queryset):
         return queryset.none()
 
@@ -435,7 +422,6 @@ async def test_the_admin_asks_the_oversight_permission_domain(settings):
     request.user = await reader(METRICS)
     turns = admin.TurnAdmin(Turn, AdminSite())
     assert await sync_to_async(turns.has_view_permission)(request)
-    # Django's view permission is not enough when the domain says no.
     settings.AI_SDK_PERMISSIONS = {"oversight": ["django_ai_sdk.permissions.IsAdminUser"]}
     get_domain_permissions.cache_clear()
     assert not await sync_to_async(turns.has_view_permission)(request)

@@ -1,11 +1,3 @@
-"""Every SDK viewset on a DefaultRouter, plus the streaming chat view.
-
-    path("api/", include("django_ai_sdk.contrib.drf.urls"))
-
-Want to change one resource? Register your subclass on your own router instead and
-leave this module out; each viewset is importable from ``django_ai_sdk.contrib.drf``.
-"""
-
 from __future__ import annotations
 
 from django.apps import apps

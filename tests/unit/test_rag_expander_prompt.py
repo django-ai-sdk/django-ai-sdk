@@ -1,5 +1,3 @@
-"""The default expander prompt must produce a reply Haystack's QueryExpander can parse."""
-
 from __future__ import annotations
 
 import json
@@ -10,8 +8,6 @@ from haystack.dataclasses import ChatMessage
 
 
 class _EchoingGenerator:
-    """Answers the way the prompt asks: JSON when the prompt asks for JSON, else lines."""
-
     def __init__(self) -> None:
         self.prompt = ""
 
@@ -52,7 +48,6 @@ def test_the_expander_is_told_what_the_documents_are_about() -> None:
     expander.run("SABRE")
 
     about = generator.prompt.split("about:", 1)[1].split("\n", 1)[0]
-    # Most common keywords first, then the files; braces don't reach Jinja.
     assert about.strip().startswith("Consultant, Travel")
     assert "(( reservations ))" in about and "32637306.pdf" in about
     assert "Original query: SABRE" in generator.prompt

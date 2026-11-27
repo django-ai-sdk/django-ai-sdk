@@ -1,5 +1,3 @@
-"""The review layer is opt-in: with its modules gone, core still guards turns and queues reviews."""
-
 from __future__ import annotations
 
 from tests.removable import run_without
@@ -12,7 +10,6 @@ REVIEW = (
     "django_ai_sdk.contrib.ninja.oversight",
 )
 
-# The review layer is modules inside the oversight app, not an app: hide them from imports.
 HIDE_REVIEW = f"""
 import importlib.abc
 import sys
@@ -54,5 +51,4 @@ assert not [m for m in sys.modules if m.startswith(REVIEW)], sorted(sys.modules)
 
 
 def test_core_runs_without_the_review_layer(tmp_path):
-    # The authoring app sits on the review layer: it goes with it.
     run_without(tmp_path, ["django_ai_sdk.oversight.authoring"], SCRIPT, before_setup=HIDE_REVIEW)

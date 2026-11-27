@@ -1,5 +1,3 @@
-"""Workflow runs, approvals, triggers and tasks on DBOS, launched in this process."""
-
 from __future__ import annotations
 
 import asyncio
@@ -57,7 +55,6 @@ def registry(settings):
 
 
 async def workflow_finished(workflow_id: str, seconds: float = 10) -> None:
-    """Wait until DBOS no longer runs `workflow_id` in this process."""
     from dbos._dbos import _get_dbos_instance
 
     active = _get_dbos_instance()._active_workflows_set
@@ -100,7 +97,6 @@ class TestRuns:
         run = await settled((await queue_run(definition(echo("a")))).pk)
         # The same workflow id: DBOS returns the finished one.
         await runtime.enqueue(RUN_WORKFLOW, str(run.pk), workflow_id=run.task_id, queue=QUEUE)
-        # A next attempt: it finds the run not pending and claims nothing.
         stray = await sync_to_async(enqueue)(str(run.pk))
         handle = await runtime.client().retrieve_workflow_async(stray)
 
@@ -116,7 +112,6 @@ class TestRuns:
             assert time.monotonic() < deadline, "the hold step never started"
             await asyncio.sleep(0.05)
 
-        # The worker dies mid-step; the next one recovers the run from its checkpoints.
         await sync_to_async(runtime.destroy)()
         steps.release.set()
         await sync_to_async(runtime.launch)()
@@ -124,18 +119,15 @@ class TestRuns:
 
         assert run.status == "completed"
         assert steps.calls == {"a": 1, "h": 2}
-        # Run twice, under one key: an effect keyed on it happens once.
         assert steps.keys == [f"{run.pk}:h", f"{run.pk}:h"]
 
     async def test_a_run_that_never_reached_dbos_is_queued_when_the_worker_starts(self, dbos):
         from django_ai_sdk.workflows.runs import open_run, requeue_pending
 
-        # Committed, but its web process died before it queued the run.
         run = await open_run(definition(echo("a")))
 
         assert await sync_to_async(requeue_pending)() == 1
         assert (await settled(run.pk)).status == "completed"
-        # Queued again, it runs nothing twice: the workflow id is the same.
         await sync_to_async(requeue_pending)()
         assert steps.calls == {"a": 1}
 
@@ -146,7 +138,6 @@ class TestRuns:
         from django_ai_sdk.workflows.runs import open_run
 
         run = await open_run(definition(echo("a")))
-        # Its workflow claimed it, and the worker died before DBOS recorded the claim.
         await WorkflowRun.objects.filter(pk=run.pk).aupdate(
             status="running", attempt=1, task_id=str(run.pk), heartbeat_at=timezone.now()
         )
@@ -185,7 +176,6 @@ class TestRuns:
         owner = await user("owner@example.com")
         waiting = await queue_run(definition(echo("a"), gate()), user=owner)
         await settled(waiting.pk, step_waiting="gate")
-        # Waiting for days for its approval: DBOS still runs it.
         await WorkflowRun.objects.filter(pk=waiting.pk).aupdate(heartbeat_at=long_ago)
 
         assert await sync_to_async(fail_stale_runs)() == 1
@@ -230,7 +220,6 @@ class TestRuns:
         assert run.status == "cancelled"
         assert (await StepRun.objects.aget(run=run, step_name="gate")).status == "skipped"
 
-        # The cancelled run stops waiting at once, so it holds no worker slot.
         await workflow_finished(run.task_id)
 
         run = await WorkflowService.resume(str(run.pk), user=owner)
@@ -274,7 +263,6 @@ async def test_a_step_its_own_attempt_recorded_before_dying_is_not_run_again(set
     steps.calls.clear()
     run = await open_run(definition(echo("a"), echo("b", requires=["a"])))
     run = await claim_run(str(run.pk))
-    # This attempt ran "a" and recorded it; its worker died before DBOS checkpointed it.
     await StepRun.objects.acreate(
         run=run, sequence=0, step_name="a", status="completed", output="a:", completed_at=timezone.now()
     )
@@ -337,7 +325,6 @@ class TestApproval:
         assert rows["b"].status == "skipped"
 
     async def test_a_decision_taken_as_the_wait_runs_out_is_kept(self, dbos, monkeypatch):
-        # Long enough to decide in on a slow runner; the send below waits for it to run out.
         monkeypatch.setattr(steps.QuickApprovalStep, "wait_seconds", lambda self: 5.0)
         owner = await user("owner@example.com")
         approver = await user("approver@example.com", is_superuser=True)
@@ -356,7 +343,6 @@ class TestApproval:
                 expired.set()
 
         async def late(*args, **kwargs):
-            # Sent only once the step's wait has run out with the decision taken.
             assert await asyncio.to_thread(expired.wait, 30)
             await send(*args, **kwargs)
 
@@ -511,7 +497,6 @@ class TestTriggers:
         context = {"key": "hourly-echo", "trigger": "hourly"}
         assert await fire_cron("2026-11-14T10:05:00.000Z", context) is None
         assert await WorkflowRun.objects.acount() == 0
-        # The switch leaves the schedules alone, so turning it back on needs nothing.
         [schedule] = await runtime.client().list_schedules_async()
         assert schedule["status"] == "ACTIVE"
 
@@ -568,7 +553,6 @@ class TestTriggers:
         assert (managed["run_as"], viewed["run_as"]) == ("bot@example.com", "")
 
     async def test_only_its_author_fires_a_stored_workflows_trigger(self, dbos):
-        # Its run acts as the author: another manager firing it would borrow them.
         from django_ai_sdk.workflows.triggers import sync_schedules
 
         author = await user("author@example.com", is_superuser=True)

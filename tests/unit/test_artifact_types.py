@@ -1,5 +1,3 @@
-"""Tests for built-in ArtifactSchema subclasses matching tool-ui component schemas."""
-
 from __future__ import annotations
 
 

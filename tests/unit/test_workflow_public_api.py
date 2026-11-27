@@ -1,5 +1,3 @@
-"""The workflows package imports without the app registry (tests/test_public_api.py: exports)."""
-
 from __future__ import annotations
 
 import subprocess

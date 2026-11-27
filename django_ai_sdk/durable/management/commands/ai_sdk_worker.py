@@ -1,5 +1,3 @@
-"""Run the DBOS worker: recover unfinished runs, dequeue workflows and tasks, fire triggers."""
-
 from __future__ import annotations
 
 import logging
@@ -16,11 +14,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# How often a standby worker checks whether the running one has stopped.
 STANDBY_SECONDS = 2.0
-# How often the running worker checks it still holds the lock.
 LOCK_CHECK_SECONDS = 5.0
-# How often the running worker looks for stale runs (`runs.fail_stale_runs`).
 UPKEEP_SECONDS = 60.0
 
 
@@ -31,7 +26,6 @@ class Command(BaseCommand):
         "runs at a time; another one started meanwhile waits as a standby."
     )
 
-    # The connection holding the worker lock, on Postgres.
     lock_connection: BaseDatabaseWrapper | None = None
 
     def handle(self, *args: Any, **options: Any) -> None:
@@ -68,13 +62,11 @@ class Command(BaseCommand):
                     self.upkeep()
                     last_upkeep = time.monotonic()
         finally:
-            # Let the step in flight finish; DBOS recovers what is left on the next start.
             runtime.destroy()
             if self.lock_connection is not None:
                 self.lock_connection.close()
 
     def warn_other_versions(self) -> None:
-        """Warn about unfinished runs this worker's VERSION leaves alone."""
         from django_ai_sdk.durable.conf import setting
         from django_ai_sdk.workflows.durable import runs_under_other_versions
 
@@ -89,7 +81,6 @@ class Command(BaseCommand):
             self.stderr.write(message)
 
     def upkeep(self) -> None:
-        """Fail the runs whose DBOS workflow no longer runs (`runs.fail_stale_runs`)."""
         from django_ai_sdk.workflows.runs import fail_stale_runs
 
         close_old_connections()
@@ -100,11 +91,7 @@ class Command(BaseCommand):
             logger.exception("Could not check for stale workflow runs")
 
     def take_worker_lock(self, stop: threading.Event) -> bool:
-        """Wait until this is the only worker. False when stopped while waiting.
-
-        DBOS recovers every unfinished run at launch, so two workers would both run them.
-        A session advisory lock lets a deploy start the new worker first; SQLite: by hand.
-        """
+        """DBOS recovers every unfinished run at launch, so two workers would both run them."""
         from django_ai_sdk.durable.conf import setting
 
         if connections[DEFAULT_DB_ALIAS].vendor != "postgresql":
@@ -126,12 +113,10 @@ class Command(BaseCommand):
         return False
 
     def holds_worker_lock(self) -> bool:
-        """Whether the lock's session is still alive and holds it. True without a lock."""
         if self.lock_connection is None:
             return True
         try:
             with self.lock_connection.cursor() as cursor:
-                # The session takes no other advisory lock, and a new session holds none.
                 cursor.execute(
                     "SELECT count(*) FROM pg_locks "
                     "WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()"

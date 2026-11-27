@@ -1,5 +1,3 @@
-"""Django admin registration for the email-only custom user."""
-
 from __future__ import annotations
 
 from django.contrib import admin
@@ -11,12 +9,6 @@ from .models import User
 
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin[User]):
-    """Admin form configured for email-based authentication.
-
-    The default ``UserAdmin`` builds its add form around ``username``, which the
-    custom model drops; this swaps the keying field to ``email``.
-    """
-
     ordering = ("email",)
     list_display = ("email", "first_name", "last_name", "is_staff")
     search_fields = ("email", "first_name", "last_name")
@@ -43,7 +35,6 @@ class UserAdmin(DjangoUserAdmin[User]):
             None,
             {
                 "classes": ("wide",),
-                # username=None means no username field; email becomes the key.
                 "fields": ("email", "password1", "password2"),
             },
         ),

@@ -1,9 +1,3 @@
-"""Minimal Django settings for the SDK test suite.
-
-Only what the tests need. Demo projects live in demos/ and carry their own settings;
-nothing here should import from them.
-"""
-
 import os
 from urllib.parse import unquote, urlsplit
 
@@ -38,9 +32,6 @@ DATABASES = {
     }
 }
 
-# Opt-in PostgreSQL, for what SQLite cannot show (row locks, racing connections):
-#   DATABASE_URL=postgres://postgres:pg@127.0.0.1:5432/postgres \
-#       uv run --with "psycopg[binary]" pytest tests
 if DATABASE_URL := os.environ.get("DATABASE_URL"):
     _url = urlsplit(DATABASE_URL)
     if _url.scheme not in {"postgres", "postgresql"}:

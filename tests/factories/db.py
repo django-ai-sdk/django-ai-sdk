@@ -1,7 +1,3 @@
-"""
-Django model factories for database-backed tests.
-"""
-
 from asgiref.sync import sync_to_async
 
 import factory
@@ -13,8 +9,6 @@ from django_ai_sdk.memories.models import Memory, MemoryUser
 
 
 class AsyncFactoryMixin:
-    """Mixin adding async create support to factory_boy DjangoModelFactory."""
-
     @classmethod
     async def acreate(cls, **kwargs):
         return await sync_to_async(cls.create)(**kwargs)
@@ -33,7 +27,6 @@ class UserFactory(AsyncFactoryMixin, DjangoModelFactory):
 
 
 def grant(user, *perms):
-    """Give `user` Django model permissions, each spelled "app_label.codename"."""
     from django.contrib.auth.models import Permission
 
     for perm in perms:

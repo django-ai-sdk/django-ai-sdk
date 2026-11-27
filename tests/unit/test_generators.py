@@ -29,14 +29,10 @@ from pydantic import BaseModel
 
 
 class Answer(BaseModel):
-    """Schema used for the structured-output assertions."""
-
     text: str
 
 
 class TestOpenAIFactories:
-    """The two OpenAI factories and their settings wiring."""
-
     @override_settings(OPENAI_API_KEY=None, OPENAI_API_URL=None)
     def test_builds_without_settings(self):
         # Credentials are omitted when unset, so Haystack's own env-var default
@@ -63,7 +59,6 @@ class TestOpenAIFactories:
 
     @override_settings(OPENAI_API_KEY="sk-test")
     def test_no_reasoning_by_default(self):
-        # Reasoning is opt-in: an agent or caller passes it explicitly.
         assert openai_responses_chat().generation_kwargs == {}
 
     @override_settings(OPENAI_API_KEY="sk-test")
@@ -80,8 +75,6 @@ def _deployment_of(generator):
 
 
 class TestAzureFactories:
-    """Azure calls the model a deployment."""
-
     @override_settings(
         AZURE_OPENAI_API_KEY="az-test",
         AZURE_OPENAI_ENDPOINT="https://example.openai.azure.com",
@@ -102,8 +95,6 @@ class TestAzureFactories:
 
 
 class TestOptionalVendors:
-    """Vendors that ship in their own pip package."""
-
     @pytest.mark.parametrize(
         ("factory", "class_name", "settings_overrides"),
         [
@@ -134,8 +125,6 @@ class TestOptionalVendors:
         HUGGINGFACE_API_URL="https://endpoint.test",
     )
     def test_huggingface_uses_the_endpoint_url(self):
-        # Serverless inference validates the model against the Hub over the
-        # network at construction; a dedicated endpoint URL does not.
         generator = huggingface_api_chat()
 
         assert type(generator).__name__ == "HuggingFaceAPIChatGenerator"
@@ -151,7 +140,6 @@ class TestOptionalVendors:
         assert "think" not in (generator.generation_kwargs or {})
 
     def test_importing_one_vendor_does_not_import_the_others(self):
-        # Each vendor ships in its own package.
         for module in [m for m in sys.modules if m.startswith("django_ai_sdk.generators.")]:
             del sys.modules[module]
 
@@ -162,15 +150,8 @@ class TestOptionalVendors:
 
 
 class TestStructuredOutput:
-    """`Run` must send the kwarg the generator's API actually accepts.
-
-    Sending the other one raises TypeError from the OpenAI client before any
-    request is made, so this is not a recoverable mistake.
-    """
-
     @staticmethod
     def _capture(generator):
-        """Replace .run_async() with a recorder returning a valid `Answer` payload."""
         captured = {}
 
         async def fake_run(messages, generation_kwargs=None, **kwargs):
@@ -200,9 +181,6 @@ class TestStructuredOutput:
         assert captured == {"response_format": Answer}
 
     def test_subclasses_inherit_through_the_mro(self):
-        # Mistral and OpenRouter subclass OpenAIChatGenerator without being
-        # installed here, so the lookup must walk the MRO rather than match a
-        # class name exactly.
         class VendorChatGenerator(OpenAIChatGenerator):
             pass
 
@@ -227,11 +205,8 @@ class TestStructuredOutput:
 
 
 class TestReasoningStream:
-    """Reasoning models stream their summary separately from the answer."""
-
     @staticmethod
     async def _events(*chunks):
-        """Feed StreamingChunks through Stream.get_events."""
         queue: asyncio.Queue = asyncio.Queue()
         for chunk in chunks:
             await queue.put(chunk)
@@ -241,9 +216,6 @@ class TestReasoningStream:
         return [event async for event in stream.get_events(queue, None)]
 
     async def test_reasoning_chunk_becomes_an_event(self):
-        # Haystack carries the summary on StreamingChunk.reasoning; without this
-        # the protocol's reasoning parts never fire and the reasoning tokens are
-        # paid for nothing.
         chunk = StreamingChunk(content="", index=0, reasoning=ReasoningContent(reasoning_text="because"))
 
         events = await self._events(chunk)
@@ -281,8 +253,6 @@ class TestReasoningStream:
 
 
 class TestAgentHook:
-    """Agent.llm / llm_kwargs / get_llm()."""
-
     @override_settings(OPENAI_API_KEY="sk-test")
     def test_factory_attribute_is_not_bound_as_method(self):
         class FactoryAgent(Agent):
@@ -314,7 +284,6 @@ class TestAgentHook:
         agent = ReasoningAgent()
 
         assert agent.get_llm().generation_kwargs == {"reasoning": {"effort": "low"}}
-        # Per-call kwargs win over the class attribute.
         overridden = agent.get_llm(generation_kwargs={"reasoning": {"effort": "high"}})
         assert overridden.generation_kwargs == {"reasoning": {"effort": "high"}}
 

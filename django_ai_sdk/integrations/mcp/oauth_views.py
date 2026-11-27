@@ -23,8 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 class OAuthCallbackError(Exception):
-    """OAuth callback failure carrying its HTTP status."""
-
     def __init__(self, message: str, http_status: int = 400) -> None:
         self.message = message
         self.http_status = http_status
@@ -44,7 +42,6 @@ async def _get_oauth_integration(server_name: str) -> DynamicMCPIntegration | No
 async def _validate_callback_params(
     request: HttpRequest, server_name: str
 ) -> tuple[str, str, str | None, DynamicMCPIntegration]:
-    """Validate the OAuth callback and extract (code, verifier, token_endpoint, integration)."""
     if error := request.GET.get("error"):
         desc = request.GET.get("error_description", "")
         logger.error("OAuth error for %r: %s — %s", server_name, error, desc)
@@ -55,7 +52,6 @@ async def _validate_callback_params(
     if not code or not state:
         raise OAuthCallbackError("Missing code or state")
 
-    # Only a state this session started has a flow: anything else is a mismatch.
     flow = request.session.get(_K_FLOW.format(server_name, state))
     if not flow:
         raise OAuthCallbackError("State mismatch")
@@ -91,7 +87,6 @@ async def _resolve_token_endpoint(
 async def oauth_callback(
     request: HttpRequest, server_name: str
 ) -> HttpResponseRedirect | JsonResponse:
-    """Handle the OAuth 2.1 callback: validate, exchange the code, store the token."""
     user = await request.auser()
 
     if not user.is_authenticated:
@@ -131,7 +126,6 @@ async def oauth_callback(
             logger.exception("Token exchange/store failed for %r", server_name)
             return JsonResponse({"error": "Token exchange failed"}, status=500)
 
-        # Drop any "disconnected" status cached before the token existed.
         await integration.reconnect(user)
 
         success_url = resolve_setting("AI_SDK_MCP_OAUTH_SUCCESS_URL", "/")

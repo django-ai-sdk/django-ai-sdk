@@ -19,15 +19,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Matches Workflow.slug, so a declared and a stored name are one key space.
 NAME_MAX_LENGTH = 100
 
-# Reserved key for unstored, unregistered runs, so channel policies can tell them apart.
 ADHOC = "adhoc"
 
 _registry: dict[str, WorkflowDefinition] = {}
 
-# Rejected declarations, name -> reason. Read by the system check.
 _invalid: dict[str, str] = {}
 
 
@@ -55,7 +52,6 @@ def register_workflow(definition: WorkflowDefinition) -> WorkflowDefinition:
 
 
 def validate_name(name: str) -> None:
-    """Raise ImproperlyConfigured unless `name` is slug form, like Workflow.slug."""
     if not name:
         raise ImproperlyConfigured(
             "A workflow must have a non-empty `name` — it is the registry key."
@@ -74,7 +70,6 @@ def validate_name(name: str) -> None:
 
 
 def validate_definition(definition: WorkflowDefinition) -> None:
-    """Raise ImproperlyConfigured unless the definition is legal to store and compile."""
     from django_ai_sdk.workflows.definitions import get_step_registry
     from django_ai_sdk.workflows.listeners import get_listener_registry
     from django_ai_sdk.workflows.runner import validate_steps
@@ -119,7 +114,6 @@ def validate_definition(definition: WorkflowDefinition) -> None:
 
 
 def _validate_triggers(definition: WorkflowDefinition, label: str) -> None:
-    """Every cron parses in its zone, and every input a trigger fills is declared."""
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
     from django_ai_sdk.workflows.schemas import CronTrigger
@@ -134,7 +128,6 @@ def _validate_triggers(definition: WorkflowDefinition, label: str) -> None:
             )
         if not isinstance(trigger, CronTrigger):
             continue
-        # Five fields, so nothing fires more than once a minute.
         if len(trigger.cron.split()) != 5 or not _cron_is_valid(trigger.cron):
             raise ImproperlyConfigured(
                 f"{where} has cron {trigger.cron!r}, which is not a 5-field cron expression "
@@ -158,7 +151,6 @@ def _cron_is_valid(expression: str) -> bool:
 
 
 def _compiles(name: str, fields: dict[str, FieldDefinition], where: str) -> None:
-    """Build the schema now: a field like `model_dump` passes name rules but kills the worker."""
     from django_ai_sdk.workflows.definitions import model_from_fields
 
     if not fields:
@@ -172,7 +164,6 @@ def _compiles(name: str, fields: dict[str, FieldDefinition], where: str) -> None
 def _validate_listeners(
     listeners: list[ListenerDefinition], where: str, listener_types: dict[str, type[RunListener]]
 ) -> None:
-    """Every listener a definition names must be one the deployment exposed."""
     for listener in listeners:
         if listener.type not in listener_types:
             raise ImproperlyConfigured(
@@ -188,31 +179,23 @@ def _validate_listeners(
 
 
 def is_registered(definition: WorkflowDefinition) -> bool:
-    """Whether `definition` is the workflow registered under its name, unchanged."""
     return bool(definition.name) and _registry.get(definition.name) == definition
 
 
 def get_declared_workflows() -> dict[str, WorkflowDefinition]:
-    """Workflows declared in code, keyed by name."""
     return dict(_registry)
 
 
 def get_invalid_workflows() -> dict[str, str]:
-    """Declarations the registry refused, name -> reason. Read by the system check."""
     return dict(_invalid)
 
 
 async def aget_workflow(name: str) -> WorkflowDefinition | None:
-    """One workflow by name; registered wins over stored. A broken stored one raises."""
     declared, row = await afind(name)
     return declared if row is None else definition_of(row)
 
 
 async def afind(name: str) -> tuple[WorkflowDefinition | None, Workflow | None]:
-    """(registered definition, None), (None, active row) or (None, None).
-
-    The row is not parsed, so a caller can check permissions on it first.
-    """
     from django_ai_sdk.workflows.models import Workflow
 
     declared = _registry.get(name)
@@ -231,7 +214,6 @@ def definition_of(row: Workflow) -> WorkflowDefinition:
 
 
 def reset_registry() -> None:
-    """Clear the registry — for tests."""
     _registry.clear()
     _invalid.clear()
 

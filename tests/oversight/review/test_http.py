@@ -1,5 +1,3 @@
-"""The review routes over HTTP: the service's answers, with 403, 404 and 409 where they belong."""
-
 from __future__ import annotations
 
 import pytest
@@ -35,7 +33,6 @@ async def test_signed_out_is_refused_under_an_api_without_auth():
 
 
 async def test_the_router_signs_in_by_session_and_checks_csrf():
-    """Its own auth, `django_auth`: whatever the API around it uses, a POST needs the token."""
     await a_turn()
     user = await reader(REVIEW)
     item = await ReviewItem.objects.aget()

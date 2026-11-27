@@ -1,13 +1,3 @@
-"""DB-declared MCP servers: ``MCPServerConfig`` and how the registry merges them in
-alongside code-declared (INSTALLED_APPS) integrations.
-
-Three things matter here: a row builds the same ``DynamicMCPIntegration`` a
-code-declared server would (so nothing downstream needs to know the difference), an
-installed app always wins on a name collision, and a built integration is cached
-across calls so its ResilientCache/circuit-breaker state survives -- otherwise every
-request would look like the server's first-ever contact.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -103,9 +93,6 @@ class TestRegistryMerge:
         assert integrations["zendesk-5"] is code_instance
 
     async def test_warns_once_when_an_enabled_row_is_shadowed(self, caplog):
-        """An enabled row that an installed app already claims is never used --
-        without a warning that's a silent no-op an operator has no way to explain."""
-
         class CodeShadow(APIIntegration):
             name = "zendesk-5b"
             tools = []
@@ -117,16 +104,13 @@ class TestRegistryMerge:
 
         with caplog.at_level("WARNING"):
             await get_all_integrations()
-            await get_all_integrations()  # second call must not warn again
+            await get_all_integrations()
 
         shadow_warnings = [r for r in caplog.records if "zendesk-5b" in r.message]
         assert len(shadow_warnings) == 1
         assert "already registers an integration" in shadow_warnings[0].message
 
     async def test_does_not_warn_when_the_shadowed_row_is_disabled(self, caplog):
-        """A disabled row shadowed by an installed app is unremarkable -- it's off
-        on purpose, not silently failing to take effect."""
-
         class CodeShadowOff(APIIntegration):
             name = "zendesk-5c"
             tools = []
@@ -166,19 +150,13 @@ class TestRegistryMerge:
 
 
 class TestRowsListCache:
-    """The enabled-rows list itself is cached (see registry._rows_cache), separate
-    from the per-row built-integration cache above -- otherwise every chat request
-    would run a SELECT just to check whether anything changed."""
-
     async def test_second_call_reuses_the_cached_rows_list(self):
         row = await MCPServerConfig.objects.acreate(
             name="zendesk-8", url="https://x", auth="static"
         )
-        await get_all_integrations()  # primes the rows-list cache
+        await get_all_integrations()
 
-        # .aupdate() is a queryset UPDATE, not save() -- it sends no post_save signal,
-        # simulating a change this process's cache can't know about (another process,
-        # a bulk update). If the second call actually re-queried, it would see this.
+        # .aupdate() is a queryset UPDATE, not save() -- it sends no post_save signal.
         await MCPServerConfig.objects.filter(pk=row.pk).aupdate(enabled=False)
 
         assert "zendesk-8" in await get_all_integrations()
@@ -188,9 +166,6 @@ class TestRowsListCache:
         assert "zendesk-8" not in await get_all_integrations()
 
     async def test_saving_a_row_invalidates_the_cache_immediately(self):
-        """mcp.apps connects a post_save signal for exactly this -- a row enabled/
-        disabled/added in this process must be visible on the very next call, not
-        after AI_SDK_MCP_SERVER_LIST_CACHE_TTL elapses."""
         row = await MCPServerConfig.objects.acreate(
             name="zendesk-9", url="https://x", auth="static", enabled=False
         )
@@ -213,10 +188,6 @@ class TestRowsListCache:
 
 
 class TestUrlValidation:
-    """save() rejects a url pointing at a loopback/private/link-local/metadata
-    address, since this app's own process is what fetches it (see
-    mcp.models._validate_public_url)."""
-
     async def test_rejects_a_loopback_url(self):
         with pytest.raises(ValueError):
             await MCPServerConfig.objects.acreate(

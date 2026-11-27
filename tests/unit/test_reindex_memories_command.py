@@ -1,9 +1,3 @@
-"""`reindex_memories` rebuilds each out-of-date memory's index once, from scratch.
-
-The provider is the real RAGProvider; the RAG is a small fake (as in the shared-index
-tests), so no Qdrant server or embedding model is needed.
-"""
-
 from __future__ import annotations
 
 from io import StringIO
@@ -45,8 +39,6 @@ class FakeRag:
 
 
 class FakeAgent:
-    """A RAG agent: a fresh RAG per memory, none for an empty one."""
-
     rag_provider = RAGProvider()
 
     def __init__(
@@ -207,7 +199,7 @@ class TestReindexMemories:
         memory.refresh_from_db()
         assert memory.metadata["sdk"]["rag"]["adopted"] is True
 
-        assert "complete" in run(FakeAgent(), "--missing")  # matches from now on
+        assert "complete" in run(FakeAgent(), "--missing")
 
     def test_missing_fails_on_an_unsigned_index_of_another_dimension(self):
         memory = Memory.objects.create(name="Test Me")

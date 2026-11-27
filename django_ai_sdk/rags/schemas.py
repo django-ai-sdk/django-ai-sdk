@@ -6,8 +6,6 @@ from pydantic import BaseModel, Field
 
 
 class RagDocument(BaseModel):
-    """Framework-agnostic document for Haystack RAG implementations."""
-
     id: str = ""
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -20,15 +18,6 @@ class RagDocument(BaseModel):
 
     @classmethod
     def from_document(cls, haystack_doc: Any) -> RagDocument:
-        """
-        Create RagDocument from a Haystack Document.
-
-        Args:
-            haystack_doc: Haystack Document object
-
-        Returns:
-            RagDocument instance
-        """
         meta = getattr(haystack_doc, "meta", {}) or {}
 
         return cls(
@@ -41,8 +30,6 @@ class RagDocument(BaseModel):
 
 
 class ToolSpec(BaseModel):
-    """Specification for RAG tool presentation to LLM."""
-
     name: str = Field(description="Tool name for function calling")
     description: str = Field(description="Tool description for LLM")
     doc_count: int | None = Field(default=None, description="Number of documents")

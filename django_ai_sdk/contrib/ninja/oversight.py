@@ -1,12 +1,3 @@
-"""Oversight routes: turns, review queues and metrics, plus the installed opt-in apps' routes.
-
-The router signs readers in with ``django_auth`` (session, CSRF on POST) unless you pass
-``auth=``; it does not inherit the API's auth. Permissions are in the oversight manual's
-Review API::
-
-    api.add_router("/", get_oversight_router())
-"""
-
 from __future__ import annotations
 
 from collections.abc import Collection
@@ -63,7 +54,6 @@ async def list_oversight_queues(request: HttpRequest) -> Any:
     return await OversightService.list_queues(user=request.user)
 
 
-# 409 when the item is already closed.
 @routes.post("/oversight/reviews/{item_id}/", response=ReviewOut)
 async def resolve_oversight_review(request: HttpRequest, item_id: str, payload: ResolveIn) -> Any:
     item = await OversightService.resolve_review(item_id, payload, user=request.user)
@@ -80,13 +70,9 @@ async def get_oversight_metrics(
 
 
 def get_oversight_router(*, exclude: Collection[str] = (), **router_kwargs: Any) -> Router:
-    """Build the oversight router. Mount it with ``api.add_router("/", ...)``.
-
-    Uses ``django_auth`` unless ``auth=`` is passed.
-    """
+    """Uses ``django_auth`` unless ``auth=`` is passed."""
     from django_ai_sdk.oversight.apps import ROUTE_MODULES
 
-    # The installed opt-in apps' routes, which they added on start.
     table = ApiRouter(routes, *(import_module(module).routes for module in ROUTE_MODULES))
     return table.build(exclude=exclude, default_auth=django_auth, **router_kwargs)
 

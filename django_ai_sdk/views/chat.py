@@ -1,18 +1,3 @@
-"""The chat endpoint: a plain async Django view, so it works under any API framework.
-
-Streaming is the one endpoint neither Ninja nor DRF helps with, so the SDK ships it
-framework-free and the contrib layers mount it as-is::
-
-    path("api/threads/<str:thread_id>/chat/", ChatView.as_view())  # the thread's agent
-    path("api/chat/", ChatView.as_view(agent="support-bot"))  # no thread: stores nothing
-
-Without a thread the conversation is not persisted; the client sends the whole history
-each turn. The ``CHAT`` permission is checked either way.
-
-Subclass and override :meth:`get_agent` to pick the agent differently, or
-:meth:`error_response` to shape failures.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -30,9 +15,9 @@ if TYPE_CHECKING:
 
 
 class ChatView(View):
+    """Without a thread nothing is stored; CHAT is checked either way."""
+
     http_method_names = ["post"]
-    # Agent id for URLs without a thread. The payload's `agent_id` is ignored, so a
-    # client can't reach another agent through a fixed-agent URL.
     agent: str | None = None
 
     async def post(self, request: HttpRequest, thread_id: str | None = None) -> HttpResponse:
@@ -42,7 +27,6 @@ class ChatView(View):
             agent = await self.get_agent(thread_id, user)
             return await agent.as_view(payload.messages, thread_id=thread_id, user=user)
         except Exception as exc:
-            # Before the stream starts; errors inside it arrive as stream events.
             return self.error_response(exc)
 
     async def get_agent(self, thread_id: str | None, user: UserType) -> Agent:

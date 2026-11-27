@@ -1,9 +1,3 @@
-"""Classifiers: fast models that answer typed questions, batched per stage and state.
-
-A subclass implements `question(lens)` and `classify(state, questions, timeout=)`
-and sets `external`; see `judges.typesafe`.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +28,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.types import TurnContext
 
-# Seconds the first question of a stage waits for others before sending.
 BATCH_DELAY = 0.005
 RATIONALE_ANSWERS = 3
 
@@ -51,7 +44,6 @@ def yes_answer(probability: float, model: str, rationale: str) -> Answer:
 
 
 def ranked_rationale(pairs: Iterable[tuple[str, float]], n: int = RATIONALE_ANSWERS) -> str:
-    """The `n` likeliest pairs, as "label 0.80, other 0.15"."""
     top = sorted(pairs, key=lambda pair: -pair[1])[:n]
     return ", ".join(f"{label} {probability:.2f}" for label, probability in top)
 
@@ -61,7 +53,6 @@ TAKEN_FROM_NO = (
     "The reply's facts are not in the source: it only shares the topic, or it says something else."
 )
 
-# Asked when there are no sources. A reply that states facts then has no source.
 STATES_FACTS = JudgeLens(
     name="facts",
     question="Does `assistant_reply` state facts as its answer to `user_message`?",
@@ -73,12 +64,6 @@ STATES_FACTS = JudgeLens(
 
 
 class Batch:
-    """Groups a stage's classifier questions so those about the same state share one call.
-
-    The flush runs in its own task, so a lens cancelled at the deadline does not
-    cancel the call other lenses wait on.
-    """
-
     def __init__(self, deadline: float | None = None) -> None:
         self.deadline = deadline
         self.groups: dict[tuple[str, str], tuple[Any, Any, dict[str, Any]]] = {}
@@ -117,7 +102,6 @@ class Batch:
         )
 
     async def _send(self, classify: Any, state: Any, waiting: dict[str, Any]) -> None:
-        """Send one call; cancel it once nobody waits, so it never outlives its stage."""
         questions = {name: question for name, (question, _) in waiting.items()}
         futures = [future for _, future in waiting.values()]
         call = asyncio.ensure_future(classify(state, questions, timeout=self.left()))
@@ -153,7 +137,6 @@ _batch: contextvars.ContextVar[Batch | None] = contextvars.ContextVar(
 
 @contextlib.contextmanager
 def batched(deadline_ms: float | None = None) -> Generator[Batch]:
-    """Batch the classifier questions of lens tasks created inside this block."""
     deadline = asyncio.get_running_loop().time() + deadline_ms / 1000 if deadline_ms else None
     batch = Batch(deadline)
     token = _batch.set(batch)
@@ -164,8 +147,6 @@ def batched(deadline_ms: float | None = None) -> Generator[Batch]:
 
 
 class Classifier(Judge):
-    """Base for judges that classify yes/no, label, score and per-source lenses."""
-
     external: ClassVar[str] = "classifier"
     timeout = 20.0
 
@@ -191,12 +172,12 @@ class Classifier(Judge):
         return f"{type(self).__qualname__}:{json.dumps(described, sort_keys=True, default=str)}"
 
     def answers(self, lens: Lens) -> bool:
-        assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
+        assert isinstance(lens, JudgeLens)
         per_source = lens.answer.kind == "entities" and lens.per_source
         return per_source or self.question(lens) is not None
 
     async def answer(self, lens: Lens, context: TurnContext) -> Answer | None:
-        assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
+        assert isinstance(lens, JudgeLens)
         if lens.answer.kind == "entities" and lens.per_source:
             return await self.per_source(lens, context)
         question = self.question(lens)
@@ -205,7 +186,6 @@ class Classifier(Judge):
         if self.too_long(lens, context):
             return Answer(error=TOO_LONG)
         answers = await self._classify_batched(self.state(lens, context), {lens.name: question})
-        # Asked and not answered is a failure, as with the model judge, so fail-closed holds.
         return answers.get(lens.name) or Answer(error=NO_VERDICT)
 
     async def _classify_batched(
@@ -232,7 +212,6 @@ class Classifier(Judge):
     def labelled_sources(
         self, context: TurnContext, *, earlier: bool = False
     ) -> list[tuple[str, Source]]:
-        """The turn's sources labelled S1, S2, ..., masked, clipped, up to SOURCES_CHARS."""
         labelled: list[tuple[str, Source]] = []
         total = 0
         for source in context.grounding(earlier=earlier):
@@ -246,7 +225,6 @@ class Classifier(Judge):
         return labelled
 
     def state(self, lens: JudgeLens, context: TurnContext) -> dict[str, Any]:
-        """Only the parts the lens's subject covers."""
         subject = lens.subject
         state: dict[str, Any] = {}
         if context.history and subject in {Subject.QUESTION, Subject.EXCHANGE}:
@@ -258,8 +236,6 @@ class Classifier(Judge):
             state["user_message"] = self.text(context.input, self.TEXT_CHARS)
         if subject in {Subject.ANSWER, Subject.EXCHANGE}:
             state["assistant_reply"] = self.text(context.output, self.TEXT_CHARS)
-        # Unlike the model judge, an exchange gets no sources: a classifier scores
-        # what it is sent, so sources would turn it into a groundedness score.
         if subject in {Subject.SOURCES, Subject.ANSWER} and (
             labelled := self.labelled_sources(context, earlier=subject is Subject.ANSWER)
         ):
@@ -301,8 +277,7 @@ class Classifier(Judge):
     async def per_source(self, lens: JudgeLens, context: TurnContext) -> Answer | None:
         """Which sources the answer is taken from, one yes/no per source.
 
-        Confidence is the lowest per-source one. Without sources, a reply that
-        states facts is taken from none.
+        Confidence is the lowest per-source one.
         """
         if not context.output.strip():
             return Answer(value=lens.answer.parse(lens, []), confidence=1.0, rationale="No answer.")
@@ -356,7 +331,6 @@ class Classifier(Judge):
 
 
 def _unsourced(lens: Lens, judged: Answer | None) -> Answer | None:
-    """A missing or failed answer is a failure, so fail-closed holds."""
     if judged is None or judged.error or not isinstance(judged.value, int | float):
         return Answer(error=(judged.error if judged else "") or NO_VERDICT)
     if float(judged.value) < 0.5:

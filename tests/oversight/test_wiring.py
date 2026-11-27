@@ -1,5 +1,3 @@
-"""How oversight is wired into agents, tools and protocols: once, everywhere, nothing raw."""
-
 from __future__ import annotations
 
 import asyncio
@@ -71,22 +69,18 @@ class TestHooks:
         assert sum(isinstance(h, ToolCallBudgetHook) for h in before) == 1
         [limit] = [h for h in after if isinstance(h, ToolOutputLimitHook)]
         assert limit.max_chars == 1234
-        # Masked before the cut, so the stream and the hook mask the same text.
         [mask] = [h for h in after if isinstance(h, MaskToolResultHook)]
         assert after.index(mask) < after.index(limit)
         assert isinstance(hooks["before_run"][0], GateQuestionHook)
         assert isinstance(hooks["after_run"][-1], JudgeAnswerHook)
-        # A closed turn stops first; only an open one has tools to limit.
         stop, limit_tools = hooks["before_llm"][:2]
         assert isinstance(stop, StopClosedTurnHook)
         assert isinstance(limit_tools, LimitToolChoiceHook)
 
     def test_any_haystack_agent_gets_the_oversight_hooks_when_it_runs(self):
-        # Built by hand, not through ToolAgent: run_with_oversight still adds every check.
         hooks = merge_oversight_hooks(HaystackAgent(chat_generator=MockChatGenerator(responses=["x"])).hooks)
         assert any(isinstance(h, JudgeToolCallHook) for h in hooks["before_tool"])
         assert any(isinstance(h, MaskToolResultHook) for h in hooks["after_tool"])
-        # run_with_oversight is the one place they join: not default_hooks.
         assert not any(
             isinstance(h, JudgeToolCallHook) for h in default_hooks(agent_with("x")[0])["before_tool"]
         )
@@ -94,8 +88,6 @@ class TestHooks:
 
 @pytest.mark.django_db(transaction=True)
 class TestToolCallsInTheTurn:
-    """The hooks run on every tool agent, subagents too: what they see is the turn's."""
-
     async def guard(self) -> TurnGuard:
         agent, _ = agent_with("x", policy=RunPolicy)
         guard = await TurnGuard.start(agent, channel="run", input="find Jan")
@@ -206,9 +198,6 @@ class TestWithheldArtifacts:
 
 @pytest.mark.django_db(transaction=True)
 class TestToolResultsAreMasked:
-    """End to end: the model, the screen, the stored message and the record never get the raw
-    result, whether it is shown as the tool returns it (live) or once the answer passed (auto)."""
-
     @pytest.mark.parametrize("stream_mode", ["auto", "live"])
     async def test_nothing_gets_the_raw_result(self, stream_mode):
         seen: list[str] = []
@@ -231,7 +220,6 @@ class TestToolResultsAreMasked:
         assert IBAN not in json.dumps(shown)
         assert "[IBAN]" in json.dumps(shown)
         assert IBAN not in storage.stored[-1].model_dump_json()
-        # Recorded where it happened: while the agent worked.
         turn = await Turn.objects.alatest("created_at")
         masked = [o async for o in LensAnswer.objects.filter(turn=turn, stage="tool", lens="pii")]
         assert [(o.value, o.spans) for o in masked] == [(["iban"], [])]
@@ -263,8 +251,6 @@ class TestWorkflowSteps:
 
 
 class TestWhatJudgesSayIsKeptLikeTheTurn:
-    # How a reason is kept per capture level: tests/oversight/test_capture.py.
-
     async def test_an_unparsable_answer_records_the_failure_not_the_value(self):
         from django_ai_sdk.oversight import Score
         from django_ai_sdk.oversight.judges.base import ask_judge
@@ -297,8 +283,6 @@ class TestRunCost:
 
 @pytest.mark.django_db(transaction=True)
 class TestSyncHooks:
-    """A sync tool run inside a turn refuses every call."""
-
     def _state(self, messages: list[Any]) -> Any:
         from haystack.components.agents.state.state import State
         from haystack.dataclasses import ChatMessage as HaystackMessage

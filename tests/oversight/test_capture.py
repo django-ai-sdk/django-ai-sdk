@@ -1,9 +1,3 @@
-"""What oversight keeps where: everything that can quote a turn lives with its content.
-
-Per capture level, the rows (turn, lens answer, rule match) and the review items
-hold no text of the turn; the content holds it as capture says;
-forgetting a thread takes it, and who asked."""
-
 from __future__ import annotations
 
 import base64
@@ -52,13 +46,13 @@ from tests.oversight.helpers import (
 EMAIL = "jan@example.com"
 
 
-BSN = "111222333"  # passes the 11-check: a country kind no lens of the policy names
+BSN = "111222333"
 
 
 KEY = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD"
 
 
-NAME = "Jan Jansen"  # found by a judge, not by any detector
+NAME = "Jan Jansen"
 
 
 IBAN = "NL91ABNA0417164300"
@@ -74,7 +68,6 @@ OTHER = base64.b64encode(b"o" * 32).decode()
 
 
 def _naming_judge(text, context):
-    # A judge that names who it found in its own words (no `labels`), and says where.
     at = context.input.find(NAME)
     if at < 0:
         return Answer(value=[])
@@ -86,7 +79,6 @@ def _judged(text, context):
 
 
 def _taken(text, context):
-    # Like TypeSafe.per_source: the titles of the sources, each one's score by its key.
     return Answer(
         value=[s.title for s in context.sources],
         confidence=0.9,
@@ -101,7 +93,7 @@ def _later(text, context):
 @register_policy
 class PrivacyPolicy(Policy):
     name = "test-privacy"
-    lenses = [  # noqa: RUF012
+    lenses = [
         PIILens(name="pii_in", stages=[Stage.GATE], kinds=[*DEFAULT_PII_KINDS, "bsn"]),
         FnLens(name="who", answer=Entities, stages=[Stage.GATE], fn=_naming_judge),
         FnLens(name="judged", subject=Subject.ANSWER, stages=[Stage.FINISH], fn=_judged),
@@ -110,8 +102,7 @@ class PrivacyPolicy(Policy):
         ),
         FnLens(name="later", subject=Subject.ANSWER, stages=[Stage.REFLECT], fn=_later),
     ]
-    rules = [  # noqa: RUF012
-        # Report mode: nothing is masked by a rule, so capture alone decides.
+    rules = [
         Rule("mask_pii_in", when=L("pii_in").is_true, then=Mask(), mode=Mode.REPORT),
         Rule("queue_judged", when=L("judged").is_true, then=Queue("q"), mode=Mode.ENFORCE),
     ]
@@ -120,7 +111,7 @@ class PrivacyPolicy(Policy):
 @register_policy
 class NamingPolicy(Policy):
     name = "test-privacy-naming"
-    lenses = [  # noqa: RUF012
+    lenses = [
         FnLens(
             name="who",
             answer=Entities,
@@ -141,7 +132,7 @@ class NamingPolicy(Policy):
             ),
         )
     ]
-    rules = [Rule("mask_who", when=L("who").is_true, then=Mask(), mode=Mode.ENFORCE)]  # noqa: RUF012
+    rules = [Rule("mask_who", when=L("who").is_true, then=Mask(), mode=Mode.ENFORCE)]
 
 
 async def run_turn(
@@ -186,7 +177,6 @@ async def run_turn(
 
 
 def _rows(turn: Turn) -> str:
-    """Every row of the record, and the review items, as one string."""
     found = [
         *Turn.objects.filter(pk=turn.pk).values(),
         *LensAnswer.objects.filter(turn=turn).values(),
@@ -201,7 +191,6 @@ def _leaks(text: str) -> list[str]:
 
 
 async def _kept(turn: Turn) -> dict:
-    """What the turn's content holds now, read again."""
     fresh = await Turn.objects.select_related("content").aget(pk=turn.pk)
     return await sync_to_async(load_content)(fresh) or {}
 
@@ -217,7 +206,6 @@ class TestWhatCaptureKeeps:
         turn = await run_turn(capture)
         assert _leaks(await sync_to_async(_rows)(turn)) == []
         answer_rows = await sync_to_async(_by_lens)(turn)
-        # A detector's kinds stay; names a judge gave in its own words are counted.
         assert answer_rows["pii_in"].value == ["bsn", "email"]
         assert answer_rows["who"].value == [FOUND]
         assert answer_rows["taken"].value == [FOUND]
@@ -305,7 +293,6 @@ class TestTheRecordsValue:
 
         titles = Answer(value=[f"Dossier {EMAIL} (BSN {BSN})"], answerer="typesafe")
         assert stored_value(TakenFrom(), titles) == [FOUND]
-        # Patterns report kinds; a person, like a judge, may type anything.
         assert stored_value(PIILens(), Answer(value=["email"], answerer="patterns")) == ["email"]
         assert stored_value(PIILens(), Answer(value=["email"], answerer="human")) == [FOUND]
         labelled = JudgeLens(name="kind", answer=Entities, labels=["hr", "pay"])
@@ -331,7 +318,6 @@ class TestTheRecordsValue:
             assert split_answer(lens, "finish", answer, keep=capture_masker(capture))[1] == {}
 
     def test_the_record_masks_a_number_whatever_label_precedes_it(self):
-        # The model may read an invoice number that passes the BSN check; the record keeps none.
         keep = capture_masker("masked")
         assert keep.text("factuurnummer: 111222333") == "factuurnummer: [BSN]"
 
@@ -353,7 +339,6 @@ class TestDeployCheck:
     def capture_ids() -> list[str]:
         from django_ai_sdk.oversight.checks import check_oversight_deploy
 
-        # The test settings run tasks inline (W014): only what capture says counts here.
         return [m.id for m in check_oversight_deploy() if m.id != "ai_sdk.oversight.W014"]
 
     def test_full_capture_warns(self):

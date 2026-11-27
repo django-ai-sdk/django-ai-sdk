@@ -31,7 +31,6 @@ def get_allowed_files() -> dict[str, str]:
 
 
 def get_file_name(file: FileSource) -> str | None:
-    """Get filename"""
     if isinstance(file, (str, Path)):
         return str(file)
     elif hasattr(file, "name"):
@@ -100,8 +99,6 @@ class FileProcessor(Protocol):
 
 
 class BaseFileProcessor:
-    """Shared MIME validation for concrete file processors."""
-
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = ()
     step: ClassVar[str | None] = None
 
@@ -143,9 +140,7 @@ class JSONFileProcessor(TextFileProcessor):
 
 
 class BaseBinaryFileProcessor(BaseFileProcessor):
-    """For binary formats where magic bytes alone can't distinguish types (e.g. OOXML).
-
-    Overrides :meth:`is_valid` to also require a matching file extension,
+    """Overrides :meth:`is_valid` to also require a matching file extension,
     since puremagic returns the same MIME for all OOXML variants.
     """
 
@@ -168,8 +163,6 @@ async def _get_bytes_stream(file: FileSource) -> BytesIO | None:
 
 
 class DocxFileProcessor(BaseBinaryFileProcessor):
-    """Extracts plain text from Word (.docx) files using python-docx."""
-
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
@@ -183,7 +176,6 @@ class DocxFileProcessor(BaseBinaryFileProcessor):
 
     @staticmethod
     def _extract_text(stream: Any) -> str:
-        # Local import: docx ships in the `files` extra
         from docx import Document
 
         doc = Document(stream)
@@ -191,8 +183,6 @@ class DocxFileProcessor(BaseBinaryFileProcessor):
 
 
 class PptxFileProcessor(BaseBinaryFileProcessor):
-    """Extracts plain text from PowerPoint (.pptx) files using python-pptx."""
-
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -207,7 +197,6 @@ class PptxFileProcessor(BaseBinaryFileProcessor):
 
     @staticmethod
     def _extract_text(stream: Any) -> str:
-        # Local import: pptx ships in the `files` extra
         from pptx import Presentation
 
         prs = Presentation(stream)
@@ -220,8 +209,6 @@ class PptxFileProcessor(BaseBinaryFileProcessor):
 
 
 class XlsxFileProcessor(BaseBinaryFileProcessor):
-    """Extracts plain text from Excel (.xlsx) files using openpyxl."""
-
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -236,7 +223,6 @@ class XlsxFileProcessor(BaseBinaryFileProcessor):
 
     @staticmethod
     def _extract_text(stream: Any) -> str:
-        # Local import: openpyxl ships in the `files` extra
         import openpyxl
 
         wb = openpyxl.load_workbook(stream, read_only=True, data_only=True)
@@ -248,8 +234,6 @@ class XlsxFileProcessor(BaseBinaryFileProcessor):
 
 
 class AnyDocFileProcessor(BaseFileProcessor):
-    """Converts many document formats to Markdown using anydoc."""
-
     step: ClassVar[str | None] = "anydoc"
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
@@ -293,12 +277,10 @@ class AnyDocFileProcessor(BaseFileProcessor):
     )
 
     async def is_valid(self, file: FileSource) -> bool:
-        """Validate by extension."""
         name = get_file_name(file)
         if not name:
             return False
 
-        # Check if the file extension is in the allowed list
         if not any(name.lower().endswith(ext) for ext in self.EXTENSIONS):
             return False
 
@@ -313,7 +295,6 @@ class AnyDocFileProcessor(BaseFileProcessor):
     @staticmethod
     def is_text_pdf(data: bytes) -> bool:
         try:
-            # Local import: pdf_inspector ships in the `files` extra
             import pdf_inspector
 
             return pdf_inspector.classify_pdf_bytes(data).pdf_type == "text_based"
@@ -330,25 +311,18 @@ class AnyDocFileProcessor(BaseFileProcessor):
 
     @staticmethod
     def _extract_text(data: bytes, name: str | None) -> str | None:
-        # Local import: anydoc ships in the `files` extra
         import anydoc
 
         try:
             fmt: str | None = anydoc.format_from_path(name) if name else None
             text = anydoc.to_markdown_bytes(data, fmt) if fmt else anydoc.to_markdown_bytes(data)
         except Exception:
-            # Never hard-fail the pipeline, just pass on.
             logger.info("anydoc could not convert %s, passing on", name, exc_info=True)
             return None
         return text if text.strip() else None
 
 
 def get_vision_agent() -> Agent | None:
-    """An instance of `AI_SDK_VISION_AGENT` (dotted path to an Agent subclass), or None.
-
-    The agent answers every image question: captions for uploads and `ask_image`.
-    Make it `hidden = True` so it isn't listed or chattable.
-    """
     from django_ai_sdk.agents.base import Agent
 
     path = resolve_setting("AI_SDK_VISION_AGENT", None)
@@ -361,16 +335,10 @@ def get_vision_agent() -> Agent | None:
 
 
 def has_vision_support() -> bool:
-    """Whether images can be described and asked about: a vision agent is set."""
     return bool(resolve_setting("AI_SDK_VISION_AGENT", None))
 
 
 async def describe_image(data: bytes, mime_type: str, prompt: str) -> str | None:
-    """Ask the `AI_SDK_VISION_AGENT` about an image; its text reply, None without one.
-
-    The agent runs with the image attached to a user message whose text is
-    `prompt`; its model, instructions and generator are yours to choose.
-    """
     from django_ai_sdk.common import Attachment, ChatMessage
 
     agent = get_vision_agent()
@@ -385,13 +353,7 @@ async def describe_image(data: bytes, mime_type: str, prompt: str) -> str | None
 
 
 class ImageCaptionProcessor(BaseFileProcessor):
-    """Turn an uploaded image into searchable text via a vision model.
-
-    Returns a description plus a verbatim transcription of any visible text, so
-    a photo or screenshot becomes retrievable like any other document, and
-    agents whose model can't see images still know what it shows. Asks the
-    `AI_SDK_VISION_AGENT` (see `describe_image`); without one it takes no files.
-    """
+    """Asks the `AI_SDK_VISION_AGENT` (see `describe_image`); without one it takes no files."""
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
         "image/jpeg",
@@ -401,7 +363,6 @@ class ImageCaptionProcessor(BaseFileProcessor):
     )
     step: ClassVar[str | None] = "captioning"
 
-    # What the vision agent is asked for each uploaded image.
     caption_prompt: ClassVar[str] = prompt("""\
         Describe this image in detail for later search and retrieval: the main
         subject, setting, notable objects, people, colours, and any diagrams or

@@ -1,5 +1,3 @@
-"""get_files narrows the file list by keywords over name, summary, keywords and facts."""
-
 from __future__ import annotations
 
 import pytest
@@ -56,7 +54,6 @@ def test_keywords_filter_files() -> None:
         return sorted(f["filename"] for f in files)
 
     assert names(list_memory_files(tid)) == ["ll-01.pdf", "ll-02.pdf", "ll-03.pdf"]
-    # Every term must match, each in any field; "lesson" stems "Lessons"
     assert names(list_memory_files(tid, ["lesson", "2026"])) == ["ll-01.pdf", "ll-02.pdf"]
     assert names(list_memory_files(tid, ["LL-03"])) == ["ll-03.pdf"]
     assert list_memory_files(tid, ["2026"])["files"][0]["summary"]

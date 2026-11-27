@@ -1,5 +1,3 @@
-"""The workflow system checks: registry entries that cannot be used."""
-
 from __future__ import annotations
 
 from django.core import checks
@@ -33,7 +31,6 @@ class TestTheRegistries:
 
     @override_settings(AI_SDK_WORKFLOWS={"STEPS": {"agent": STEP}})
     def test_a_step_under_the_reserved_agent_key_is_e004(self):
-        """Definitions name agent steps "agent", so that class could never be reached."""
         [error] = check_workflows()
 
         assert error.id == "ai_sdk.workflows.E004"

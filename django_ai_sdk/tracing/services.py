@@ -21,8 +21,6 @@ logger = get_logger(__name__)
 
 
 class TraceService:
-    """Service for reading spans recorded"""
-
     @classmethod
     async def thread_traces(
         cls,
@@ -34,24 +32,8 @@ class TraceService:
         limit: int | None = 100,
         offset: int = 0,
     ) -> list[TraceOut]:
-        """
-        Spans recorded for one thread, newest first.
-
-        Args:
-            thread_id: Thread whose spans to return
-            user: User for permission checking
-            message_id: Narrow to a single message's run
-            operation_name: Narrow to one Haystack operation
-            limit: Maximum spans to return; None returns all (default 100)
-            offset: Number of spans to skip
-
-        Returns:
-            List of TraceOut
-
-        Raises:
-            PermissionDenied: If user has no VIEW_THREAD permission for the thread
-            ValueError: If the thread does not exist
-        """
+        """Spans recorded for one thread, newest first.
+        Raises PermissionDenied without VIEW_THREAD, ValueError if the thread does not exist."""
         await cls.get_permissions(thread_id, user=user)
         qs = Trace.objects.for_thread(thread_id)
         if message_id:
@@ -68,46 +50,15 @@ class TraceService:
         limit: int | None = 100,
         offset: int = 0,
     ) -> list[TraceOut]:
-        """
-        Spans recorded for one message's run, newest first.
-
-        The owning thread is resolved from the message, so a caller holding only
-        a message id does not need to know its thread.
-
-        Args:
-            message_id: Message whose spans to return
-            user: User for permission checking
-            operation_name: Narrow to one Haystack operation
-            limit: Maximum spans to return; None returns all (default 100)
-            offset: Number of spans to skip
-
-        Returns:
-            List of TraceOut
-
-        Raises:
-            PermissionDenied: If user has no VIEW_THREAD permission for the thread
-            ValueError: If the message does not exist
-        """
+        """Spans recorded for one message's run, newest first.
+        Raises PermissionDenied without VIEW_THREAD, ValueError if the message does not exist."""
         await cls.get_permissions(await cls._thread_message(message_id), user=user)
         qs = Trace.objects.for_message(message_id)
         return await cls._get_page(qs, operation_name, limit, offset)
 
     @classmethod
     async def thread_token_usage(cls, thread_id: str | uuid.UUID, *, user: UserType) -> TokenUsage:
-        """
-        Token totals across every run in one thread, broken down per subagent.
-
-        Args:
-            thread_id: Thread to total
-            user: User for permission checking
-
-        Returns:
-            TokenUsage with prompt, completion, overall totals and by_subagent
-
-        Raises:
-            PermissionDenied: If user has no VIEW_THREAD permission for the thread
-            ValueError: If the thread does not exist
-        """
+        """Raises PermissionDenied without VIEW_THREAD, ValueError if the thread does not exist."""
         await cls.get_permissions(thread_id, user=user)
         return await cls._usage(Trace.objects.for_thread(thread_id))
 
@@ -115,26 +66,12 @@ class TraceService:
     async def message_token_usage(
         cls, message_id: str | uuid.UUID, *, user: UserType
     ) -> TokenUsage:
-        """
-        Token totals for one message's run, broken down per subagent.
-
-        Args:
-            message_id: Message to total
-            user: User for permission checking
-
-        Returns:
-            TokenUsage with prompt, completion, overall totals and by_subagent
-
-        Raises:
-            PermissionDenied: If user has no VIEW_THREAD permission for the thread
-            ValueError: If the message does not exist
-        """
+        """Raises PermissionDenied without VIEW_THREAD, ValueError if the message does not exist."""
         await cls.get_permissions(await cls._thread_message(message_id), user=user)
         return await cls._usage(Trace.objects.for_message(message_id))
 
     @classmethod
     async def _usage(cls, qs: TraceQuerySet) -> TokenUsage:
-        """Combine the plain total with the per-subagent breakdown."""
         totals = await qs.atoken_usage()
         by_subagent = await qs.asubagent_usage()
         return TokenUsage(
@@ -154,13 +91,11 @@ class TraceService:
 
     @classmethod
     async def get_permissions(cls, thread_id: str | uuid.UUID, *, user: UserType) -> None:
-        """Enforce the thread's view permission"""
         if await ThreadService.get_thread(str(thread_id), user=user) is None:
             raise NotFound("Thread not found")
 
     @classmethod
     async def _thread_message(cls, message_id: str | uuid.UUID) -> uuid.UUID:
-        """Resolve which thread a message belongs to."""
         thread_id = (
             await Message.objects.filter(id=message_id)
             .values_list(
@@ -181,7 +116,6 @@ class TraceService:
         limit: int | None,
         offset: int,
     ) -> list[TraceOut]:
-        """Apply the shared operation filter, ordering and slice."""
         if operation_name:
             qs = qs.filter(operation_name=operation_name)
         return [
@@ -191,10 +125,6 @@ class TraceService:
             ]
         ]
 
-
-# ============================================================================
-# Sync wrappers for use in sync contexts
-# ============================================================================
 
 thread_traces = async_to_sync(TraceService.thread_traces)
 message_traces = async_to_sync(TraceService.message_traces)

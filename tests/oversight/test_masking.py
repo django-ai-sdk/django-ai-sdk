@@ -1,5 +1,3 @@
-"""Masks: what happens when a mask cannot point, or changes nothing."""
-
 from __future__ import annotations
 
 import pytest
@@ -41,15 +39,12 @@ from tests.oversight.helpers import (
 
 @pytest.mark.django_db(transaction=True)
 class TestMasksThatCannotPoint:
-    """A mask that cannot say where to mask blocks instead; one with nothing to mask did nothing."""
-
     async def test_a_lens_that_found_something_without_saying_where_blocks_the_question(self):
         guard = await start(masking_policy("test-no-spans", found_without_spans), "Jan asked")
         gate = await guard.gate()
         assert gate.blocked
         assert gate.message == str(Block.DEFAULT_MESSAGE)
         assert gate.notice["outcome"] == "blocked"
-        # The question is not echoed: nothing in it was masked.
         assert "input" not in gate.notice
         turn = await closed_turn(guard)
         assert turn.outcome == "blocked"
@@ -120,8 +115,6 @@ class TestMasksThatCannotPoint:
 
 @pytest.mark.django_db(transaction=True)
 class TestMasksThatChangeNothing:
-    """Spans outside the text block; "masked" only when text changed."""
-
     @pytest.mark.parametrize("span", [(900, 950), (3, 3), (-1, 2)], ids=["past", "empty", "neg"])
     async def test_a_span_outside_the_question_blocks(self, span):
         def lying(text, context):
@@ -139,7 +132,6 @@ class TestMasksThatChangeNothing:
 
     async def test_a_mask_that_changes_nothing_did_not_act(self):
         def masks_its_own_label(text, context):
-            # Points at text that already reads as its mask.
             return Answer(value=["email"], spans=[TextSpan(start=0, end=7, label="email")])
 
         name = policy(
@@ -160,7 +152,6 @@ def test_a_span_across_question_and_answer_masks_both_sides():
     from django_ai_sdk.oversight.guard.masking import spans_for
 
     lens = JudgeLens(name="who", answer=Entities, subject=Subject.EXCHANGE)
-    # "ask Jan" + "\n\n" + "Jansen here": one name across the blank line.
     found = Answered(lens, Stage.FINISH, Answer(value=["Jan Jansen"], spans=[TextSpan(start=4, end=15)]))
     question = spans_for([found], {"who"}, Subject.QUESTION, "ask Jan")
     answer = spans_for([found], {"who"}, Subject.ANSWER, "ask Jan")

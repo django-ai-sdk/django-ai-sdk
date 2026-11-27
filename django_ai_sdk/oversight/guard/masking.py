@@ -1,9 +1,3 @@
-"""What a Mask rule hides in the turn's own text and in other text the model reads.
-
-Other text (earlier messages, tool results) is judged by the gate's lenses like
-the question, then masked or withheld whole; findings are recorded aside.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -42,29 +36,19 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.policy import ResolvedPolicy
     from django_ai_sdk.oversight.rules import Action
 
-# (spans to hide, replacement template)
 MaskGroup = tuple[list[TextSpan], str]
 
-# Chunks of over-length other text overlap by this much (at most a tenth of a chunk),
-# so a name on a boundary is whole in one of them.
 CHUNK_OVERLAP = 200
 
 
 class TurnMasks:
-    """A turn's masking. The stream and the tool hook share one masking per tool result."""
-
     def __init__(self, guard: TurnGuard) -> None:
         self.guard = guard
-        # In-flight tool result masking, keyed by call id and text hash.
         self.results: dict[str, asyncio.Future[str]] = {}
-        # Calls oversight answered itself (blocked, or skipped next to a blocked one):
-        # their result is its own message, which no lens judges.
         self.answered_here: set[str] = set()
-        # Masked citation source text by source key.
         self.sources: dict[str, str] = {}
 
     def mask_groups(self, matched: list[Matched], subject: Subject) -> list[MaskGroup]:
-        """Collect the Mask groups for `subject`; a mask that cannot locate its target blocks."""
         guard = self.guard
         groups, unpointed = collect_masks(
             matched,
@@ -78,12 +62,6 @@ class TurnMasks:
         return [group for _, group in groups]
 
     async def mask_other_text(self, lenses: list[Lens], text: str, stage: Stage) -> StageResult:
-        """Judge `text` like the gate judges the question, and mask it.
-
-        Unlocatable text becomes UNCHECKED_TEXT. Only mask, block and tool restriction are
-        kept, so other text never alerts or notifies. At the tool stage a failed lens fires
-        no rule; a closed policy withholds the result instead if an enforced rule reads it.
-        """
         guard = self.guard
         judged = StageResult(stage, text=text)
         if not text:
@@ -101,8 +79,6 @@ class TurnMasks:
         unpointed = False
         groups: list[MaskGroup] = []
         by_rule: dict[str, Matched] = {}
-        # Each chunk is decided on its own and what any of them decides holds, so a
-        # finding in one chunk is never outweighed by another.
         for answered in views:
             failed = errored_lenses(answered)
             errored = errored or bool(failed & enforced)
@@ -154,19 +130,11 @@ class TurnMasks:
         return judged
 
     async def mask_text(self, text: str) -> str:
-        """Mask a tool result the way the gate masks the question. Never raises.
-
-        A result an enforced gate rule would block is withheld whole. If it cannot
-        be checked, a closed policy withholds it; an open one passes it and records
-        the error.
-        """
         guard = self.guard
         try:
             lenses = other_text_lenses(guard.resolved) if guard.active else []
             if not lenses or not text:
                 return text
-            # What a tool or source returned and a lens could not judge (too long, down)
-            # is no finding about the turn: the result is withheld instead.
             judged = await self.mask_other_text(lenses, text, Stage.TOOL)
             if judged.restrict is not None:
                 guard.restrict = merge_restrict(guard.restrict, judged.restrict)
@@ -180,7 +148,6 @@ class TurnMasks:
             return str(UNCHECKED_TEXT) if withhold else text
 
     async def mask_result(self, call_id: str, text: str) -> str:
-        """`mask_text` once per call id and text, so stream and tool hook get the same result."""
         if call_id in self.answered_here:
             return text
         if not call_id:
@@ -198,11 +165,6 @@ class TurnMasks:
 async def judge_other_text(
     lenses: list[Lens], context: TurnContext, deadline: float | None
 ) -> list[list[Answered]]:
-    """Answers about other text, one list per part of it that rules read on its own.
-
-    Too-long lenses are asked per chunk (at most MAX_OTHER_TEXT_CHUNKS), spans shifted back;
-    a text needing more chunks keeps its too-long answers, so FAIL_MODE decides.
-    """
     answered = await answer_lenses(lenses, context, Stage.GATE, deadline_ms=deadline)
     too_long = [o.lens for o in answered if o.answer.error == TOO_LONG]
     size = chunk_chars(too_long)
@@ -211,8 +173,6 @@ async def judge_other_text(
     chunks = split_chunks(context.input, size)
     if not 1 < len(chunks) <= setting("MAX_OTHER_TEXT_CHUNKS"):
         return [answered]
-    # All chunks at once, within the stage deadline: a history text judged in chunks
-    # asks up to MAX_OTHER_TEXT_CHUNKS times the judges a short one does.
     parts = await asyncio.gather(
         *(
             answer_lenses(
@@ -232,13 +192,12 @@ async def judge_other_text(
 
 
 def chunk_chars(lenses: Iterable[Lens]) -> int | None:
-    """The fewest characters any judge of `lenses` reads, or None when none has a limit."""
     limits: list[int] = []
     for lens in lenses:
         for step in lens.steps():
             try:
                 limit = build_judge(step).TEXT_CHARS
-            except Exception:  # It answers its error when asked.
+            except Exception:
                 continue
             if limit:
                 limits.append(limit)
@@ -246,7 +205,6 @@ def chunk_chars(lenses: Iterable[Lens]) -> int | None:
 
 
 def split_chunks(text: str, size: int) -> list[tuple[int, str]]:
-    """(offset, chunk) pairs of at most `size` characters covering `text`, overlapping."""
     step = size - min(CHUNK_OVERLAP, size // 10)
     starts = [0]
     while starts[-1] + size < len(text):
@@ -255,7 +213,6 @@ def split_chunks(text: str, size: int) -> list[tuple[int, str]]:
 
 
 def _moved(item: Answered, offset: int) -> Answered:
-    """`item` about a chunk, its spans moved to where they are in the whole text."""
     spans = [
         s.model_copy(update={"start": s.start + offset, "end": s.end + offset})
         for s in item.answer.spans
@@ -279,11 +236,6 @@ def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:
 
 
 def other_text_lenses(policy: ResolvedPolicy) -> list[Lens]:
-    """`gate_masking_lenses` plus gate lenses a mask, block or restrict_tools rule reads.
-
-    Report-mode rules count, to record what they would have done. `judges_tool_results`
-    filters only the second group, so it never turns masking off.
-    """
     masking = gate_masking_lenses(policy)
     names = {
         name
@@ -306,10 +258,6 @@ def collect_masks(
     context: TurnContext,
     closed: bool,
 ) -> tuple[list[tuple[Matched, MaskGroup]], list[tuple[Matched, Mask]]]:
-    """Collect the (spans, template) group each Mask action in `matched` masks in `subject`.
-
-    No-op masks are dropped so the turn is never recorded as masked; unpointed ones come apart.
-    """
     groups: list[tuple[Matched, MaskGroup]] = []
     unpointed: list[tuple[Matched, Mask]] = []
     text = context.text(subject)
@@ -346,11 +294,6 @@ def _unpointed(
     subject: Subject,
     context: TurnContext,
 ) -> bool:
-    """True when a mask cannot locate everything to hide; masking around it would leak.
-
-    A lens failed under a closed policy, found something without spans, or has
-    spans outside the text it read.
-    """
     for item in _latest(answered, names):
         if item.lens.subject not in {subject, Subject.EXCHANGE}:
             continue
@@ -367,11 +310,6 @@ def _unpointed(
 def spans_for(
     answered: Iterable[Answered], names: set[str], subject: Subject, input_text: str
 ) -> list[TextSpan]:
-    """Spans lenses `names` found in `subject`.
-
-    An EXCHANGE lens reads input, a blank line, then output; its spans are clipped
-    and shifted onto the requested part, so a span across both masks each side.
-    """
     size = len(input_text)
     offset = size + 2
     spans: list[TextSpan] = []

@@ -1,5 +1,3 @@
-"""The Judge base and the shared machinery to ask one, build one from an alias or config."""
-
 from __future__ import annotations
 
 import asyncio
@@ -32,14 +30,11 @@ logger = get_logger(__name__)
 
 DEFAULT_TIMEOUT = 30.0
 
-# Error prefix for a failed external service; reflect asks such a lens again later.
 UNAVAILABLE = "unavailable"
 
-# Errors where nothing was judged, so FAIL_MODE decides.
 TOO_LONG = "too long"
 NO_VERDICT = "no verdict"
 
-# Below the default min_confidence, so a made-up confidence never ends the chain.
 UNSTATED_CONFIDENCE = 0.5
 
 HISTORY_MESSAGES = 6
@@ -60,18 +55,15 @@ def is_unavailable(error: str) -> bool:
 
 
 class Judge(ABC):
-    """Answers lenses. Return None to abstain and let the next judge try.
+    """Return None to abstain and let the next judge try.
 
     `confidence` is 0 to 1 on this judge's own scale, compared with a lens's
-    `min_confidence`: report what you can stand behind, or it ends the chain every
-    time. A judge that is a model names it in `model`.
+    `min_confidence`.
     """
 
-    # Who receives turn content, e.g. "model gateway". Empty means nothing leaves the process.
     external: ClassVar[str] = ""
     timeout: float = DEFAULT_TIMEOUT
     name: str = ""
-    # The most characters of one text it reads; longer is TOO_LONG. 0: no limit.
     TEXT_CHARS: ClassVar[int] = 0
 
     def __init__(self, *, name: str = "", timeout: float | None = None) -> None:
@@ -88,11 +80,10 @@ class Judge(ABC):
         return self.name or type(self).__name__.lower()
 
     def missing(self) -> str:
-        """Why this judge can't run here (e.g. an unset key), or "" when it can."""
+        """Why this judge can't run here, or "" when it can."""
         return ""
 
     def answers(self, lens: Lens) -> bool:
-        """Whether this judge can answer `lens` at all, e.g. its answer type."""
         return True
 
     def describe(self) -> dict[str, Any]:
@@ -105,11 +96,7 @@ class Judge(ABC):
 async def ask_judge(
     judge: Judge | str | dict[str, Any], lens: Lens, context: TurnContext
 ) -> Answer | None:
-    """Ask one judge with a timeout. Any failure comes back as an Answer with `error`.
-
-    An answer without a value or an error is NO_VERDICT, so FAIL_MODE applies
-    (return None to abstain). Cancellation from outside re-raises.
-    """
+    """Any failure comes back as an Answer with `error`. Cancellation from outside re-raises."""
     started = time.perf_counter()
     label = judge_label(judge)
     try:
@@ -128,7 +115,6 @@ async def ask_judge(
         )
 
     try:
-        # A judge's own model calls are oversight, not the turn's.
         with settled():
             answer = await asyncio.wait_for(judge.answer(lens, context), timeout=judge.timeout)
     except TimeoutError:
@@ -141,7 +127,6 @@ async def ask_judge(
         return failed("CancelledError")
     except Exception as exc:
         if judge.external:
-            # Log only the type. The message may quote the request or the reply.
             logger.warning(
                 "Judge {} failed on lens {}: {}", judge.display_name, lens.name, type(exc).__name__
             )
@@ -164,7 +149,6 @@ async def ask_judge(
         try:
             answer.value = lens.answer.parse(lens, answer.value)
         except Exception as exc:
-            # Keep only the exception type. Its message may quote the value.
             answer = answer.model_copy(
                 update={"value": None, "error": f"unparsable: {type(exc).__name__}"}
             )
@@ -178,7 +162,7 @@ async def ask_judge(
 
 @dataclass(frozen=True)
 class Maybe:
-    """A judge alias asked only when JUDGES defines it. JSON: {"alias": ..., "optional": true}."""
+    """A judge alias asked only when JUDGES defines it."""
 
     alias: str
 
@@ -203,7 +187,6 @@ def judge_label(spec: Any) -> str:
 
 
 def clip(text: str, limit: int) -> str:
-    """Cut out the middle: an injected instruction can hide after a page of padding."""
     if len(text) <= limit:
         return text
     marker = "\n[... {} characters left out ...]\n"
@@ -213,17 +196,12 @@ def clip(text: str, limit: int) -> str:
 
 
 def masked_clip(text: str, limit: int) -> str:
-    """Every judge reads turn text this way: secrets masked, then clipped."""
     return clip(mask_secrets(text or ""), limit)
 
 
 def too_long(
     lens: Lens, context: TurnContext, *, input_chars: int, output_chars: int, tool_chars: int
 ) -> bool:
-    """Whether the judged text would need clipping; then nothing is judged.
-
-    Context like history and sources is clipped to fit instead.
-    """
     judged: list[tuple[str, int]] = []
     if lens.subject in {Subject.QUESTION, Subject.EXCHANGE}:
         judged.append((context.input, input_chars))
@@ -244,12 +222,10 @@ def unit(value: Any, default: float) -> float:
 
 
 def secret_setting(name: str) -> str:
-    """From the environment, else Django settings."""
     return str(os.environ.get(name) or resolve_setting(name, "") or "").strip()
 
 
 def sampled(key: str, rate: float) -> bool:
-    """Deterministic: the same `key` always gets the same result for a `rate`."""
     if rate >= 1:
         return True
     if rate <= 0:
@@ -259,7 +235,6 @@ def sampled(key: str, rate: float) -> bool:
 
 
 def build_judge(spec: Judge | str | dict[str, Any]) -> Judge:
-    """Build a Judge from an instance, an alias, or {"class": dotted path, **kwargs}."""
     if isinstance(spec, Judge):
         return spec
     if isinstance(spec, str):
@@ -289,9 +264,7 @@ def _build_alias(alias: str, aliases: Mapping[str, Any]) -> Judge:
             )
         seen.add(target)
         target = aliases[target]
-    # Copy a shared instance, so renaming it doesn't rename it for other aliases.
     judge = copy.copy(target) if isinstance(target, Judge) else build_judge(target)
     if not (isinstance(target, dict) and target.get("name")):
-        # Name it after the alias the lens used. Each answer records the model anyway.
         judge.name = alias
     return judge

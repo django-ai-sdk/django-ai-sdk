@@ -19,7 +19,6 @@ class PipelineResult:
 
 
 def parse_data(data: Any) -> dict | list:
-    """Normalize transform output for storage"""
     if hasattr(data, "model_dump"):
         return data.model_dump()
     if isinstance(data, (dict, list)):
@@ -28,26 +27,11 @@ def parse_data(data: Any) -> dict | list:
 
 
 class FilePipeline:
-    """Composable file processing pipeline.
-
-    Selects a file processor and chains transforms in sequence.
-    Each agent can declare its own pipelines; the first one
-    whose processor accepts the uploaded file is used.
-
-    Example::
-
-        FilePipeline(
-            CSVFileProcessor(),
-            transforms=[CSVTransform(), LLMExtractTransform(response_format=MySchema)],
-        )
-    """
-
     def __init__(
         self,
         file_processor: FileProcessor,
         transforms: list[BaseTransform] | None = None,
     ) -> None:
-        # SAFEGUARD: Accept both a class and an instance
         self.file_processor = (
             file_processor() if isinstance(file_processor, type) else file_processor
         )
@@ -63,13 +47,8 @@ class FilePipeline:
         agent: Agent | None = None,
         on_step: OnStep | None = None,
     ) -> PipelineResult | None:
-        """Run processor then all transforms in sequence.
-        Processor runs in a thread to avoid blocking the event loop.
-
-        ``on_step``, if given, is awaited before the processor and before each
-        transform, passing that component's ``step`` name (or ``None``). It's
-        the pipeline's only checkpoint, so callers can also use it to raise
-        and cancel the run, whether or not that boundary has a step name.
+        """``on_step``, if given, is awaited before the processor and before each
+        transform, passing that component's ``step`` name (or ``None``).
         """
         if not await self.accepts(file):
             return None

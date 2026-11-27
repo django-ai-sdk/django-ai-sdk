@@ -1,8 +1,3 @@
-"""Workflows: steps that pass results forward, declared in code or stored as JSON.
-
-Services and models live in their own modules, so importing this needs no app registry.
-"""
-
 from __future__ import annotations
 
 from django_ai_sdk.workflows.listeners import RunListener

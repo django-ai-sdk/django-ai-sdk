@@ -138,7 +138,6 @@ class TestErrorResponse:
         assert error_response(RequestDataTooBig("too big"))[0] == 400
 
     def test_an_unexpected_error_is_logged_with_its_traceback(self):
-        """A ValueError from inside the SDK is a bug, not the caller's bad input."""
         records = []
         sink = errors.logger.add(records.append, level="ERROR")
         try:

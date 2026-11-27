@@ -6,8 +6,6 @@ from pydantic import BaseModel, Field
 
 
 class NumberedSource(BaseModel):
-    """A source found during a turn"""
-
     index: int = 0
     key: str = ""
     title: str
@@ -22,7 +20,6 @@ class NumberedSource(BaseModel):
 
 
 def from_document(doc: Any) -> NumberedSource:
-    """A source from a retrieved Haystack Document"""
     if hasattr(doc, "meta"):
         found: dict[str, Any] = {
             "chunk_id": doc.id,
@@ -55,7 +52,6 @@ def from_document(doc: Any) -> NumberedSource:
 
 
 def from_web_result(result: dict[str, Any]) -> NumberedSource:
-    """A source from a web search`."""
     return NumberedSource(
         title=result.get("title") or result.get("url") or "Web result",
         content=result.get("content") or result.get("snippet") or "",
@@ -65,14 +61,10 @@ def from_web_result(result: dict[str, Any]) -> NumberedSource:
 
 
 class SourceFormatter(Protocol):
-    """Renders a tool's sources as the text the answering model reads."""
-
     def render(self, sources: list[NumberedSource]) -> str: ...
 
 
 class SourcesFormatter:
-    """Sources as plain blocks."""
-
     def render(self, sources: list[NumberedSource]) -> str:
         return "\n\n".join(
             f"### {s.title}" + (f" ({s.url})" if s.url else "") + f"\n{s.content}" for s in sources

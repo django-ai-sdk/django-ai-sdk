@@ -1,4 +1,3 @@
-# Agent Settings
 from __future__ import annotations
 
 from .agents.models import (
@@ -6,15 +5,11 @@ from .agents.models import (
     AgentSettings,
     AgentUser,
 )
-
-# Conversation models from chats app
 from .artifacts.models import Artifact
 from .conversation.models import (
     Message,
     Thread,
 )
-
-# Memories models
 from .memories.models import (
     Entry,
     EntryDocument,
@@ -25,18 +20,15 @@ from .memories.models import (
 )
 
 __all__ = [
-    # Conversation models
     "Artifact",
     "Thread",
     "Message",
-    # Memories models
     "Entry",
     "EntryDocument",
     "Memory",
     "MemoryGroup",
     "MemoryUser",
     "ThreadMemory",
-    # Agent Settings
     "AgentGroup",
     "AgentSettings",
     "AgentUser",

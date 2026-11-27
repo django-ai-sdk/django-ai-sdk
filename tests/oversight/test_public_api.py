@@ -1,6 +1,3 @@
-"""The oversight surface beyond tests/test_public_api.py: the judges' exports and the
-manual's settings table."""
-
 from __future__ import annotations
 
 import re
@@ -16,13 +13,11 @@ def test_judges_are_exported_from_the_package_and_load_on_first_use():
         oversight.__all__
     )
     assert "load_local_classifier" in oversight.__all__
-    # Each judge loads on first use, so declaring a lens never imports a model client.
     assert "TypeSafe" not in vars(oversight)
     assert oversight.TypeSafe.__name__ == "TypeSafe"
 
 
 def shown(value) -> str:
-    """A default as the manual's settings table writes it."""
     if isinstance(value, bool) or value is None:
         return repr(value)
     if isinstance(value, str):

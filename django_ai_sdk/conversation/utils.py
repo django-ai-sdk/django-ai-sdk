@@ -14,12 +14,10 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Default title length for generated thread titles.
 TITLE_SANITY_LIMIT_DEFAULT = 80
 
 
 def get_title_sanity_limit() -> int:
-    """Overridable via `AI_SDK_TITLE_SANITY_LIMIT` setting."""
     return resolve_setting("AI_SDK_TITLE_SANITY_LIMIT", TITLE_SANITY_LIMIT_DEFAULT)
 
 
@@ -29,8 +27,6 @@ async def generate_thread_title(
     thread_id: str | None = None,
     user: AbstractBaseUser | AnonymousUser | None = None,
 ) -> str | None:
-    """Extract a thread title from the user message(s)."""
-
     user_messages = [m for m in messages if m.role == "user"]
     if not user_messages:
         return None

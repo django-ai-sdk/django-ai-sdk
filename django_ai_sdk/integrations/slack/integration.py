@@ -23,23 +23,10 @@ POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
 TIMESTAMP_HEADER = "X-Slack-Request-Timestamp"
 SIGNATURE_HEADER = "X-Slack-Signature"
 
-# Slack writes a mention as <@U123ABC>.
 _MENTION = re.compile(r"<@[A-Z0-9]+>")
 
 
 class SlackIntegration(WebhookIntegration):
-    """Answer app mentions and direct messages with the configured agent.
-
-    Needs app_mentions:read, im:history and chat:write, Event Subscriptions on this path, and:
-
-        AI_SDK_INTEGRATIONS = {"slack": {
-            "BOT_TOKEN": env("SLACK_BOT_TOKEN"),
-            "SIGNING_SECRET": env("SLACK_SIGNING_SECRET"),
-            "ALLOW_FROM": ["U0123ABCD"],
-            "AGENT": "myapp.agents.SupportAgent",
-        }}
-    """
-
     name = "slack"
     label = "Slack"
     # A top-level message uses its own ts, so its replies land in the same thread.
@@ -66,7 +53,6 @@ class SlackIntegration(WebhookIntegration):
         if body is None:
             return None
 
-        # Slack's endpoint check.
         if body.get("type") == "url_verification":
             return JsonResponse({"challenge": body.get("challenge", "")})
 

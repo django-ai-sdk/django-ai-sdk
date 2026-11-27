@@ -1,22 +1,3 @@
-"""Ready-made django-ninja endpoints over the SDK services.
-
-Needs ``pip install django-ai-sdk[ninja]``. Mount what you need::
-
-    from django_ai_sdk.contrib import ninja as ai_sdk_routers
-
-    api = NinjaAPI(auth=SessionAuth())
-    ai_sdk_routers.register_error_handlers(api)
-    api.add_router("/", ai_sdk_routers.get_threads_router())
-    api.add_router("/", ai_sdk_routers.get_agents_router())
-    api.add_router("/", ai_sdk_routers.get_workflows_router())
-    api.add_router("/memories", ai_sdk_routers.get_memories_router())
-    api.add_router("/integrations", ai_sdk_routers.get_integrations_router())
-    api.add_router("/", ai_sdk_routers.get_oversight_router())
-
-The oversight and workflows routers load lazily and need their apps installed. Each
-``get_*_router()`` returns a new Router, so ``exclude=`` endpoints or add your own.
-"""
-
 from __future__ import annotations
 
 from importlib import import_module
@@ -24,7 +5,7 @@ from typing import Any
 
 try:
     import ninja  # noqa: F401
-except ImportError as exc:  # pragma: no cover - exercised without the extra installed
+except ImportError as exc:  # pragma: no cover
     from django.core.exceptions import ImproperlyConfigured
 
     raise ImproperlyConfigured(
@@ -37,7 +18,6 @@ from django_ai_sdk.contrib.ninja.memories import get_memories_router
 from django_ai_sdk.contrib.ninja.routing import register_error_handlers
 from django_ai_sdk.contrib.ninja.threads import get_threads_router
 
-# Imported on first use (PEP 562): each needs its own app installed.
 _LAZY_ROUTERS = {"get_oversight_router": "oversight", "get_workflows_router": "workflows"}
 
 

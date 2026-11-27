@@ -28,17 +28,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# how a passage was found in its source
 Match = Literal["exact", "normalized", "fuzzy", "partial"]
-# pieces of a passage too short to locate on their own
 MIN_PIECE = 20
-# characters of each source the citation agent reads
 SOURCE_CHARS = 6000
-# below this similarity a quote counts as not found in the answer.
 FUZZY_RATIO = 0.85
-# least characters of answer per citation call
 BLOCK_CHARS = 300
-# most sources one citation call reads
 MAX_SOURCES = 15
 
 CITATION_PROMPT = prompt("""\
@@ -55,7 +49,6 @@ CITATION_PROMPT = prompt("""\
 
 
 def get_citation_agent(agent: Agent) -> Agent | Run:
-    """Get citation agent from settings"""
     from django_ai_sdk.agents.base import Agent  # noqa: PLC0415
     from django_ai_sdk.agents.utils import task_runner  # noqa: PLC0415
 
@@ -69,42 +62,32 @@ def get_citation_agent(agent: Agent) -> Agent | Run:
 
 
 def pick(answer: str, registry: SourceRegistry) -> list[NumberedSource]:
-    """The sources `answer` may cite, at most MAX_SOURCES, in number order."""
     from django_ai_sdk.rags.components import _words  # noqa: PLC0415
 
     sources = registry.all
     if len(sources) <= MAX_SOURCES:
         return sources
 
-    # words in each source, lowercased, for the first SOURCE_CHARS characters
     words = {s.key: _words(f"{s.title} {s.content[:SOURCE_CHARS]}") for s in sources}
 
-    # words in most sources
     terms = {t for t in _words(answer) if sum(t in w for w in words.values()) <= len(sources) / 2}
     shared = {key: len(terms & w) for key, w in words.items()}
     ranks = registry.ranks
 
-    # pick out the sources that share the most words with the answer
     candidates = [s for s in sources if shared[s.key] or ranks.get(s.key) == 1]
     candidates.sort(key=lambda s: (-shared[s.key], ranks.get(s.key, math.inf), s.index))
     return sorted(candidates[:MAX_SOURCES], key=lambda s: s.index)
 
 
 def render(answer: str, sources: list[NumberedSource]) -> str:
-    """The citation agent's input: the numbered sources, then the answer.
-
-    Sources first: a turn's calls then share a prefix the provider can cache.
-    """
+    """Sources first: a turn's calls then share a prefix the provider can cache."""
     text = "\n\n".join(f"[{s.index}] {s.title}\n{s.content[:SOURCE_CHARS]}" for s in sources)
     return f"Sources:\n{text}\n\nAnswer:\n{answer}"
 
 
 def parse_pairs(reply: str) -> list[tuple[str, list[tuple[int, str]]]]:
-    """parse JSON from the citation agent's reply"""
-
-    # FIX: this was probably wrapped due to vendor structured output formatting issues.
     text = reply.strip()
-    if text.startswith("```"):  # a ```json wrapper around the object
+    if text.startswith("```"):
         text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
     start, end = text.find("{"), text.rfind("}")
     try:
@@ -125,7 +108,7 @@ def parse_pairs(reply: str) -> list[tuple[str, list[tuple[int, str]]]]:
     return pairs
 
 
-_IGNORED = re.compile(r"[\s*_`#>|]+")  # whitespace
+_IGNORED = re.compile(r"[\s*_`#>|]+")
 _PLAIN = str.maketrans(
     {
         "\u2010": "-",
@@ -144,8 +127,7 @@ _PLAIN = str.maketrans(
 
 
 def _normalized(text: str) -> tuple[str, list[int]]:
-    """`text` lowercased without markdown marks"""
-    text = text.translate(_PLAIN)  # offset plain markers
+    text = text.translate(_PLAIN)
     out: list[str] = []
     offsets: list[int] = []
     for match in re.finditer(r"[\s*_`#>|]+|[^\s*_`#>|]+", text):
@@ -161,7 +143,6 @@ def _normalized(text: str) -> tuple[str, list[int]]:
 
 
 def _span(offsets: list[int], start: int, end: int, text: str) -> tuple[int, int]:
-    """Raw offsets for the normalized range, trimmed of whitespace."""
     raw_start, raw_end = offsets[start], offsets[end - 1] + 1
     while raw_start < raw_end and text[raw_start].isspace():
         raw_start += 1
@@ -171,13 +152,11 @@ def _span(offsets: list[int], start: int, end: int, text: str) -> tuple[int, int
 
 
 def locate(text: str, quote: str, start: int = 0) -> tuple[int, int] | None:
-    """Find `quote` is in `text`, as raw `(start, end)` offsets, or None."""
     found = match(text, quote, start)
     return found and found[:2]
 
 
 def match(text: str, quote: str, start: int = 0) -> tuple[int, int, Match] | None:
-    """Where `quote` is in `text`, as raw `(start, end)` offsets, or None."""
     for begin in (start, 0):
         if (i := text.find(quote, begin)) != -1:
             return i, i + len(quote), "exact"
@@ -195,28 +174,25 @@ def match(text: str, quote: str, start: int = 0) -> tuple[int, int, Match] | Non
     size = len(norm_quote)
     for i in range(0, max(1, len(norm_text) - size + 1)):
         if i and norm_text[i - 1] != " ":
-            continue  # only windows starting at a word
+            continue
         ratio = difflib.SequenceMatcher(None, norm_quote, norm_text[i : i + size]).ratio()
         if ratio > best[0]:
             best = (ratio, i)
     if best[0] < FUZZY_RATIO:
         return None
     end = min(best[1] + size, len(norm_text))
-    while end < len(norm_text) and norm_text[end] != " ":  # finish the last word
+    while end < len(norm_text) and norm_text[end] != " ":
         end += 1
     return *_span(offsets, best[1], end, text), "fuzzy"
 
 
 async def ground(answer: str, registry: SourceRegistry, agent: Agent | Run) -> CitationsData | None:
-    """The answer's citations and the sources to store"""
     if not registry.all or not answer.strip():
         return None
     return await Grounder(registry, agent).finish(answer)
 
 
 class Grounder:
-    """Grounds an answer block by block while it streams"""
-
     def __init__(
         self,
         registry: SourceRegistry,
@@ -224,25 +200,21 @@ class Grounder:
         on_block: Callable[[], None] | None = None,
     ) -> None:
         self.registry, self.agent, self.on_block = registry, agent, on_block
-        self.text = ""  # the answer so far
-        self.cursor = 0  # where the next block starts
+        self.text = ""
+        self.cursor = 0
         self.tasks: list[asyncio.Task[list[Citation]]] = []
 
     def feed(self, delta: str) -> None:
-        """Add streamed answer text; ground each block once it is complete."""
         self.text += delta
-        if "\n" in delta and self.registry.all:  # a block ends at a blank line
+        if "\n" in delta and self.registry.all:
             self._start(self._block_end())
 
     async def finish(self, answer: str, timeout: float | None = None) -> CitationsData:
-        """The whole answer's citations"""
-
         async for _ in self.wait(answer, timeout):
             pass
         return self.citations()
 
     async def wait(self, answer: str, timeout: float | None = None) -> AsyncIterator[None]:
-        """Ground the rest of `answer`"""
         self.text = answer
         self._start(len(answer))
         loop = asyncio.get_running_loop()
@@ -265,7 +237,6 @@ class Grounder:
         self.cancel()
 
     def citations(self) -> CitationsData:
-        """The citations of the blocks grounded so far."""
         from django_ai_sdk.artifacts.schemas import CitationsData  # noqa: PLC0415
 
         citations = sorted(
@@ -279,7 +250,6 @@ class Grounder:
             task.cancel()
 
     def _block_end(self) -> int:
-        """End of the complete blocks since the cursor"""
         end = self.text.rfind("\n\n", self.cursor + BLOCK_CHARS)
         if end == -1 or self.text.count("```", 0, end) % 2:
             return self.cursor
@@ -306,7 +276,6 @@ class Grounder:
 
 
 async def cite(answer: str, registry: SourceRegistry, agent: Agent | Run) -> list[Citation]:
-    """Citations of `answer`, offsets into it, from one citation agent call."""
     from django_ai_sdk.artifacts.schemas import Citation, Evidence  # noqa: PLC0415
     from django_ai_sdk.common import ChatMessage  # noqa: PLC0415
 
@@ -319,7 +288,7 @@ async def cite(answer: str, registry: SourceRegistry, agent: Agent | Run) -> lis
     asked = [ChatMessage(role="user", content=render(answer, sources))]
     reply = await run_side_task(agent, asked, system_prompt=CITATION_PROMPT, response_format=None)
     citations: list[Citation] = []
-    outcomes: Counter[str] = Counter()  # per supporting passage
+    outcomes: Counter[str] = Counter()
     cursor = 0
     for quote, support in parse_pairs(reply if isinstance(reply, str) else ""):
         evidence = get_evidence(support, registry, Evidence, outcomes)
@@ -342,12 +311,6 @@ async def cite(answer: str, registry: SourceRegistry, agent: Agent | Run) -> lis
 
 
 def rebase(data: CitationsData, answer: str) -> CitationsData:
-    """Move citations onto `answer` after oversight masked part of it.
-
-    Citations whose quote is unchanged stay. Moved quotes are found again. Quotes
-    that are gone are dropped, and sources no longer cited are unmarked. Fuzzy
-    matches are ignored, since a near match may be the masked part.
-    """
     from django_ai_sdk.artifacts.schemas import CitationsData  # noqa: PLC0415
 
     kept: list[Citation] = []
@@ -378,7 +341,6 @@ def rebase(data: CitationsData, answer: str) -> CitationsData:
 
 
 def uncited(registry: SourceRegistry) -> CitationsData:
-    """The turn's own sources without citations"""
     from django_ai_sdk.artifacts.schemas import CitationsData  # noqa: PLC0415
 
     return CitationsData(citations=[], sources=_stored_sources([], registry))
@@ -390,7 +352,6 @@ def get_evidence(
     evidence_class: Any,
     outcomes: Counter[str],
 ) -> list[Any]:
-    """Single Evidence per source whose passage is found in that source."""
     found: dict[str, Any] = {}
     for number, passage in support:
         source = registry.get(number)
@@ -410,8 +371,6 @@ def get_evidence(
 
 
 def get_locate_passage(content: str, passage: str) -> tuple[int, int, Match] | None:
-    """Where `passage` is in `content`."""
-
     if found := match(content, passage):
         return found
     pieces = re.split(r"(?<=[.!?;:])\s+|\n+|\.{3}|…", passage)
@@ -419,19 +378,17 @@ def get_locate_passage(content: str, passage: str) -> tuple[int, int, Match] | N
     for piece in (p.strip() for p in pieces):
         cursor = spans[-1][1] if spans else 0
         if len(piece) >= MIN_PIECE and (span := locate(content, piece, cursor)):
-            if span[0] >= cursor:  # in order
+            if span[0] >= cursor:
                 spans.append(span)
     if not spans:
         return None
     start, end = spans[0][0], spans[-1][1]
-    if end - start > 2 * len(passage):  # stitched from far apart: keep the longest piece
+    if end - start > 2 * len(passage):
         start, end = max(spans, key=lambda s: s[1] - s[0])
     return start, end, "partial"
 
 
 def _stored_sources(citations: list[Any], registry: SourceRegistry) -> list[Any]:
-    """The turn's own sources and every cited one. An uncited one whose text an
-    earlier turn stored goes without it (title, document and chunk only)."""
     from django_ai_sdk.artifacts.schemas import CitedSource  # noqa: PLC0415
 
     numbers: dict[str, int] = {}
@@ -453,5 +410,5 @@ def _stored_sources(citations: list[Any], registry: SourceRegistry) -> list[Any]
             cited=s.key in numbers,
         )
         for s in registry.all
-        if s.key in numbers or s.key not in registry.seeded  # earlier turns' only when cited
+        if s.key in numbers or s.key not in registry.seeded
     ]

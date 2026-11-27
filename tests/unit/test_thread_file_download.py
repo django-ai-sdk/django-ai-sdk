@@ -1,5 +1,3 @@
-"""Thread file downloads through both contrib layers (tests/urls.py)."""
-
 import pytest
 from asgiref.sync import async_to_sync
 from django.core.files.base import ContentFile
@@ -19,7 +17,6 @@ def stranger(django_user_model):
 
 @pytest.fixture
 def thread_file(owner, settings, tmp_path, mock_agents_registry):
-    """A thread with two uploaded files: an image and a PDF."""
     from django_ai_sdk.conversation.models import Thread
     from django_ai_sdk.memories.models import EntryDocument
     from django_ai_sdk.memories.services import MemoryService
@@ -37,8 +34,8 @@ def thread_file(owner, settings, tmp_path, mock_agents_registry):
 
 
 URLS = [
-    "/api/memories/thread/{t}/files/{d}/download",  # ninja
-    "/drf/threads/{t}/files/{d}/download/",  # drf
+    "/api/memories/thread/{t}/files/{d}/download",
+    "/drf/threads/{t}/files/{d}/download/",
 ]
 
 
@@ -89,7 +86,6 @@ class TestDownload:
 
 @pytest.mark.django_db
 def test_the_helper_checks_permissions_on_its_own(stranger, thread_file):
-    """Not only the endpoints: a project's own download view can't skip the check."""
     from django_ai_sdk.permissions import PermissionDenied
     from django_ai_sdk.views.files import thread_file_response
 
@@ -108,7 +104,6 @@ class TestThreadFileUrl:
         doc = EntryDocument(file_name="cat.png")
         doc.file.save("cat.png", ContentFile(PNG), save=False)
 
-        # tests/urls.py mounts the contrib memories router on the "ai-test" API.
         settings.AI_SDK_THREAD_FILE_URL = "ai-test:download_thread_file"
         assert get_thread_file_url(doc, "t1") == (
             f"/api/memories/thread/t1/files/{doc.id}/download"

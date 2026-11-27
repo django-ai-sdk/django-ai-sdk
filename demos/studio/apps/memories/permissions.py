@@ -13,13 +13,6 @@ if TYPE_CHECKING:
 
 
 class AllowAnonymousMemoryPermission(BasePermission):
-    """Permission class that allows anonymous users read-only access to public memories.
-
-    - Anonymous users: can view/list public memories and documents (read-only).
-    - Authenticated users: full access to their own memories + public memories.
-    - Manager operations (update/delete memory) require ownership with can_manage=True.
-    """
-
     READ: frozenset[Operation] = frozenset(
         {
             Operation.VIEW_MEMORY,
@@ -51,7 +44,6 @@ class AllowAnonymousMemoryPermission(BasePermission):
     async def has_permission(
         self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
     ) -> bool:
-        # Anonymous users can only read public memories
         if user is None or not user.is_authenticated:
             return operation in self.READ
         return True
@@ -63,19 +55,15 @@ class AllowAnonymousMemoryPermission(BasePermission):
         obj: Memory,
         **kwargs: Any,
     ) -> bool:
-        # Anonymous users can only read public memories
         if user is None or not user.is_authenticated:
             return operation in self.READ and obj.is_public
 
-        # Check memory user permissions for authenticated users
         ownership = await obj.memory_users.filter(user=user).afirst()  # ty: ignore[invalid-attribute-access]
         if ownership is None:
-            # Not a memory user — only allow read on public memories
             if operation in self.READ and obj.is_public:
                 return True
             return False
 
-        # Memory user: manager ops require can_manage=True
         if operation in self.MANAGE:
             return ownership.can_manage
         return True
@@ -86,7 +74,6 @@ class AllowAnonymousMemoryPermission(BasePermission):
         operation: Operation,
         queryset: QuerySet,
     ) -> QuerySet:
-        """Return a filtered queryset for the given user and operation."""
         is_authenticated = user is not None and getattr(user, "is_authenticated", False)
 
         if not is_authenticated:

@@ -22,13 +22,10 @@ THREAD_TITLE_MAX_LENGTH = 255
 
 
 def prompt(text: str) -> Prompt:
-    """Helper to create Prompt type with dedented text."""
     return Prompt(dedent(text))
 
 
 class Attachment(BaseModel):
-    """A thread file attached to a user message."""
-
     document_id: str
     media_type: str = ""
     filename: str = ""
@@ -40,37 +37,28 @@ class Attachment(BaseModel):
 
 
 class ChatMessage(BaseModel):
-    """Internal SDK representation of a chat message."""
-
-    # Core message data
     role: Literal["system", "user", "assistant"]
     content: str = ""
     reasoning: str | None = None
     id: str = ""
     attachments: list[Attachment] = Field(default_factory=list)
 
-    # Rich metadata
     tool_calls: list[dict] = Field(default_factory=list)
     sources: list[dict] = Field(default_factory=list)
     model: str = ""
     finish_reason: str = ""
-    # Raw text, for admins and logs only.
     errors: list[str] = Field(default_factory=list)
-    # What a client sees (see django_ai_sdk.errors).
     error_code: str = ""
     error_ref: str = ""
     metadata: dict = Field(default_factory=dict)
 
-    # Timestamps & timing
     created_at: str = ""
     processing_time_ms: int = 0
     started_at: float = Field(default_factory=time.time)
     completed_at: float = 0
 
-    # Helpers
     @property
     def text(self) -> str:
-        """Text property for compatibility"""
         return self.content
 
     @property
@@ -82,51 +70,41 @@ class ChatMessage(BaseModel):
 
     @property
     def has_tools(self) -> bool:
-        """Whether this message used tools."""
         return len(self.tool_calls) > 0
 
     @property
     def has_errors(self) -> bool:
-        """Whether this message had errors."""
         return len(self.errors) > 0
 
     def finalize(self, finish_reason: str = "") -> None:
-        """Mark message as complete."""
         self.finish_reason = finish_reason
         self.completed_at = time.time()
         self.processing_time_ms = self.duration
 
 
 def as_chat_messages(messages: Iterable[ChatMessage | Mapping[str, Any]]) -> list[ChatMessage]:
-    """Convert dicts to ChatMessages. Existing ChatMessages are kept as the same objects."""
     return [
         m if isinstance(m, ChatMessage) else ChatMessage.model_validate(dict(m)) for m in messages
     ]
 
 
 def last_user_message(messages: list[ChatMessage]) -> ChatMessage | None:
-    """Return the latest user message, usually the question being asked."""
     return next((m for m in reversed(messages) if m.role == "user"), None)
 
 
 def last_user_text(messages: list[ChatMessage]) -> str:
-    """Return the latest user message's text, or "" when there is none."""
     message = last_user_message(messages)
     return (message.content if message is not None else "") or ""
 
 
 class MessageChunk(BaseModel):
-    """Universal chunk format for storage and standardization."""
-
-    type: str  # 'text', 'reasoning', 'tool_call_start', 'tool_input', 'tool_output', 'error'
+    type: str
     content: Any
     metadata: dict = Field(default_factory=dict)
     timestamp: float = Field(default_factory=time.time)
 
 
 class StreamWriter:
-    """Writes ChatMessage from streaming chunks."""
-
     def __init__(
         self,
         message_id: str,
@@ -140,7 +118,7 @@ class StreamWriter:
             model=model,
             started_at=time.time(),
         )
-        self._pending_tool_calls = {}  # Track multiple tool calls by ID
+        self._pending_tool_calls = {}
         self.storage_callback = storage_callback
         self._content_chunks: list[str] = []
         self._reasoning_chunks: list[str] = []
@@ -150,7 +128,6 @@ class StreamWriter:
         )
 
     def add_chunk(self, chunk: MessageChunk) -> ChatMessage:
-        """Process a chunk and update message."""
         if chunk.type == "text":
             self._content_chunks.append(chunk.content)
 
@@ -171,12 +148,9 @@ class StreamWriter:
                 "arguments": {},
                 "result": None,
             }
-            # Which agent ran this: "agent" for a subagent's own tool, "handoff"
-            # for the coordinator delegating to one. Absent for a plain call.
             for key in ("agent", "handoff"):
                 if value := chunk.metadata.get(key):
                     tool_call[key] = value
-            # Append at start time so stored tool_calls are chronological.
             self._pending_tool_calls[tool_call_id] = tool_call
             self.message.tool_calls.append(tool_call)
             logger.debug(f"Started tool call: {tool_name} (ID: {tool_call_id})")
@@ -211,39 +185,28 @@ class StreamWriter:
 
     @property
     def text(self) -> str:
-        """The answer text"""
         return "".join(self._content_chunks)
 
     def replace_text(self, text: str) -> None:
-        """Store `text` instead of the streamed text, e.g. a masked answer."""
         self._content_chunks = [text]
 
     def drop_reasoning(self) -> None:
-        """Drop the reasoning, which could reveal a withheld answer."""
         self._reasoning_chunks = []
 
     def drop_tool_details(self, receipts: Mapping[str, tuple[str, ...]]) -> None:
-        """Keep only tool call names. Arguments and results could reveal a withheld answer.
-
-        A tool in `receipts` (receipt keys by tool name) keeps its receipt as its result.
-        """
         for call in self.message.tool_calls:
             kept = receipt(call["result"], receipts.get(call["name"]))
             call["arguments"] = {}
             call["result"] = {"result": kept} if kept else None
 
     async def finalize(self, finish_reason: str = "") -> ChatMessage:
-        """Complete the message"""
         logger.debug(f"Finalizing message with reason: {finish_reason}")
 
-        # Join string chunks
         if self._content_chunks:
             self.message.content = "".join(self._content_chunks)
         if self._reasoning_chunks:
             self.message.reasoning = "".join(self._reasoning_chunks)
 
-        # Any remaining pending tool calls never received an output chunk; they
-        # were already appended to message.tool_calls at start time.
         pending_tools_count = len(self._pending_tool_calls)
         if pending_tools_count > 0:
             logger.debug(
@@ -252,21 +215,17 @@ class StreamWriter:
             )
         self._pending_tool_calls.clear()
 
-        # Finalize message
         self.message.finalize(finish_reason)
         logger.debug(
             f"Message finalized: content_length={len(self.message.content)}, tool_calls={len(self.message.tool_calls)}, errors={len(self.message.errors)}, duration={self.message.duration}ms"
         )
 
-        # Auto-store if callback provided
         if self.storage_callback:
             logger.debug("Attempting to store message via storage callback")
             try:
-                # Store the message based on connected adapter.
                 await self.storage_callback(self.message)
                 logger.debug("Message stored successfully via callback")
             except Exception as storage_error:
-                # Log error but don't break streaming
                 logger.error(f"Storage callback failed: {storage_error}")
                 logger.error(f"Storage callback traceback: {traceback.format_exc()}")
         else:

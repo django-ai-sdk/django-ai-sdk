@@ -1,5 +1,3 @@
-"""The AI_SDK_OVERSIGHT setting. Only this module reads it; check E012 validates it."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -18,29 +16,19 @@ FAIL_MODES = ("closed", "open")
 RETENTION_KINDS = ("content", "metadata")
 
 DEFAULTS: dict[str, Any] = {
-    # Kill switch: False leaves every agent unguarded.
     "ENABLED": True,
-    # Policy for agents without `oversight`; "" leaves them unguarded.
     "DEFAULT_POLICY": "",
-    # The most content the record keeps. A policy may keep less, never more.
     "CAPTURE": Capture.MASKED,
     "STREAM_MODE": "auto",
-    # Judges by alias: {"judge": {"class": "LLMJudge"}}.
     "JUDGES": {},
-    # Milliseconds per inline stage; a lens still running at the deadline fails.
     "DEADLINE_MS": {"gate": 1000, "tool": 1000, "finish": 2_000},
-    # Longer questions are blocked at the gate: lenses would only read part of them.
     "MAX_INPUT_CHARS": 100_000,
-    # A tool result or source longer than a judge reads is judged in at most this many chunks.
     "MAX_OTHER_TEXT_CHUNKS": 10,
     "CLIENT_DETAIL": "actions",
     "FAIL_MODE": "closed",
     "RETENTION": {"content": 90, "metadata": 730},
-    # Notifiers as JUDGES names its judges: ["LogNotifier"].
     "NOTIFIERS": [],
-    # How long each process caches authored policies. 0 reads them every turn.
     "RUNTIME_CACHE_SECONDS": 10,
-    # What a model call outside a required turn does.
     "UNGUARDED_MODEL_CALLS": "refuse",
 }
 
@@ -48,12 +36,10 @@ UNGUARDED_MODES = ("refuse", "warn", "allow")
 
 
 def configured(name: str = "AI_SDK_OVERSIGHT") -> Any:
-    """{} when unset. It may not be a dict."""
     return getattr(settings, name, None) or {}
 
 
 def setting_from(name: str, defaults: dict[str, Any], key: str) -> Any:
-    """A dict value merges one level deep into a dict default."""
     user_settings = configured(name)
     if not isinstance(user_settings, dict):
         raise ImproperlyConfigured(f"{name} must be a dict, not a {type(user_settings).__name__}.")
@@ -69,10 +55,6 @@ def setting(key: str) -> Any:
 
 
 def build_configured[T](spec: Any, base: type[T], package: str) -> T:
-    """A `base` from an instance, a class name, or {"class": class, **kwargs}.
-
-    A class name is a dotted path, or a bare name of one of `package`'s own classes.
-    """
     if isinstance(spec, base):
         return spec
     config = {"class": spec} if isinstance(spec, str) else spec
@@ -97,7 +79,6 @@ def is_retention(value: Any) -> bool:
 
 
 def validate_retention(value: Any) -> dict[str, int]:
-    """Raise ValueError; the system check does not stop a turn or prune, so runtime checks too."""
     if not is_retention(value):
         raise ValueError(
             f"retention must map 'content' and/or 'metadata' to whole days of at least 1, not {value!r}"

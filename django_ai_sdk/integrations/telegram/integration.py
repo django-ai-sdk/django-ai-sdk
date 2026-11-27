@@ -24,23 +24,10 @@ MAX_MESSAGE_LENGTH = 4096
 
 SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
 
-# In a group the bot is addressed as @botname.
 _MENTION = re.compile(r"^@\w+\s*")
 
 
 class TelegramIntegration(WebhookIntegration):
-    """Answer messages sent to a Telegram bot with the configured agent.
-
-    Register the bot once with setWebhook (WEBHOOK_SECRET as secret_token), and:
-
-        AI_SDK_INTEGRATIONS = {"telegram": {
-            "BOT_TOKEN": env("TELEGRAM_BOT_TOKEN"),
-            "WEBHOOK_SECRET": env("TELEGRAM_WEBHOOK_SECRET"),
-            "ALLOW_FROM": ["123456789"],
-            "AGENT": "myapp.agents.SupportAgent",
-        }}
-    """
-
     name = "telegram"
     label = "Telegram"
 
@@ -84,18 +71,15 @@ class TelegramIntegration(WebhookIntegration):
 
     @staticmethod
     def _is_answerable(message: dict[str, Any]) -> bool:
-        # is_bot: our own reply came back (would loop). No text: a sticker, photo or join.
         if (message.get("from") or {}).get("is_bot"):
             return False
         return bool(message.get("text"))
 
     async def send(self, chat_id: str, text: str, *, reply_to: str | None = None) -> bool:
-        """Send a message to a chat; whether Telegram accepted it. Refusals are logged."""
         payload: dict[str, Any] = {
             "chat_id": chat_id,
             "text": text[:MAX_MESSAGE_LENGTH],
         }
-        # A non-numeric id still sends, just not as a reply.
         if reply_to and str(reply_to).isdigit():
             payload["reply_parameters"] = {"message_id": int(reply_to)}
 

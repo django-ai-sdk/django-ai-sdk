@@ -1,9 +1,3 @@
-"""Forget users on the oversight record as deleting them does, for a delete whose forgetting
-failed and was logged. Safe to run again:
-
-    manage.py oversight_forget_actor <user id> [<user id> ...]
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
 
 def _accepted_kwargs(factory: Callable[..., Any], context: dict[str, Any]) -> dict[str, Any]:
-    """Filter context to the keys factory accepts."""
     params = inspect.signature(factory).parameters
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
         return context
@@ -29,9 +28,7 @@ def _accepted_kwargs(factory: Callable[..., Any], context: dict[str, Any]) -> di
 
 
 class APIIntegration(Integration):
-    """Base for integrations backed by a hand-written API client, not MCP.
-
-    `tools`: Haystack Tools, or factories passed whichever of user, agent, thread_id they declare.
+    """`tools`: Haystack Tools, or factories passed whichever of user, agent, thread_id they declare.
     `health_check`: async no-arg staticmethod that raises on failure; without it, always ACTIVE.
     """
 
@@ -43,7 +40,6 @@ class APIIntegration(Integration):
     def __init__(self) -> None:
         if not self.label and self.name:
             self.label = self.name.title()
-        # Decided once: set health_check on the class, not the instance.
         self._cache: ResilientCache | None = (
             ResilientCache(
                 ttl=resolve_setting("AI_SDK_INTEGRATION_CACHE_TTL", 900),

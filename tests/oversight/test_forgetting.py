@@ -1,5 +1,3 @@
-"""Forgetting: deleting a thread deletes its oversight content; deleting a user, who asked too."""
-
 from __future__ import annotations
 
 import threading
@@ -38,7 +36,6 @@ OVERSIGHT_TABLES = [
 
 
 async def a_turn_in(thread, text: str = QUESTION) -> str:
-    """A closed turn in `thread`, recorded with full capture so its content quotes it."""
     from django.test import override_settings
 
     with override_settings(AI_SDK_OVERSIGHT={"CAPTURE": "full"}):
@@ -51,7 +48,6 @@ async def a_turn_in(thread, text: str = QUESTION) -> str:
 
 
 async def a_threadless_turn(user=None, text: str = QUESTION) -> str:
-    """A closed turn `user` asked without a thread, with full capture."""
     from django.test import override_settings
 
     with override_settings(AI_SDK_OVERSIGHT={"CAPTURE": "full"}):
@@ -66,13 +62,12 @@ async def has_content(turn_id: str) -> bool:
 
 
 def dump() -> str:
-    """Every row of every oversight table, read with raw SQL."""
     from django.db import connection
 
     rows = []
     with connection.cursor() as cursor:
         for table in OVERSIGHT_TABLES:
-            cursor.execute(f"SELECT * FROM {table}")  # noqa: S608 - fixed table names
+            cursor.execute(f"SELECT * FROM {table}")
             rows.extend(repr(row) for row in cursor.fetchall())
     return "\n".join(rows)
 
@@ -93,7 +88,7 @@ class TestForgetTurns:
         assert not await TurnContent.objects.aexists()
         turn = await Turn.objects.aget(id=turn_id)
         assert turn.content_id is None
-        assert not turn.content_forgotten  # it was closed already
+        assert not turn.content_forgotten
         assert await RuleMatch.objects.filter(turn=turn).aexists()
 
     async def test_it_blanks_reviewers_notes(self):
@@ -116,7 +111,6 @@ class TestForgetTurns:
     async def test_an_interrupted_turn_forgotten_then_closing_stores_nothing(self):
         guard = await start("test-guard", QUESTION)
         await guard.gate()
-        # oversight_sweep found it, but its run was only slow.
         await Turn.objects.filter(id=guard.id).aupdate(status=Turn.Status.INTERRUPTED)
         await sync_to_async(forget_turns)(Turn.objects.filter(id=guard.id))
         await guard.finish(ANSWER)
@@ -143,7 +137,7 @@ class TestDeletedThreads:
         assert await has_content(turn_id)
         assert await ThreadService.delete_thread(str(thread.id), user=user)
         assert not await TurnContent.objects.aexists()
-        assert await Turn.objects.filter(thread_id=str(thread.id)).aexists()  # matches stay
+        assert await Turn.objects.filter(thread_id=str(thread.id)).aexists()
 
     async def test_the_command_forgets_a_thread(self):
         from django.core.management import call_command
@@ -184,7 +178,7 @@ class TestNothingQuotesAForgottenThread:
         thread_id = str(thread.id)
         await a_turn_in(thread)
         before = await sync_to_async(dump)()
-        assert "salary" in before and "jan@example.com" in before  # full capture kept it
+        assert "salary" in before and "jan@example.com" in before
         await thread.adelete()
         after = await sync_to_async(dump)()
         for text in ("salary", "jan@example.com", "fine", "found none"):
@@ -236,8 +230,6 @@ class TestNothingQuotesAForgottenThread:
 @pytest.mark.usefixtures("no_reflect_queue")
 @pytest.mark.django_db(transaction=True)
 class TestDeletedUsers:
-    """Deleting a user clears who asked and forgets the content of their threadless turns."""
-
     async def test_a_deleted_user_leaves_no_actor_and_no_threadless_content(self):
         user = await UserFactory.acreate()
         thread = await a_thread(user)
@@ -253,7 +245,6 @@ class TestDeletedUsers:
         assert await Turn.objects.acount() == 2
         assert not await has_content(threadless)
         assert not await has_content(in_thread)
-        # What the record says about the turns stays.
         assert await LensAnswer.objects.acount() == answers
         assert await RuleMatch.objects.acount() == matches
         after = await sync_to_async(dump)()
@@ -307,7 +298,6 @@ class TestDeletedUsers:
         assert not await get_user_model().objects.filter(pk=pk).aexists()
         logger.exception.assert_called_once()
         assert "oversight_forget_actor" in logger.exception.call_args.args[0]
-        # All or nothing: the actor stays named, so a retry (forget_actor) finds the turn.
         assert (await Turn.objects.aget(id=turn_id)).actor_id == str(pk)
 
     async def test_the_command_forgets_a_user_whose_delete_could_not(self):
@@ -337,7 +327,6 @@ class TestDeletedUsers:
             forgotten, deletes = await sync_to_async(forget_counting_deletes)(str(user.pk))
         assert forgotten == 5
         assert not await TurnContent.objects.filter(turn__id__in=turns).aexists()
-        # Three batches of at most two turns: one delete of content rows each, not five.
         assert deletes == 3
 
     async def test_a_deleted_user_blanks_notes_on_their_threadless_turns(self):
@@ -350,7 +339,6 @@ class TestDeletedUsers:
 
 
 def forget_counting_deletes(actor_id: str) -> tuple[int, int]:
-    """`forget_actor(actor_id)`, and how many DELETEs of content rows it sent."""
     from django.db import connection
     from django.test.utils import CaptureQueriesContext
     from django_ai_sdk.oversight.content import forget_actor
@@ -408,7 +396,6 @@ class TestForgettingRacesAClose:
             with transaction.atomic():
                 content.forget_thread("t-race")
                 forgot.set()
-                # Hold the forget open while the close runs.
                 time.sleep(0.5)
 
         def close() -> None:

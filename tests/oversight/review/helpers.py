@@ -1,5 +1,3 @@
-"""Readers with the oversight model permissions, and closed turns to read."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -18,7 +16,6 @@ REVIEW = "django_ai_sdk_oversight.change_reviewitem"
 
 
 async def reader(*perms: str, **traits: Any) -> Any:
-    """A user holding `perms` (and `staff=True`/`superuser=True` when asked)."""
     user = await UserFactory.acreate(**traits)
     return await agrant(user, *perms)
 
@@ -33,7 +30,6 @@ async def a_turn(
     channel: str = "api",
     thread_id: str = "",
 ) -> str:
-    """A closed test-guard turn: "salary" queues it for hr and labels it topic=hr."""
     with override_settings(AI_SDK_OVERSIGHT={"CAPTURE": capture}):
         invalidate_policy()
         guard = await TurnGuard.start(

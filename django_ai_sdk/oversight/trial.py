@@ -1,5 +1,3 @@
-"""Dry runs: run a policy over one exchange as a turn would, without recording it."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
@@ -26,10 +24,8 @@ if TYPE_CHECKING:
 class DryRunResult:
     policy: str
     stages: list[StageResult] = field(default_factory=list)
-    # "gate" or "finish" when that stage blocked. A blocked tool call does not end the turn.
     blocked_stage: str = ""
     outcome: Outcome = Outcome.ALLOWED
-    # As if every report-mode rule were enforced.
     report_outcome: Outcome = Outcome.ALLOWED
 
     def stage(self, name: Stage | str) -> StageResult:
@@ -54,13 +50,7 @@ async def dry_run(
 ) -> DryRunResult:
     """Run `policy` over one exchange as a turn would, then reflect, without recording it.
 
-        result = await dry_run("support", question="Where is my refund?", answer="On its way.")
-        result.stage("gate").answers["injection_question"].value
-
-    `policy` is a name or a `ResolvedPolicy` (e.g. a draft from `build_policy`).
-    `tool_calls` are checked in order before the answer. Judges are real: in tests
-    use a CheckLens or `LLMJudge(llm=FakeLLM(...))`. Raises LookupError when a named
-    policy does not load.
+    Raises LookupError when a named policy does not load.
     """
     if isinstance(policy, ResolvedPolicy):
         resolved = policy
@@ -68,7 +58,6 @@ async def dry_run(
         resolved = await get_resolved_policy(policy)
         if resolved is None:
             raise LookupError(broken_reason(policy) or f"No oversight policy {policy!r}")
-    # Opened directly, so a dry run checks even when oversight is switched off.
     guard = TurnGuard.under_policy(
         resolved,
         agent=SimpleNamespace(name="Dry run", oversight=resolved.name),
@@ -123,7 +112,6 @@ async def _run_stages(
         if finish.blocked:
             result.blocked_stage = "finish"
 
-    # Reflect runs on every closed turn, a blocked one too.
     answered, matched = len(guard.answered), len(guard.matched)
     await _run_reflect_stage(guard, resolved)
     add_stage(StageResult(stage=Stage.REFLECT), answered, matched)

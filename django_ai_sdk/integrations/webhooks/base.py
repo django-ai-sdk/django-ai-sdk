@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 REPLY_TIMEOUT_SECONDS = 10
 
-# Dedup window for a platform that signs no timestamp: replays work once it ends.
 UNSIGNED_DEDUP_TTL = 7 * 24 * 60 * 60
 
 
@@ -34,16 +33,14 @@ class InboundEvent(BaseModel):
     event_id: str
     text: str
     conversation_id: str
-    # Where to reply, such as a Slack thread_ts. Empty means the top level.
+    # Where to reply. Empty means the top level.
     thread_ref: str = ""
     external_user_id: str = ""
     workspace_id: str = ""
-    # Travels with the event since reply() runs in the worker.
     reply_token: str = ""
 
 
 def json_body(response: Any) -> dict[str, Any]:
-    """A platform response's JSON object, or {} when the body is not one."""
     try:
         body = response.json()
     except ValueError:
@@ -51,20 +48,17 @@ def json_body(response: Any) -> dict[str, Any]:
     return body if isinstance(body, dict) else {}
 
 
-# The event being answered, so a tool can post to the same channel.
 current_event: ContextVar[InboundEvent | None] = ContextVar("current_event", default=None)
 
 
 class WebhookIntegration(Integration):
-    """Receives platform events and answers with an agent; implement verify, parse, reply."""
-
     agent: str = ""
 
     # Sync, in the request, within the platform's ack window (three seconds for Slack).
 
     @abstractmethod
     def verify(self, request: HttpRequest) -> bool:
-        """Check that the request really came from the platform."""
+        pass
 
     @abstractmethod
     def parse(self, request: HttpRequest) -> InboundEvent | HttpResponse | None:
@@ -84,17 +78,15 @@ class WebhookIntegration(Integration):
         """Response sent once the event is queued, before the agent runs."""
         return HttpResponse(status=200)
 
-    #: Platforms redeliver and tasks are at-least-once.
     dedup_ttl: int = 600
 
     @abstractmethod
     async def reply(self, event: InboundEvent, text: str) -> None:
-        """Post `text` back to the event's conversation."""
+        pass
 
     async def _post_reply(
         self, url: str, *, json: dict[str, Any], headers: dict[str, str] | None = None
     ) -> httpx.Response | None:
-        """POST a reply; None when the platform is unreachable."""
         try:
             async with httpx.AsyncClient(timeout=REPLY_TIMEOUT_SECONDS) as client:
                 return await client.post(url, json=json, headers=headers)
@@ -123,7 +115,6 @@ class WebhookIntegration(Integration):
         )
 
     def has_audience(self) -> bool:
-        """True when ALLOW_FROM is set, to a list or to ANY."""
         return bool(self._config().get("ALLOW_FROM"))
 
     def _missing_audience(self, senders: str) -> str | None:
@@ -135,7 +126,6 @@ class WebhookIntegration(Integration):
         )
 
     def _admits(self, key: str, value: str) -> bool:
-        # An unset list admits everyone the platform lets through.
         allowed = self._config().get(key) or []
         if not allowed or allowed == self.ANY:
             return True
@@ -160,7 +150,6 @@ class WebhookIntegration(Integration):
         identifier = self.secret("RUN_AS")
         user = await aget_active_user(identifier)
         if identifier and user is None:
-            # Anonymous is the lower privilege: the agent reaches no integration.
             logger.error(
                 "AI_SDK_INTEGRATIONS[%r]['RUN_AS'] = %r matches no single active user; "
                 "answering anonymously",
@@ -169,7 +158,6 @@ class WebhookIntegration(Integration):
             )
         return user
 
-    # A detail set by hand wins over the computed one.
     _detail: str | None = None
 
     @property
@@ -220,7 +208,6 @@ class WebhookIntegration(Integration):
                 "AI_SDK_INTEGRATIONS[%r]['AGENT'] = %r cannot be imported", self.name, path
             )
             return None
-        # Only registered (non-abstract) Agent subclasses have an _agent_id.
         agent_id = getattr(agent_class, "_agent_id", "")
         if not agent_id:
             logger.error(

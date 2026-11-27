@@ -1,9 +1,3 @@
-"""Error codes: what a client is told when something fails.
-
-Clients get a stable code, its message and a ``ref``; the exception text goes to the
-log under that ref.
-"""
-
 from __future__ import annotations
 
 import secrets
@@ -29,15 +23,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# How far to walk __cause__/__context__ looking for something recognisable.
 # Haystack wraps provider errors in PipelineRuntimeError one or two frames deep.
 _MAX_CAUSE_DEPTH = 5
 
 
 class ErrorCode(StrEnum):
-    """The SDK's own codes. Part of the public API; apps add theirs with
-    `register_error_code`."""
-
     CONTEXT_OVERFLOW = "context_overflow"
     RATE_LIMITED = "rate_limited"
     PROVIDER_UNAVAILABLE = "provider_unavailable"
@@ -58,8 +48,6 @@ class ErrorCode(StrEnum):
 
 @dataclass(frozen=True)
 class ErrorSpec:
-    """How a code is shown: its message, HTTP status and whether retrying can help."""
-
     code: str
     message: Any
     status: int = 500
@@ -73,14 +61,11 @@ def register_error_code(
     code: str, *, message: Any, status: int = 500, retryable: bool = False
 ) -> None:
     """Add a code, or change an existing one's message, status or retryable flag.
-
-    Call it from `AppConfig.ready()`.
-    """
+    Call it from `AppConfig.ready()`."""
     _REGISTRY[str(code)] = ErrorSpec(str(code), message, status, retryable)
 
 
 def get_error_spec(code: str | None) -> ErrorSpec:
-    """The spec for a code; `unknown` for a code nobody registered."""
     return _REGISTRY.get(str(code or ""), _REGISTRY[ErrorCode.UNKNOWN])
 
 
@@ -147,8 +132,6 @@ register_error_code(
     ErrorCode.CONFLICT, message=_("This conflicts with something that already exists."), status=409
 )
 register_error_code(ErrorCode.INVALID_REQUEST, message=_("The request was invalid."), status=400)
-# 400 like CONTENT_FILTERED. A 403 would look like an auth failure, but the
-# block is about the content, not the user.
 register_error_code(
     ErrorCode.BLOCKED, message=_("This assistant's policy stopped this answer."), status=400
 )
@@ -160,10 +143,7 @@ register_error_code(
 
 
 class AiSdkError(Exception):
-    """An error whose code the raiser already knows.
-
-    `detail` is for the log only; clients get the code's message.
-    """
+    """`detail` is for the log only; clients get the code's message."""
 
     code: str = ErrorCode.UNKNOWN
 
@@ -174,29 +154,20 @@ class AiSdkError(Exception):
 
 
 class NotFound(AiSdkError, ValueError):
-    """A looked-up object doesn't exist (or isn't visible to the user).
-
-    Subclasses ValueError because the services raised plain ValueError for
-    this before, and callers catch that.
-    """
+    """A looked-up object doesn't exist (or isn't visible to the user)."""
 
     code = ErrorCode.NOT_FOUND
 
 
 class UserError(AiSdkError, ValueError):
-    """An error whose message is written for the user, e.g. "File too large".
-
-    Unlike any other exception, its message is sent to the client.
-    """
+    """Unlike any other exception, its message is sent to the client."""
 
     code = ErrorCode.INVALID_REQUEST
 
 
 class Blocked(AiSdkError):
     """Raised by `Agent.run()` when the policy blocks the question or withholds the answer.
-
-    Show `message` to the user as the reply. `stage` is "gate" or "finish".
-    """
+    `stage` is "gate" or "finish"."""
 
     code = ErrorCode.BLOCKED
 
@@ -224,7 +195,6 @@ def _is_context_overflow(exc: BaseException) -> bool:
 
 
 def _classify_openai(exc: BaseException) -> str | None:
-    """Also covers every OpenAI-compatible server (vLLM, OpenRouter, Mistral, ...)."""
     if isinstance(exc, openai.ContentFilterFinishReasonError):
         return ErrorCode.CONTENT_FILTERED
     if isinstance(exc, openai.RateLimitError):
@@ -286,7 +256,6 @@ _PROVIDER_CLASSIFIERS = (_classify_openai, _classify_anthropic)
 
 
 def _classify_with_hooks(exc: BaseException) -> str | None:
-    """`AI_SDK_ERROR_CLASSIFIERS`: dotted paths to `(exc) -> code | None`."""
     classifiers: list[Callable[[BaseException], str | None]] = [
         import_string(path) for path in resolve_setting("AI_SDK_ERROR_CLASSIFIERS", [])
     ]
@@ -294,7 +263,6 @@ def _classify_with_hooks(exc: BaseException) -> str | None:
         try:
             code = classifier(exc)
         except Exception:
-            # A broken classifier must not take the error report down with it.
             logger.opt(exception=True).error("Error classifier {} failed", classifier)
             continue
         if code is not None:
@@ -303,7 +271,6 @@ def _classify_with_hooks(exc: BaseException) -> str | None:
 
 
 def classify_error(exc: BaseException, _depth: int = 0) -> str:
-    """Map an exception to the code sent to the client."""
     if isinstance(exc, AiSdkError):
         return exc.code
     if (code := _classify_with_hooks(exc)) is not None:
@@ -334,14 +301,11 @@ def classify_error(exc: BaseException, _depth: int = 0) -> str:
 
 
 def new_ref() -> str:
-    """A short id tying what the client sees to the log line."""
     return secrets.token_hex(4)
 
 
 @dataclass(frozen=True)
 class ErrorInfo:
-    """Everything about an error that is safe to send to a client."""
-
     code: str
     ref: str
 
@@ -364,11 +328,6 @@ def describe_error(exc: BaseException) -> ErrorInfo:
 
 
 def public_detail(exc: BaseException) -> str:
-    """Text a stored record may show a client for `exc`, such as a failed step.
-
-    SDK errors keep their message; other text may hold hosts or SQL, so it is logged
-    under a ref instead.
-    """
     if isinstance(exc, AiSdkError):
         return str(exc)
     info = describe_error(exc)
@@ -376,16 +335,10 @@ def public_detail(exc: BaseException) -> str:
     return f"{info.spec.message} (ref {info.ref})"
 
 
-# Malformed input from the caller. Only these, not any ValueError: a ValueError
-# from inside the SDK is a bug and should reach the error log.
 _BAD_INPUT = (ValidationError, DjangoValidationError, SuspiciousOperation)
 
 
 def error_response(exc: BaseException) -> tuple[int, dict[str, Any]]:
-    """HTTP status and JSON body for an exception raised while handling a request.
-
-    Framework-agnostic; see `django_ai_sdk.contrib` for ninja and DRF wiring.
-    """
     if isinstance(exc, _BAD_INPUT):
         info = ErrorInfo(code=ErrorCode.INVALID_REQUEST, ref=new_ref())
     else:
@@ -403,7 +356,6 @@ def error_response(exc: BaseException) -> tuple[int, dict[str, Any]]:
     if isinstance(exc, Blocked) and exc.message:
         body["message"] = exc.message
     if isinstance(exc, ValidationError):
-        # Field errors describe the caller's own input.
         body["errors"] = [
             {"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]} for e in exc.errors()
         ]

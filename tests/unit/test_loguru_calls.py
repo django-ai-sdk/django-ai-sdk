@@ -43,7 +43,6 @@ async def test_a_failed_agent_lookup_names_the_agent(logged):
 
 
 def test_tool_call_arguments_stay_out_of_the_info_log():
-    """Arguments can carry PII or tokens: INFO names the tool, DEBUG adds the arguments."""
     from unittest.mock import MagicMock
 
     from haystack.dataclasses import ChatMessage, ToolCall

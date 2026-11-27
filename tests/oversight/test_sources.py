@@ -1,5 +1,3 @@
-"""What retrieval found reaches oversight, and sources from earlier turns stay apart."""
-
 from __future__ import annotations
 
 import json
@@ -103,7 +101,7 @@ class TestCitations:
             _skip_auto_register = True
             permissions = [AllowAll]
             name = "cited"
-            oversight = "test-guard"  # masks personal data the way the gate does
+            oversight = "test-guard"
             title_generation = False
 
             async def get_pipeline_adapter(self, thread_id=None, user=None):  # noqa: ANN001, ANN201
@@ -125,7 +123,7 @@ class TestCitations:
                 Cited(), [("user", "find Jan")], thread_id=str(thread.id), user=user
             )
         outputs = [p for p in parts if p.get("type") == "tool-output-available"]
-        assert len(outputs) >= 2  # the search, and the citations card
+        assert len(outputs) >= 2
         assert "jan@example.com" not in json.dumps(outputs)
         sources = await aget_thread_sources(str(thread.id), user=user)
         assert sources and "jan@example.com" not in json.dumps(sources, default=str)

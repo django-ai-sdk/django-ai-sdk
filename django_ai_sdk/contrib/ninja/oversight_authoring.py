@@ -1,9 +1,3 @@
-"""Policy authoring routes: define, toggle, try and delete policies at runtime.
-
-`get_oversight_router()` adds them when the authoring app is installed; the oversight
-manual's Review API lists the permission each operation takes.
-"""
-
 from __future__ import annotations
 
 from typing import Any

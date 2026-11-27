@@ -1,5 +1,3 @@
-"""Grounded citations: sources of a turn, the citation agent's reply, and where its quotes are."""
-
 from __future__ import annotations
 
 import asyncio
@@ -35,8 +33,6 @@ CHUNK = Document(
 
 
 class CitationAgent:
-    """Answers like a citation agent would: the JSON `reply`."""
-
     def __init__(self, reply: str) -> None:
         self.reply = reply
         self.calls: list[str] = []
@@ -47,7 +43,6 @@ class CitationAgent:
 
 
 def citations(*pairs: tuple[str, list[tuple[int, str]]]) -> str:
-    """A citation agent's reply; support as `[(n, "passage"), …]`."""
     return json.dumps(
         {
             "citations": [
@@ -159,11 +154,9 @@ class TestGround:
         data = await ground(ANSWER, registry, agent)
 
         (citation,) = data.citations
-        # Markdown inside the quote stays in the span: offsets are into the raw text.
         assert ANSWER[citation.start : citation.end] == "Postal Address** element is optional"
-        (evidence,) = citation.evidence  # unknown number 9 dropped
+        (evidence,) = citation.evidence
         assert evidence.key == "doc:d1:c1"
-        # The supporting passage, found in the source's own text.
         assert (
             CHUNK.content[evidence.start : evidence.end]
             == evidence.text
@@ -186,7 +179,7 @@ class TestGround:
         data = await ground(ANSWER, registry, CitationAgent(reply))
 
         assert data.citations == []
-        assert [s.key for s in data.sources] == ["doc:d1:c1"]  # still stored, uncited
+        assert [s.key for s in data.sources] == ["doc:d1:c1"]
 
     async def test_a_source_whose_passage_is_missing_is_dropped_when_another_is_found(self):
         registry = SourceRegistry()
@@ -219,7 +212,7 @@ class TestGround:
 
         (evidence,) = citation.evidence
         assert evidence.matcher == "partial"
-        assert evidence.text == policy[: policy.index(" Contact")]  # the source's own text
+        assert evidence.text == policy[: policy.index(" Contact")]
 
     async def test_an_earlier_turns_source_is_stored_only_when_cited(self):
         registry = SourceRegistry()
@@ -235,14 +228,13 @@ class TestGround:
 
 
 def filler(key: str) -> NumberedSource:
-    """A source that shares no words with ANSWER (no "0" in `key` either)."""
     return NumberedSource(key=key, title=key, content=f"lorem ipsum {key.replace(':', ' ')}")
 
 
 class TestPick:
     async def test_with_many_sources_a_block_reads_the_matching_ones_and_each_searchs_best(self):
         registry = SourceRegistry()
-        for search in range(1, 5):  # four searches of ten hits, best first
+        for search in range(1, 5):
             registry.add([filler(f"doc:s{search}:{hit}") for hit in range(1, 11)])
         registry.add([NumberedSource(key="doc:x", title="XAF", content=CHUNK.content)])
         agent = CitationAgent(citations(("Postal Address element is optional", [(41, "0..*")])))
@@ -252,7 +244,6 @@ class TestPick:
         sent = agent.calls[0]
         assert len(re.findall(r"^\[\d+\] ", sent, re.MULTILINE)) <= grounding.MAX_SOURCES
         assert "[41] XAF" in sent
-        # The best hit of every search, the rest left out.
         for best in (1, 11, 21, 31):
             assert f"[{best}] doc:s" in sent
         assert "[2] doc:s" not in sent
@@ -303,12 +294,12 @@ class TestGrounder:
         intro = "Here is what the standard says.\n\n"
 
         grounder.feed(intro)
-        assert len(grounder.tasks) == 1  # before the answer is done
+        assert len(grounder.tasks) == 1
         grounder.feed(ANSWER)
         data = await grounder.finish(intro + ANSWER)
 
         assert [call.rsplit("Answer:\n", 1)[1] for call in agent.calls] == [intro, ANSWER]
-        (citation,) = data.citations  # the intro's call found nothing to place
+        (citation,) = data.citations
         assert (intro + ANSWER)[citation.start : citation.end] == "element is optional"
 
     async def test_a_code_block_is_not_split(self):
@@ -337,8 +328,6 @@ class TestGrounder:
 
 
 class TestRebase:
-    """Review may mask the answer after it was grounded: citations follow the stored text."""
-
     def data(self, *quotes: tuple[int, str]):
         from django_ai_sdk.artifacts.schemas import Citation, CitationsData, CitedSource, Evidence
 
@@ -416,7 +405,6 @@ class TestStream:
         assert await Artifact.objects.filter(thread_id=thread_id).acount() == 1
         assert writer.message.tool_calls[0]["name"] == "artifact_citations_artifact"
 
-        # Next turn: no new search, the earlier source is still citable.
         later = SourceRegistry()
         await later.seed_from_thread(thread_id)
         assert [(s.key, s.content) for s in later.all] == [("doc:d1:c1", CHUNK.content)]
@@ -443,7 +431,7 @@ class TestStream:
         async for event in stream.get_events(queue, writer):
             live.append(event)
             if event.event_type == "tool_output":
-                await queue.put(_SENTINEL)  # the answer ends after its block is cited
+                await queue.put(_SENTINEL)
         stored = [e async for e in stream.get_citations_artifact(writer)]
 
         assert [e.event_type for e in live] == [
@@ -452,8 +440,7 @@ class TestStream:
             "tool_input_complete",
             "tool_output",
         ]
-        assert "artifact_id" not in live[-1].tool_output  # shown, not stored
-        # The stored citations replace the shown ones in the same tool call.
+        assert "artifact_id" not in live[-1].tool_output
         assert [e.event_type for e in stored] == ["tool_output"]
         assert stored[0].tool_call_id == live[-1].tool_call_id
         assert stored[0].tool_output["citations"] == live[-1].tool_output["citations"]
@@ -478,7 +465,7 @@ class TestStream:
         stream.citation_agent.run = slow_after_the_first
         stream._grounder = Grounder(registry, stream.citation_agent)
         answer = ANSWER + "\n\nAnd that is all."
-        stream._grounder.feed(answer)  # the first block is cited as the answer ends
+        stream._grounder.feed(answer)
         writer = StreamWriter(message_id="m1")
         writer.add_chunk(stream.get_text_chunk(answer))
 
@@ -487,8 +474,8 @@ class TestStream:
         assert [e.event_type for e in events] == [
             "tool_call_start",
             "tool_input_complete",
-            "tool_output",  # the first block's, while the last one is grounded
-            "tool_output",  # stored
+            "tool_output",
+            "tool_output",
         ]
         assert "artifact_id" not in events[2].tool_output
         assert "artifact_id" in events[3].tool_output
@@ -526,7 +513,6 @@ class TestStream:
         assert [s.key for s in later.all] == ["doc:d1:c1"]
 
     async def _turn(self, thread_id: str, reply: str) -> dict:
-        """A turn that finds CHUNK (again) and stores its citations; their payload."""
         registry = SourceRegistry()
         await registry.seed_from_thread(thread_id)
         registry.add([from_document(CHUNK)])
@@ -544,9 +530,7 @@ class TestStream:
         cited = await self._turn(thread_id, citations(("element is optional", [(1, "POSTAL")])))
 
         assert first["sources"][0]["content"] == CHUNK.content
-        # Found again, not cited: the first turn's copy has its text.
         assert again["sources"][0]["content"] == ""
-        # Cited: its answer shows the passage, so it keeps its text.
         assert cited["sources"][0]["content"] == CHUNK.content
         later = SourceRegistry()
         await later.seed_from_thread(thread_id)
@@ -555,7 +539,6 @@ class TestStream:
 
 @pytest.mark.asyncio
 async def test_the_stream_no_longer_rewrites_the_answer_text():
-    # Bracket numbers or tags in the answer are just text now: nothing parses them.
     stream = Stream.__new__(Stream)
     stream.citation_registry = None
     queue: asyncio.Queue = asyncio.Queue()
@@ -585,7 +568,7 @@ def test_the_thread_lists_each_source_once(client, owner, stranger, url):
 
     thread = Thread.objects.create(user=owner)
     shared = {"key": "doc:d1:c1", "title": "XAF", "content": "POSTAL ADDRESS 0..*, F"}
-    for cited in (False, True):  # two turns found the same chunk; the second cited it
+    for cited in (False, True):
         Artifact.objects.create(
             thread=thread,
             schema_name="CitationsArtifact",
@@ -611,7 +594,7 @@ def test_the_thread_lists_a_source_with_the_text_an_earlier_turn_stored(owner):
 
     thread = Thread.objects.create(user=owner)
     source = {"key": "doc:d1:c1", "title": "XAF", "cited": False}
-    for content in ("POSTAL ADDRESS 0..*, F", ""):  # the later copy is stored without
+    for content in ("POSTAL ADDRESS 0..*, F", ""):
         Artifact.objects.create(
             thread=thread,
             schema_name="CitationsArtifact",
@@ -624,8 +607,6 @@ def test_the_thread_lists_a_source_with_the_text_an_earlier_turn_stored(owner):
 
 
 class TestCitationAgent:
-    """AI_SDK_CITATION_AGENT, else AI_SDK_TASK_MODEL, else the chat agent places citations."""
-
     def test_the_chat_agent_by_default(self):
         from django_ai_sdk.adapters.citations.grounding import get_citation_agent
 
@@ -650,7 +631,6 @@ class TestCitationAgent:
 
 
 async def test_citing_is_not_a_turn_of_its_own():
-    """A side task over an answer oversight judges in its own turn: the policy does not run again."""
     from unittest.mock import AsyncMock, MagicMock
 
     from django_ai_sdk.adapters.citations.grounding import cite

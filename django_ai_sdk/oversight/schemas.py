@@ -1,10 +1,3 @@
-"""Request and response models for the review API.
-
-Plain pydantic, so the SDK does not tie you to a web framework. Fields marked
-"Content" are filled only for readers allowed to see the turn's content
-(`VIEW_OVERSIGHT_CONTENT`, within `scope_turns`). For others they stay empty.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -14,12 +7,9 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from django_ai_sdk.oversight.types import Outcome
 
-# Fixed vocabularies, so a typo is refused instead of matching nothing. "" does not filter.
 TurnStatus = Literal["", "open", "closed", "interrupted"]
 ReviewStatus = Literal["", "open", "done", "dismissed"]
-# "open" (waiting for a reviewer), "reviewed" (a person closed one) or "unreviewed" (neither).
 ReviewState = Literal["", "open", "reviewed", "unreviewed"]
-# A turn's capture level, or why it shows no content (`TurnDetail.content_state`).
 ContentState = Literal["metadata", "masked", "full", "withheld", "none", "expired"]
 
 
@@ -27,20 +17,16 @@ class TurnFilter(BaseModel):
     """Filters for the turns feed. Empty fields do not filter."""
 
     outcome: Outcome | Literal[""] = ""
-    # The outcome a rule in report mode would have caused.
     report_outcome: Outcome | Literal[""] = ""
     status: TurnStatus = ""
     agent_id: str = ""
-    # Matched as a prefix, so "webhook" matches every webhook channel.
     channel: str = ""
     policy: str = ""
     severity: str = ""
-    # A lens that has an answer on the turn. With `value`, that answer must match.
     label: str = ""
     value: str = ""
     rule: str = ""
     review: ReviewState = ""
-    # Content. Filtering by thread needs VIEW_OVERSIGHT_CONTENT.
     thread_id: str = ""
     since: datetime | None = None
     until: datetime | None = None
@@ -80,8 +66,6 @@ class TurnOut(BaseModel):
     latency_ms: float | None = None
     reviews_open: int = 0
     reflected: bool = False
-    # Content. The start of the question ("" when not shown), and the asker's user id
-    # ("" if anonymous).
     preview: str = ""
     actor_id: str = ""
 
@@ -107,7 +91,6 @@ class LensAnswerOut(BaseModel):
     latency_ms: float | None = None
     created_at: datetime
     trail: list[dict[str, Any]] = Field(default_factory=list)
-    # Content.
     rationale: str = ""
     spans: list[dict[str, Any]] = Field(default_factory=list)
     items: dict[str, float] = Field(default_factory=dict)
@@ -123,29 +106,21 @@ class ReviewOut(BaseModel):
     status: Literal["open", "done", "dismissed"]
     created_at: datetime
     resolved_at: datetime | None = None
-    # The reviewer's user id.
     resolved_by: str = ""
-    # Whether the reviewer agreed with the rule. None when open or dismissed.
     agree: bool | None = None
     note: str = ""
     turn: TurnOut | None = None
 
 
 class TurnDetail(TurnOut):
-    # The stored content. None when the reader may not see it or nothing was kept.
     content: dict[str, Any] | None = None
-    # The capture level ("metadata", "masked" or "full"), or why there is no content:
-    # "withheld" (not for this reader), "none" (never kept or forgotten) or "expired".
     content_state: ContentState = "withheld"
     answers: list[LensAnswerOut] = Field(default_factory=list)
     reviews: list[ReviewOut] = Field(default_factory=list)
-    # What went wrong, such as a failed stage or a disconnect. Never content.
     error: str = ""
-    # The outer turn, when this one ran nested under another policy, as a subagent does.
     parent_turn_id: str = ""
     agent_fingerprint: str = ""
     reflect_state: str = ""
-    # Content.
     thread_id: str = ""
     message_id: str = ""
 
@@ -155,7 +130,6 @@ class Page[T](BaseModel):
 
     items: list[T]
     limit: int
-    # Empty on the last page.
     next_cursor: str = ""
 
 
@@ -182,11 +156,8 @@ class MetricsOut(BaseModel):
     since: datetime
     turns: int
     by_outcome: dict[str, int] = Field(default_factory=dict)
-    # Outcomes that rules in report mode would have caused.
     by_report_outcome: dict[str, int] = Field(default_factory=dict)
     by_channel: dict[str, int] = Field(default_factory=dict)
-    # Keyed by agent id, like the `agent_id` filters, so a rename does not split counts.
     by_agent: dict[str, int] = Field(default_factory=dict)
     rules: list[RuleCountOut] = Field(default_factory=list)
-    # Open review items per queue, regardless of age.
     queues: dict[str, int] = Field(default_factory=dict)

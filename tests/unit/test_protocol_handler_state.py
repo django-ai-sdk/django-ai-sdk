@@ -1,5 +1,3 @@
-"""One agent, one handler, many concurrent streams: no stream may see another's state."""
-
 import json
 
 import pytest
@@ -17,8 +15,6 @@ from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 
 
 class Scripted:
-    """An adapter that streams a fixed list of events."""
-
     def __init__(self, *events):
         self.events = events
 
@@ -50,8 +46,7 @@ async def test_interleaved_vercel_streams_keep_their_own_text_ids():
     handler = VercelProtocolHandler()
     first = handler.sse(reply("m1", "a1", "a2"), [])
 
-    # The first stream is mid-text when a second request starts and finishes.
-    head = [parse(await anext(first)) for _ in range(3)]  # start, text-start, delta
+    head = [parse(await anext(first)) for _ in range(3)]
     second = await drain(handler.sse(reply("m2", "b1"), []))
     first_chunks = head + await drain(first)
 

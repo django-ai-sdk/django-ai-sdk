@@ -56,8 +56,6 @@ from django_ai_sdk.utils import resolve_setting
 
 logger = get_logger(__name__)
 
-# Catches the worker dying outright (nothing left to hit PIPELINE_TIMEOUT_SECONDS'
-# own except block), so this can only ever fire after that would already have.
 STALE_PROCESSING_DEADLINE_SECONDS = PIPELINE_TIMEOUT_SECONDS + 60
 
 if TYPE_CHECKING:
@@ -83,12 +81,10 @@ def _read_document(doc: EntryDocument) -> bytes:
 
 
 async def aread_document(doc: EntryDocument) -> bytes:
-    """Read document from storage."""
     return await sync_to_async(_read_document)(doc)
 
 
 def get_thread_file_url(doc: EntryDocument, thread_id: str) -> str:
-    """URL the frontend shows a thread file with."""
     url_name = resolve_setting("AI_SDK_THREAD_FILE_URL", None)
     if url_name:
         return reverse(url_name, kwargs={"thread_id": thread_id, "doc_id": str(doc.id)})
@@ -96,7 +92,6 @@ def get_thread_file_url(doc: EntryDocument, thread_id: str) -> str:
 
 
 async def _aget_or_not_found(qs: Any, **lookup: Any) -> Any:
-    """Fetch a single object or raise NotFound."""
     from django.core.exceptions import ObjectDoesNotExist
 
     try:
@@ -106,7 +101,6 @@ async def _aget_or_not_found(qs: Any, **lookup: Any) -> Any:
 
 
 def _document_pdf(document: EntryDocument) -> bytes:
-    """A stored document as a PDF, converted when it is not one."""
     from django_ai_sdk.files.previews import to_pdf
 
     with document.file.open("rb") as file:
@@ -119,9 +113,6 @@ def _document_pdf(document: EntryDocument) -> bytes:
 async def _fail_orphaned_processing_document(
     entry_doc: EntryDocument, task_status: TaskStatus | None
 ) -> None:
-    """Mark a stuck PROCESSING document FAILED: either its task already
-    finished without us noticing, or it's been RUNNING too long (dead worker).
-    """
     if entry_doc.processing_status != EntryDocument.ProcessingStatus.PROCESSING:
         return
 
@@ -139,7 +130,6 @@ async def _fail_orphaned_processing_document(
             return
         error = "Processing did not complete and the worker never reported back"
 
-    # Only writes if still PROCESSING, so a concurrent finish/cancel wins.
     updated = await EntryDocument.objects.filter(
         id=entry_doc.id, processing_status=EntryDocument.ProcessingStatus.PROCESSING
     ).aupdate(
@@ -157,7 +147,6 @@ async def _fail_orphaned_processing_document(
 
 
 def _public_error(entry_doc: EntryDocument) -> tuple[str, str]:
-    """The (code, message) a client sees. Older failed rows have no code."""
     code = entry_doc.processing_error_code
     if not code and entry_doc.processing_status == EntryDocument.ProcessingStatus.FAILED:
         code = ErrorCode.FILE_PROCESSING_FAILED
@@ -199,18 +188,9 @@ def _check_upload_size(file: File) -> None:
 
 
 class MemoryService(PermissionsMixin):
-    """
-    Service for memory operations.
-
-    All methods are async. Use the sync-prefixed aliases for sync contexts
-    (e.g., DRF class-based views).
-    """
+    """All methods are async."""
 
     domain = PermissionDomain.MEMORY
-
-    # ============================================================================
-    # Memory CRUD
-    # ============================================================================
 
     @classmethod
     async def create_memory(
@@ -222,7 +202,6 @@ class MemoryService(PermissionsMixin):
         *,
         user: UserType,
     ) -> MemoryOut:
-        """Create a new memory."""
         await cls.has_perms(user, Operation.CREATE_MEMORY)
 
         memory = await Memory.objects.acreate(
@@ -248,10 +227,6 @@ class MemoryService(PermissionsMixin):
             updated_at=memory.updated_at.isoformat(),
         )
 
-    # ============================================================================
-    # Memory User Management
-    # ============================================================================
-
     @classmethod
     async def list_memory_users(
         cls,
@@ -261,7 +236,6 @@ class MemoryService(PermissionsMixin):
         limit: int | None = 100,
         offset: int = 0,
     ) -> list[MemoryUserOut]:
-        """List all users of a memory."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.VIEW_MEMORY, memory)
         qs = memory.memory_users.all().select_related("user")[
@@ -278,7 +252,6 @@ class MemoryService(PermissionsMixin):
         *,
         user: UserType,
     ) -> MemoryUserOut:
-        """Add a user to a memory."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.UPDATE_MEMORY, memory)
         UserModel = get_user_model()
@@ -299,7 +272,6 @@ class MemoryService(PermissionsMixin):
         *,
         user: UserType,
     ) -> MemoryUserOut:
-        """Update a memory user's can_manage flag."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.UPDATE_MEMORY, memory)
         ownership = await _aget_or_not_found(
@@ -311,7 +283,6 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def remove_memory_user(cls, memory_id: str, user_id: str, *, user: UserType) -> None:
-        """Remove a user from a memory."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.UPDATE_MEMORY, memory)
         ownership = await _aget_or_not_found(memory.memory_users, user_id=user_id)
@@ -362,7 +333,6 @@ class MemoryService(PermissionsMixin):
         *,
         user: UserType,
     ) -> list[MemoryGroupOut]:
-        """List all groups of a memory."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.VIEW_MEMORY, memory)
         return [
@@ -375,13 +345,10 @@ class MemoryService(PermissionsMixin):
             async for mg in memory.memory_groups.all().select_related("group")
         ]
 
-    # ============================================================================
-
     @classmethod
     async def list_memories(
         cls, *, user: UserType, limit: int | None = 100, offset: int = 0
     ) -> list[MemoryOut]:
-        """List memories visible to the requesting user."""
         qs = cls.has_queryset_perms(
             user,
             Operation.VIEW_MEMORY,
@@ -408,7 +375,6 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def _get_agent_memories(cls, agent_id: str) -> QuerySet[Memory]:
-        """Resolve the agent's configured memories as a queryset."""
         try:
             agent = await AgentService.get(agent_id)
         except ValueError:
@@ -425,11 +391,7 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def get_agent_memories_for_user(cls, agent_id: str, *, user: UserType) -> list[Memory]:
-        """Return the agent's configured memories the user can ``VIEW_MEMORY``.
-
-        Filters out memories the user doesn't have permission to see, so the
-        caller never receives unreadable memories.
-        """
+        """Return the agent's configured memories the user can ``VIEW_MEMORY``."""
         qs = await cls._get_agent_memories(agent_id)
         qs = cls.has_queryset_perms(user, Operation.VIEW_MEMORY, queryset=qs)
         return [m async for m in qs]
@@ -442,12 +404,7 @@ class MemoryService(PermissionsMixin):
         *,
         user: UserType,
     ) -> None:
-        """Link an agent's configured memories to a thread.
-
-        Skips memories the user doesn't have ``LINK_MEMORY`` permission for,
-        consistent with the per-request retrieval filter, a private memory
-        the user cannot read is simply not linked, rather than blocking by raise.
-        """
+        """Skips memories the user doesn't have ``LINK_MEMORY`` permission for."""
         qs = await cls._get_agent_memories(agent_id)
         qs = cls.has_queryset_perms(user, Operation.LINK_MEMORY, queryset=qs)
         async for memory in qs:
@@ -461,10 +418,7 @@ class MemoryService(PermissionsMixin):
         *,
         user: UserType,
     ) -> None:
-        """Unlink an agent's configured memories from a thread.
-
-        Only unlinks memories the user has ``UNLINK_MEMORY`` permission for.
-        """
+        """Only unlinks memories the user has ``UNLINK_MEMORY`` permission for."""
         qs = await cls._get_agent_memories(agent_id)
         qs = cls.has_queryset_perms(user, Operation.UNLINK_MEMORY, queryset=qs)
         if not await qs.aexists():
@@ -476,7 +430,6 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def get_memory(cls, memory_id: str, *, user: UserType) -> MemoryOut:
-        """Get a single memory by ID."""
         memory = await _aget_or_not_found(
             Memory.objects.annotate(document_count=Count("entries")), id=memory_id
         )
@@ -502,7 +455,6 @@ class MemoryService(PermissionsMixin):
         *,
         user: UserType,
     ) -> MemoryOut:
-        """Update a memory."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.UPDATE_MEMORY, memory)
         memory.name = name
@@ -529,10 +481,6 @@ class MemoryService(PermissionsMixin):
         await cls.has_perms(user, Operation.DELETE_MEMORY, memory)
         await memory.adelete()
 
-    # ============================================================================
-    # Document CRUD (per memory)
-    # ============================================================================
-
     @classmethod
     async def upload_document(
         cls, memory_id: str, file: File, *, user: UserType
@@ -547,8 +495,6 @@ class MemoryService(PermissionsMixin):
     async def _create_document(
         cls, memory_id: str, file: File, *, user: UserType
     ) -> DocumentUploadResponse:
-        """Create a new document entry."""
-
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
 
         file_name = file.name or ""
@@ -609,7 +555,6 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def get_document(cls, memory_id: str, doc_id: str, *, user: UserType) -> DocumentOut:
-        """Get a single document from a memory by its EntryDocument id."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.VIEW_DOCUMENT, memory)
         entry_doc = await _aget_or_not_found(
@@ -621,11 +566,7 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def delete_document(cls, memory_id: str, doc_id: str, *, user: UserType) -> None:
-        """Delete a document from a memory by its EntryDocument id.
-
-        Works for in-flight docs (no Entry yet). When an Entry exists, deleting it
-        cascades to the EntryDocument and triggers RAG cleanup via the delete signal.
-        """
+        """Works for in-flight docs (no Entry yet)."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.DELETE_DOCUMENT, memory)
         entry_doc = await _aget_or_not_found(
@@ -638,13 +579,8 @@ class MemoryService(PermissionsMixin):
         else:
             await entry_doc.adelete()
 
-    # ============================================================================
-    # Thread-Memory linking
-    # ============================================================================
-
     @classmethod
     async def link_memory_to_thread(cls, memory_id: str, thread_id: str, *, user: UserType) -> None:
-        """Link a memory to a thread."""
         thread = await _aget_or_not_found(Thread.objects, id=thread_id)
         await ThreadService.has_perms(user, Operation.UPDATE_THREAD, thread)
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
@@ -658,7 +594,6 @@ class MemoryService(PermissionsMixin):
     async def unlink_memory_from_thread(
         cls, memory_id: str, thread_id: str, *, user: UserType
     ) -> None:
-        """Unlink a memory from a thread."""
         thread = await _aget_or_not_found(Thread.objects, id=thread_id)
         await ThreadService.has_perms(user, Operation.UPDATE_THREAD, thread)
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
@@ -677,10 +612,8 @@ class MemoryService(PermissionsMixin):
         limit: int | None = 100,
         offset: int = 0,
     ) -> list[ThreadMemoryOut]:
-        """List all memories connected to a thread with their active status."""
         thread = await _aget_or_not_found(Thread.objects, id=thread_id)
         await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread)
-        # Filtered before slicing, so a page is not short by the rows it drops.
         readable = cls.has_queryset_perms(
             user, Operation.LIST_THREAD_MEMORIES, queryset=Memory.objects.all()
         )
@@ -719,11 +652,7 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def get_thread_memories(cls, thread_id: str, *, user: UserType) -> list[Memory]:
-        """Return active Memory objects for a thread that ``user`` can read.
-
-        Filters out memories the user lacks ``VIEW_MEMORY`` access to (silent
-        skip), so the caller never sees unreadable memories.
-        """
+        """Return active Memory objects for a thread that ``user`` can read."""
         query = (
             ThreadMemory.objects.filter(thread_id=thread_id, active=True)
             .select_related("memory")
@@ -747,8 +676,7 @@ class MemoryService(PermissionsMixin):
     async def bulk_connect_memories(
         cls, thread_id: str, memory_ids: list[str], *, user: UserType
     ) -> list[ThreadMemoryOut]:
-        """Connect multiple memories to a thread at once.
-
+        """
         Raises:
             ValueError: If any of the requested memory ids does not exist.
             PermissionDenied: If the user lacks LINK_MEMORY on any memory.
@@ -780,7 +708,6 @@ class MemoryService(PermissionsMixin):
         *,
         user: UserType,
     ) -> ThreadMemoryOut:
-        """Toggle the active status of a memory for a thread."""
         thread = await _aget_or_not_found(Thread.objects, id=thread_id)
         await ThreadService.has_perms(user, Operation.UPDATE_THREAD, thread)
         thread_memory = await _aget_or_not_found(
@@ -806,7 +733,6 @@ class MemoryService(PermissionsMixin):
     async def disconnect_memory_from_thread(
         cls, thread_id: str, memory_id: str, *, user: UserType
     ) -> None:
-        """Disconnect a memory from a thread."""
         thread = await _aget_or_not_found(Thread.objects, id=thread_id)
         await ThreadService.has_perms(user, Operation.UPDATE_THREAD, thread)
         link = await _aget_or_not_found(
@@ -816,13 +742,8 @@ class MemoryService(PermissionsMixin):
         await cls.has_perms(user, Operation.UNLINK_MEMORY, memory)
         await link.adelete()
 
-    # ============================================================================
-    # Thread file uploads
-    # ============================================================================
-
     @classmethod
     async def get_or_create_thread_file_memory(cls, thread_id: str) -> Memory:
-        """Get or auto-create the hidden file-upload Memory for a thread."""
         thread = await _aget_or_not_found(
             Thread.objects.select_related("file_memory"), id=thread_id
         )
@@ -833,12 +754,10 @@ class MemoryService(PermissionsMixin):
 
     @staticmethod
     def _create_thread_file_memory(thread_id: str) -> Memory:
-        # Parallel uploads wait on the thread row lock.
         with transaction.atomic():
             thread = Thread.objects.select_for_update().get(id=thread_id)
             if thread.file_memory_id:
                 return thread.file_memory
-            # Private: uploads are the thread owner's content, not a shared memory.
             memory = Memory.objects.create(
                 name=f"thread_files_{thread_id}",
                 description="Thread file uploads",
@@ -928,7 +847,6 @@ class MemoryService(PermissionsMixin):
         limit: int | None = 100,
         offset: int = 0,
     ) -> list[DocumentOut]:
-        """List all files uploaded to a thread."""
         thread = await _aget_or_not_found(
             Thread.objects.select_related("file_memory"), id=thread_id
         )
@@ -958,7 +876,6 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def get_thread_file(cls, thread_id: str, doc_id: str, *, user: UserType) -> EntryDocument:
-        """Return a thread's file (EntryDocument), e.g. to serve its bytes."""
         thread = await _aget_or_not_found(Thread.objects.all(), id=thread_id)
         agent_id = thread.metadata.get("agent_id") or None
         if agent_id is None:
@@ -980,11 +897,7 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def delete_thread_file(cls, thread_id: str, doc_id: str, *, user: UserType) -> None:
-        """Delete a file from a thread by its EntryDocument id.
-
-        Works for in-flight docs (no Entry yet), so a slow/stuck upload can be
-        cancelled to unblock a deferred send.
-        """
+        """Works for in-flight docs (no Entry yet)."""
         thread = await _aget_or_not_found(
             Thread.objects.select_related("file_memory"), id=thread_id
         )
@@ -1014,12 +927,8 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def get_document_status(cls, doc_id: str, *, user: UserType) -> DocumentStatusOut:
-        """Return processing status for a document.
-
-        Requires ``VIEW_DOCUMENT`` on the document's owning memory.  Documents
-        whose ``memory`` is ``None`` (legacy rows predating migration 0002) are
-        accessible without a permission check to preserve backward compatibility
-        — they carry no content, only a status string.
+        """Requires ``VIEW_DOCUMENT`` on the document's owning memory. Documents
+        whose ``memory`` is ``None`` are accessible without a permission check.
         """
         entry_doc = await _aget_or_not_found(
             EntryDocument.objects.select_related("memory"), id=doc_id
@@ -1041,12 +950,7 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def get_task_status(cls, task_id: str, *, user: UserType) -> DocumentStatusOut:
-        """Return processing status for a document, looked up by its task id.
-
-        Same permission model and response shape as ``get_document_status`` — this
-        is just an alternate lookup key for consumers that only have a ``task_id``
-        (e.g. straight off ``DocumentUploadResponse``), not a ``doc_id``.
-        """
+        """Same permission model and response shape as ``get_document_status``."""
         entry_doc = await _aget_or_not_found(
             EntryDocument.objects.select_related("memory"), task_id=task_id
         )
@@ -1065,17 +969,7 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def retry_document(cls, doc_id: str, *, user: UserType) -> DocumentStatusOut:
-        """Re-enqueue processing for a failed or stuck document.
-
-        Only documents in ``FAILED`` or ``PENDING`` status may be retried.
-        ``PROCESSING`` documents are skipped (the worker is still active) and
-        ``COMPLETED`` documents are skipped (re-processing would create duplicate
-        index entries).
-
-        Recovers ``agent_id`` from the owning thread (for thread-file
-        memories) so the agent's file pipeline (e.g. OCR) is used again,
-        not just the default text pipeline.
-        """
+        """Only documents in ``FAILED`` or ``PENDING`` status may be retried."""
         _RETRYABLE = {
             EntryDocument.ProcessingStatus.FAILED,
             EntryDocument.ProcessingStatus.PENDING,
@@ -1138,8 +1032,6 @@ class MemoryService(PermissionsMixin):
             task_id=task_result.id,
             processing_status=EntryDocument.ProcessingStatus.PROCESSING,
         )
-        # Re-read to return the actual persisted state — the conditional aupdate above
-        # may have been skipped if the worker already advanced past PENDING.
         await entry_doc.arefresh_from_db(
             fields=[
                 "processing_status",
@@ -1153,12 +1045,8 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def cancel_document(cls, doc_id: str, *, user: UserType) -> DocumentStatusOut:
-        """Cancel a pending or in-progress document.
-
-        Sets ``cancelled_at`` so a still-running pipeline stops at its next
-        step boundary (cooperative — it won't interrupt a step already in
-        flight) and marks the document ``CANCELLED`` immediately so the
-        caller sees it right away.
+        """Sets ``cancelled_at`` so a still-running pipeline stops at its next
+        step boundary, and marks the document ``CANCELLED`` immediately.
         """
         _CANCELLABLE = {
             EntryDocument.ProcessingStatus.PENDING,
@@ -1214,15 +1102,7 @@ class MemoryService(PermissionsMixin):
     async def get_chunk_content(
         cls, entry_id: str, chunk_id: str | None, *, user: UserType
     ) -> str | None:
-        """Return a specific chunk from the vector store, falling back to full Entry content.
-
-        When chunk_id is None the document was not split into chunks, so the
-        full Entry content is returned directly without querying the vector store.
-
-        Chunk lookup uses the already-warmed RAG cache (get_cached_rag_instance) to
-        avoid opening a second connection on backends with exclusive file locks (Qdrant).
-        Falls back to entry.content when no warmed RAG is available for this memory.
-        """
+        """Return a specific chunk from the vector store, falling back to full Entry content."""
         try:
             entry = await Entry.objects.select_related("memory").aget(id=entry_id)
         except Entry.DoesNotExist:
@@ -1247,7 +1127,6 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def _get_source(cls, *, user: UserType, **lookup: str) -> EntryDocument:
-        """A knowledge-base document with a preview"""
         from django_ai_sdk.files.previews import IMAGE_EXTENSIONS, PREVIEW_EXTENSIONS
 
         if not all(map(_is_uuid, lookup.values())):
@@ -1266,10 +1145,7 @@ class MemoryService(PermissionsMixin):
     async def get_source_document(
         cls, entry_id: str, quotes: list[str], *, user: UserType
     ) -> tuple[EntryDocument, int | None]:
-        """The original document behind a cited source (its ``documentId``), and the
-        page that holds the cited passages ``quotes`` (None when not found, and for
-        an image: it is shown as itself, see ``get_source_file``).
-
+        """
         Raises:
             NotFound: No document with a preview for this entry.
             PermissionDenied: `user` may not view the entry's documents.
@@ -1287,9 +1163,7 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def get_source_file(cls, doc_id: str, *, user: UserType) -> EntryDocument:
-        """A cited knowledge-base document (one with a preview, or an image), for a
-        user who may view its memory's documents.
-
+        """
         Raises:
             NotFound: No such document, or none with a preview.
             PermissionDenied: `user` may not view the memory's documents.
@@ -1298,8 +1172,7 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def get_source_pdf(cls, doc_id: str, *, user: UserType) -> tuple[EntryDocument, bytes]:
-        """A knowledge-base document as a PDF (converted when it is not one).
-
+        """
         Raises:
             NotFound: No such document, or none with a preview.
             PermissionDenied: `user` may not view the memory's documents.
@@ -1312,9 +1185,7 @@ class MemoryService(PermissionsMixin):
     async def render_source_page(
         cls, doc_id: str, page: int, quotes: list[str], *, user: UserType
     ) -> tuple[bytes, str]:
-        """Page ``page`` of a knowledge-base document as a PNG with ``quotes``
-        marked, and where the marks are (see ``files.previews.render_page``).
-
+        """
         Raises:
             NotFound: No such document or page.
             PermissionDenied: `user` may not view the memory's documents.
@@ -1338,12 +1209,6 @@ class MemoryService(PermissionsMixin):
         inline_images: bool = False,
     ) -> None:
         """Validate message attachments against the thread's files, in place.
-
-        Attachments are client-supplied references: ids that are not a document
-        of this thread's file memory are dropped. The rest get their canonical
-        name/type, a fresh url and the agent's context hint. With
-        `inline_images`, images on the last user message also get their
-        base64 bytes for a vision model.
 
         Raises:
             NotFound: The thread doesn't exist.
@@ -1399,15 +1264,8 @@ class MemoryService(PermissionsMixin):
                 attachments.append(attachment)
             message.attachments = attachments
 
-    # ============================================================================
-    # Private helpers
-    # ============================================================================
-
     @classmethod
     def _entry_doc_to_out(cls, entry_doc: EntryDocument) -> DocumentOut:
-        # `entry` is None until processing produces one (in-flight / failed docs).
-        # The document id is always the EntryDocument id so it's stable across the
-        # whole lifecycle.
         entry = entry_doc.entry
         error_code, error = _public_error(entry_doc)
         return DocumentOut(
@@ -1428,10 +1286,6 @@ class MemoryService(PermissionsMixin):
             updated_at=entry_doc.updated_at.isoformat(),
         )
 
-
-# ============================================================================
-# Sync wrappers for use in sync contexts
-# ============================================================================
 
 create_memory = async_to_sync(MemoryService.create_memory)
 list_memories = async_to_sync(MemoryService.list_memories)

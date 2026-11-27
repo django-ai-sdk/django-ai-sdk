@@ -4,8 +4,6 @@ from django.apps import AppConfig
 
 
 class MCPConfig(AppConfig):
-    """MCP OAuth models and views; required alongside any MCP-backed integration."""
-
     name = "django_ai_sdk.integrations.mcp"
     label = "django_ai_sdk_mcp"
     verbose_name = "Django AI SDK — MCP toolkit"

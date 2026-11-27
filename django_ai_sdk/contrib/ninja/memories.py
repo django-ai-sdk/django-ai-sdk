@@ -1,5 +1,3 @@
-"""Memories (knowledge bases), their documents, sharing, and thread links/files."""
-
 from __future__ import annotations
 
 from collections.abc import Collection
@@ -304,7 +302,6 @@ async def get_source_content(request: HttpRequest, entry_id: str, chunk_id: str)
     return SourceContentOut(content=content)
 
 
-# Cited passages, as a repeated query parameter (?quote=...&quote=...)
 QUOTES = params.Query([])
 
 

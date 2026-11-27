@@ -1,5 +1,3 @@
-"""Markdown made into a PDF by pdf_oxide, its layout helped."""
-
 from __future__ import annotations
 
 from typing import Any

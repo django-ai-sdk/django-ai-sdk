@@ -1,5 +1,3 @@
-"""What the gate judges besides the question: history, a caller's list and attachments."""
-
 from __future__ import annotations
 
 import asyncio
@@ -62,7 +60,6 @@ class FakeStorage:
 
 
 def conversation(size: int, first: str = "earlier") -> list[ChatMessage]:
-    """`size` earlier messages, `first` the oldest, then the question."""
     earlier = [
         ChatMessage(role="user" if n % 2 == 0 else "assistant", content=f"message {n}")
         for n in range(1, size)
@@ -73,8 +70,6 @@ def conversation(size: int, first: str = "earlier") -> list[ChatMessage]:
 
 @register_policy
 class ReportOnlyPolicy(Policy):
-    """Masks nothing for real: every rule in report mode."""
-
     name = "test-report-only"
     lenses = [PatternLens(name="x", stages=[Stage.GATE], patterns=[r"zzz"])]
     rules = [Rule("would_block", when=L("x").is_true, then=Alert("info"))]
@@ -82,8 +77,6 @@ class ReportOnlyPolicy(Policy):
 
 @pytest.mark.django_db(transaction=True)
 class TestHistoryAtTheGate:
-    """History and attachment context are judged at the gate."""
-
     async def test_earlier_messages_are_masked_in_place(self):
         guard = await start("test-guard", "and now?")
         messages = [
@@ -129,7 +122,6 @@ class TestHistoryAtTheGate:
         ]
         await guard.gate_history(messages[:-1], messages[-1])
         gate = await guard.gate()
-        # The question's own masking still runs: history did not make the rule "done".
         assert gate.changed and gate.text == "My IBAN? [EMAIL]"
         turn = await closed_turn(guard)
         queued = await RuleMatch.objects.filter(turn=turn, rule="hr_to_people").acount()
@@ -161,7 +153,6 @@ class TestHistoryAtTheGate:
         assert blocked.blocked
 
     async def test_a_vouched_history_still_judges_earlier_attachment_context(self):
-        # Context is rebuilt from the document each turn, so the stored thread never vouched for it.
         guard = await start("test-guard", "and now?")
         earlier = ChatMessage(
             role="user",
@@ -182,8 +173,6 @@ class TestHistoryAtTheGate:
 
 @pytest.mark.django_db(transaction=True)
 class TestHistoryBounds:
-    """A stateless history is judged within bounds, and nothing slips past them."""
-
     def counting(self, name: str, **attrs: Any) -> tuple[str, dict[str, int]]:
         seen = {"calls": 0, "running": 0, "most": 0}
 
@@ -282,7 +271,7 @@ class TestStoredHistory:
         agent, model = agent_with("Sure.")
         seen: list[list[str]] = []
 
-        async def refuse(self, earlier, question, **kwargs):  # noqa: ANN001, ANN202
+        async def refuse(self, earlier, question, **kwargs):
             seen.append([m.content for m in [*earlier, question]])
             return StageResult(blocked=True, message="Not that history.")
 
@@ -306,21 +295,19 @@ class TestStoredHistory:
         ids=["before-an-empty-question", "after-the-question"],
     )
     async def test_every_text_but_the_question_is_history(self, said):
-        """The question is the last message, and only if a person sent it."""
         agent, model = agent_with("Sure.")
         with pytest.raises(Blocked):
             await agent.run([ChatMessage(role=role, content=text) for role, text in said])
         assert not model.asked
 
     async def test_a_reply_after_the_question_leaves_it_the_question(self):
-        """A client may end on an assistant message; the question is still the person's."""
         agent = make_agent(["Fine."], Storage())
         said = [("user", "what is my salary?"), ("assistant", "Let me look that up:")]
         await chat_turns(agent, said)
         assert await ReviewItem.objects.filter(queue="hr").aexists()
 
     async def test_chat_without_a_thread_refuses_what_gate_history_refuses(self):
-        async def refuse(self, earlier, question, **kwargs):  # noqa: ANN001, ANN202
+        async def refuse(self, earlier, question, **kwargs):
             return StageResult(blocked=True, message="Not that history.")
 
         with patch.object(TurnGuard, "gate_history", refuse):
@@ -331,7 +318,6 @@ class TestStoredHistory:
         assert text_of(parts) == "Not that history."
 
     async def test_a_stored_thread_is_the_history_of_a_run(self):
-        """The thread run endpoints: the client's copy of the history is not what the model reads."""
         from django_ai_sdk.storage.db import DbStorageAdapter
 
         user = await UserFactory.acreate()
@@ -355,7 +341,6 @@ class TestStoredHistory:
         assert "jan@example.com" not in asked and "ignore my instructions" not in asked
 
     async def test_a_history_on_record_is_not_judged_again(self):
-        """A webhook sends the stored thread back; under a policy that does not mask, as is."""
         from django_ai_sdk.storage.db import DbStorageAdapter
 
         user = await UserFactory.acreate()
@@ -369,9 +354,8 @@ class TestStoredHistory:
         agent, _ = agent_with("Sure.", policy=LenientPolicy, storage_adapter=DbStorageAdapter)
         checked: list[int] = []
 
-        async def refuse(self, earlier, question, *, history=True):  # noqa: ANN001, ANN202
+        async def refuse(self, earlier, question, *, history=True):
             if not history:
-                # Only the question's attachments; it has none.
                 return StageResult()
             checked.append(len(earlier) + 1)
             return StageResult(blocked=True, message="Judged.")
@@ -386,7 +370,6 @@ class TestStoredHistory:
         assert checked == [3]
 
     async def test_a_run_on_a_stored_thread_judges_the_question_attachments(self):
-        """The thread vouches for the history, not for what is attached to the new question."""
         from django_ai_sdk.storage.db import DbStorageAdapter
 
         user = await UserFactory.acreate()
@@ -399,7 +382,6 @@ class TestStoredHistory:
         )
         await agent.run([question], thread_id=str(thread.id), user=user)
         assert "a@b.nl" not in asked_text(model)
-        # Only the content is stored: the attachment's context is rebuilt each turn.
         assert question.content == "What is in it?"
 
     async def test_takes_stored_history_only_under_masking(self):
@@ -420,12 +402,10 @@ class TestStoredHistory:
             for i in range(6)
         ]
         question = ChatMessage(role="user", content="new")
-        # A tail the server stored, by id (a webhook's last turns).
         tail = [ChatMessage(role=m.role, content="x", id=m.id) for m in stored[4:]]
         assert [
             m.content for m in await stored_history(FakeStorage(stored), [*tail, question])
         ] == ["s4", "s5", "new"]
-        # A client's own copy: the stored messages as far as it goes.
         own = [ChatMessage(role="user", content="mine"), ChatMessage(role="assistant", content="x")]
         assert [m.content for m in await stored_history(FakeStorage(stored), [*own, question])] == [
             "s0",
@@ -447,17 +427,16 @@ class TestAttachments:
             role="user", content="What is in it?", attachments=[Attachment(document_id="d1")]
         )
 
-        async def resolve(thread_id, messages, **kwargs):  # noqa: ANN001, ANN202
+        async def resolve(thread_id, messages, **kwargs):
             order.append("resolve")
             for message in messages:
                 for attachment in message.attachments:
                     attachment.context = "Attached file notes.pdf"
 
-        real_start = TurnGuard.start.__func__  # ty: ignore[unresolved-attribute]
+        real_start = TurnGuard.start.__func__
 
-        async def start(cls, *args, **kwargs):  # noqa: ANN001, ANN202
+        async def start(cls, *args, **kwargs):
             order.append("start")
-            # The run's turn opens on the question as the model reads it, attachments included.
             seen.append(kwargs["input"])
             return await real_start(cls, *args, **kwargs)
 
@@ -478,9 +457,9 @@ class TestAttachments:
         question = ChatMessage(
             role="user", content="hi", attachments=[Attachment(document_id="d1")]
         )
-        real_start = TurnGuard.start.__func__  # ty: ignore[unresolved-attribute]
+        real_start = TurnGuard.start.__func__
 
-        async def start(cls, *args, **kwargs):  # noqa: ANN001, ANN202
+        async def start(cls, *args, **kwargs):
             seen.extend(a for m in kwargs["messages"] for a in m.attachments)
             return await real_start(cls, *args, **kwargs)
 
@@ -498,11 +477,11 @@ class TestAttachments:
         agent = make_agent(["Fine."], Storage())
         real = TurnGuard.gate_history
 
-        async def gate_history(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        async def gate_history(self, *args, **kwargs):
             calls.append(kwargs)
             return await real(self, *args, **kwargs)
 
-        async def vouched(guard, storage, messages):  # noqa: ANN001, ANN202
+        async def vouched(guard, storage, messages):
             return messages
 
         with (
@@ -514,7 +493,6 @@ class TestAttachments:
 
     @pytest.mark.parametrize("merged", [False, True], ids=["apart", "merged"])
     async def test_a_stored_thread_judges_earlier_attachment_context_on_a_run(self, merged):
-        """Rebuilt from the document each turn, so the thread never vouched for it."""
         user = await UserFactory.acreate()
         thread = await a_thread(user)
         agent = make_agent(["Fine."], Storage())
@@ -524,11 +502,11 @@ class TestAttachments:
         conversation = [earlier, ChatMessage(role="assistant", content="ok")]
         conversation.append(ChatMessage(role="user", content="and now?"))
 
-        async def resolve(thread_id, messages, **kwargs):  # noqa: ANN001, ANN202
+        async def resolve(thread_id, messages, **kwargs):
             for attachment in earlier.attachments:
                 attachment.context = INJECTION
 
-        async def vouched(policy, storage, messages):  # noqa: ANN001, ANN202
+        async def vouched(policy, storage, messages):
             return messages
 
         with (

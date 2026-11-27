@@ -5,11 +5,6 @@ from django_ai_sdk.integrations.weather.tools import check_weather_api, get_curr
 
 
 class WeatherIntegration(APIIntegration):
-    """Minimal ``APIIntegration``: one tool plus a health probe.
-
-    ``health_check`` must be a ``staticmethod``, or it would receive ``self``.
-    """
-
     name = "weather"
     label = "Weather"
     tools = [get_current_weather]

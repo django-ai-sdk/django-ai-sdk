@@ -1,9 +1,3 @@
-"""Forget threads' oversight content as deleting them does, for threads deleted without
-signals (a queryset `.update()`, raw SQL, another database). Safe to run again:
-
-    manage.py oversight_forget_thread <thread id> [<thread id> ...]
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

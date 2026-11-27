@@ -10,13 +10,6 @@ if TYPE_CHECKING:
 
 
 class DemoThreadPermission(ThreadDefaultPermission):
-    """Owner-only thread access.
-
-    Extends the SDK's ThreadDefaultPermission, which already handles the
-    UUID-to-str cast on user_id comparison. Override this class to customise
-    thread access rules (e.g. shared threads, role-based access).
-    """
-
     async def has_object_permission(
         self,
         user: UserType,

@@ -1,14 +1,3 @@
-"""Clean up turns a crash left behind. Schedule it:
-
-    manage.py oversight_sweep --stale-after 30m --reflect-after 10m --limit 500 [--dry-run]
-
-A turn still open after --stale-after (its worker was killed, or the response never
-read) is marked `interrupted`; its outcome stays blank unless a rule already acted.
-A turn whose reflect task was lost (never queued, or its worker's lease ran out) is
-queued again, oldest first; one that died on its last attempt is marked failed.
-Each run handles at most --limit turns of each kind, oldest first.
-"""
-
 from __future__ import annotations
 
 import re
@@ -29,7 +18,6 @@ AGE = re.compile(r"^\s*(\d+)\s*([smhd]?)\s*$")
 
 
 def parse_age(text: str) -> timedelta:
-    """Parse an age like "30m" (s, m, h or d). A bare number means minutes."""
     match = AGE.match(str(text))
     if match is None:
         raise ValueError(f"Expected an age such as 90s, 30m, 2h or 1d, got {text!r}")
@@ -78,7 +66,6 @@ class Command(BaseCommand):
             status=Turn.Status.OPEN, created_at__lt=now - options["stale_after"]
         )
         keys = list(stale.order_by("created_at").values_list("pk", flat=True)[:limit])
-        # The update repeats the filter, so a turn that closed in the meantime is left alone.
         count = len(keys) if dry_run else stale.filter(pk__in=keys).update(status="interrupted")
         self.stdout.write(
             f"{count} turn{'' if count == 1 else 's'} {'would be swept' if dry_run else 'swept'}"
@@ -89,7 +76,6 @@ class Command(BaseCommand):
         if dry_run:
             count = len(keys)
         else:
-            # These died on their last attempt, so nothing will retry them.
             mark_reflect_failed(
                 Turn.objects.filter(
                     reflect_state=Turn.ReflectState.RUNNING,
@@ -97,7 +83,6 @@ class Command(BaseCommand):
                     reflect_attempts__gte=REFLECT_ATTEMPTS,
                 )
             )
-            # Looked up when called, so a test's patch of the task never sticks to this module.
             count = sum(tasks.enqueue_reflect(key) for key in keys)
         self.stdout.write(
             f"{count} turn{'' if count == 1 else 's'} {'would be queued' if dry_run else 'queued'}"

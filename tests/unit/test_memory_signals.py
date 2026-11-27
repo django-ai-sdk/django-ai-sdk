@@ -1,5 +1,3 @@
-"""Entry signals reach the cached RAG indexes of runtime agents, not only registry ones."""
-
 from __future__ import annotations
 
 from contextlib import nullcontext
@@ -19,7 +17,6 @@ class TestEntrySignals:
 
         memory = await Memory.objects.acreate(name="Docs")
         entry = await Entry.objects.acreate(memory=memory, content="hello", name="a.txt")
-        # Two runtime agents of the same class share one cache entry.
         await AgentSettings.objects.acreate(name="A", model="gpt-4o-mini")
         await AgentSettings.objects.acreate(name="B", model="gpt-4o-mini")
 
@@ -45,8 +42,6 @@ SIGNATURE = {"sdk": {"rag": {"dim": 384}}, "owner": "hr"}
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestIndexSignature:
-    """A change the index missed drops the stored signature, so reindex rebuilds it."""
-
     async def _save_entry(self, add_documents: AsyncMock) -> dict:
         from django_ai_sdk.memories.models import Entry, Memory
 

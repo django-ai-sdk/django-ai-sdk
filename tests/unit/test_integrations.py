@@ -1,18 +1,3 @@
-"""Tests for the integrations layer.
-
-Three things are under test, in order of how much they'd hurt if wrong:
-
-1. ``ResilientCache`` — the latency and failure guarantees the whole layer rests on.
-   A dead integration must cost a bounded wait once and ~nothing after, and must be
-   visible as DEGRADED rather than silently contributing no tools.
-2. The registry and the ``Integration`` contract — a broken integration is
-   isolated, integrations load concurrently, and a third-party backend plugs in with
-   no special-casing.
-3. The MCP OAuth flow — connect, callback, code exchange, refresh, and the concurrent
-   refresh race. This is shared infrastructure several consumers rely on, so it is
-   covered here rather than only in whichever project happens to use it.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -47,8 +32,6 @@ from tests.mocks.integrations import ExampleWeatherService
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
-    """The registry is process-global and caches instances for their breaker state, so
-    every test starts and ends with an empty one."""
     reset_registry()
     yield
     reset_registry()
@@ -70,10 +53,6 @@ def _mock_transport(
 
 
 def _patch_oauth_transport(monkeypatch, transport: _http.MockTransport) -> None:
-    """Inject a fake token-endpoint transport into every AsyncOAuth2Client this package
-    builds, whether called from loader.refresh_oauth_token directly or from
-    services.exchange_token (which imports build_oauth_client locally, so patching the
-    loader's copy covers both)."""
     from django_ai_sdk.integrations.mcp import loader as loader_module
 
     original = loader_module.build_oauth_client
@@ -86,20 +65,12 @@ def _patch_oauth_transport(monkeypatch, transport: _http.MockTransport) -> None:
 
 
 async def _coroutine(value):
-    """Wrap a value so it can stand in for an awaitable request attribute."""
     return value
 
 
 def _patch_discovery(
     monkeypatch, token_endpoint: str = "https://auth.example.com/token"
 ) -> None:
-    """Stub OAuth metadata discovery.
-
-    Patches every module that binds ``discover``, not just its home module: `services`
-    and `oauth_views` import the name directly, so rebinding only
-    ``discovery.discover`` would leave them calling the real one — which does DNS-based
-    SSRF checks and would reject a test hostname outright.
-    """
     import django_ai_sdk.integrations.mcp.discovery as discovery_module
     from django_ai_sdk.integrations.mcp import oauth_views
     from django_ai_sdk.integrations.mcp import services as services_module
@@ -134,34 +105,33 @@ class TestResilientCache:
 
         assert first == ["tool"]
         assert second == ["tool"]
-        assert calls == 1  # second call was a cache hit, no re-fetch
+        assert calls == 1
 
     async def test_stale_entry_served_immediately_while_refreshing_in_background(self):
-        # ttl=1.0 -> background refresh kicks in at early_ttl=0.8; hard expiry at 1.0.
         cache = ResilientCache(ttl=1.0, timeout=5)
         calls = 0
 
         async def fetch():
             nonlocal calls
             calls += 1
-            await asyncio.sleep(0.3)  # slow refresh — must not block the caller
+            await asyncio.sleep(0.3)
             return [f"tool-{calls}"]
 
         first = await cache.get("k", fetch)
         assert first == ["tool-1"]
 
-        await asyncio.sleep(0.9)  # age now in [early_ttl=0.8, ttl=1.0): stale window
+        await asyncio.sleep(0.9)
 
         start = time.monotonic()
         second = await cache.get("k", fetch)
         elapsed = time.monotonic() - start
 
-        assert second == ["tool-1"]  # stale value served immediately, not the new one
-        assert elapsed < 0.1  # nowhere near the 0.3s refresh — never blocked on it
+        assert second == ["tool-1"]
+        assert elapsed < 0.1
 
-        await asyncio.sleep(0.5)  # let the background refresh finish
+        await asyncio.sleep(0.5)
         third = await cache.get("k", fetch)
-        assert third == ["tool-2"]  # now warmed by the background refresh
+        assert third == ["tool-2"]
 
     async def test_cache_miss_bounded_by_timeout(self):
         cache = ResilientCache(ttl=60, timeout=0.05)
@@ -174,8 +144,8 @@ class TestResilientCache:
         result = await cache.get("k", hangs_forever)
         elapsed = time.monotonic() - start
 
-        assert result == []  # degrades to empty rather than hanging
-        assert elapsed < 0.5  # bounded by `timeout`, not the 10s fetch
+        assert result == []
+        assert elapsed < 0.5
 
     async def test_circuit_breaker_opens_after_repeated_failures_and_stops_retrying(
         self,
@@ -188,21 +158,16 @@ class TestResilientCache:
             calls += 1
             raise RuntimeError("dead server")
 
-        # Each failure is truthfully reported as DEGRADED while the breaker is closed.
         for _ in range(3):
             await cache.get("k", always_fails)
             assert cache.status_for("k") == IntegrationStatus.DEGRADED
 
-        # Breaker is now open — further gets short-circuit to empty without a live fetch.
         result = await cache.get("k", always_fails)
         assert result == []
-        assert calls == 3  # the 4th get() didn't attempt another live fetch
+        assert calls == 3
         assert cache.status_for("k") == IntegrationStatus.DEGRADED
 
     async def test_breaker_open_transition_logs_exactly_once(self, caplog):
-        """The 'just opened' warning fires once, on the transition — not on every
-        subsequent short-circuited call, which would otherwise spam the logs for as
-        long as the integration stays down."""
         cache = ResilientCache(ttl=60, timeout=1)
 
         async def always_fails():
@@ -211,8 +176,6 @@ class TestResilientCache:
         with caplog.at_level(logging.WARNING):
             for _ in range(3):
                 await cache.get("k", always_fails)
-            # Breaker is now open. Further short-circuited calls must not add another
-            # "just opened" warning.
             for _ in range(3):
                 await cache.get("k", always_fails)
 
@@ -229,7 +192,7 @@ class TestResilientCache:
 
         for _ in range(3):
             await cache.get("k", always_fails)
-        await asyncio.sleep(0.1)  # let the cooldown elapse so it half-opens
+        await asyncio.sleep(0.1)
 
         with caplog.at_level(logging.INFO):
             result = await cache.get("k", succeeds)
@@ -238,8 +201,6 @@ class TestResilientCache:
         assert caplog.text.count("recovered") == 1
 
     async def test_single_failure_immediately_reports_degraded_not_active(self):
-        """A wrong/invalid token must never show as ACTIVE — status reflects the last
-        real attempt, not an optimistic default, even before the breaker trips."""
         cache = ResilientCache(ttl=60, timeout=1)
 
         async def wrong_token():
@@ -249,10 +210,6 @@ class TestResilientCache:
         assert cache.status_for("k") == IntegrationStatus.DEGRADED
 
     def test_never_attempted_key_raises_instead_of_guessing(self):
-        """status_for() can't distinguish "never checked" from "healthy" on its own,
-        so it refuses to guess: callers (e.g. DynamicMCPIntegration.get_status()) must force
-        a real attempt via get() first, or this raises rather than reporting a false
-        ACTIVE for an integration nothing has actually checked yet."""
         cache = ResilientCache(ttl=60, timeout=1)
         with pytest.raises(RuntimeError, match="never-checked"):
             cache.status_for("never-checked")
@@ -269,14 +226,12 @@ class TestResilientCache:
         await cache.get("k", fails)
         assert cache.status_for("k") == IntegrationStatus.DEGRADED
 
-        await cache.invalidate("k")  # the manual "reconnect" / retry-now action
+        await cache.invalidate("k")
         result = await cache.get("k", succeeds)
         assert result == ["ok"]
         assert cache.status_for("k") == IntegrationStatus.ACTIVE
 
     async def test_invalidate_clears_a_cached_success_value(self):
-        """invalidate() ("retry now") must drop a previously cached *successful* value,
-        not just reset the breaker — otherwise reconnect keeps serving stale."""
         cache = ResilientCache(ttl=60, timeout=1)
         calls = 0
 
@@ -286,18 +241,14 @@ class TestResilientCache:
             return [f"tools-{calls}"]
 
         assert await cache.get("k", fetch) == ["tools-1"]
-        assert await cache.get("k", fetch) == ["tools-1"]  # cache hit, no re-fetch
+        assert await cache.get("k", fetch) == ["tools-1"]
         assert calls == 1
 
         await cache.invalidate("k")
-        assert await cache.get("k", fetch) == ["tools-2"]  # cleared -> real re-fetch
+        assert await cache.get("k", fetch) == ["tools-2"]
         assert calls == 2
 
     async def test_invalidate_clears_the_whole_instance_not_just_one_key(self):
-        """Documents a deliberate trade: invalidate() drops every key in this cache,
-        not only the one named. Each instance holds a single integration's keys, so the
-        cost is that other users of the *same* integration pay one bounded re-fetch —
-        accepted in exchange for not coupling to cashews' internal key layout."""
         cache = ResilientCache(ttl=60, timeout=1)
         calls = {"a": 0, "b": 0}
 
@@ -317,13 +268,10 @@ class TestResilientCache:
 
         await cache.get("user-a", fetch_a)
         await cache.get("user-b", fetch_b)
-        assert calls == {"a": 2, "b": 2}  # user-b was dropped too
+        assert calls == {"a": 2, "b": 2}
 
 
 class TestResilientCacheRecovery:
-    """The breaker recovers on its own via half-open probing after the cooldown — there
-    is no terminal give-up state."""
-
     async def test_open_breaker_half_opens_and_recovers_after_cooldown(self):
         cache = ResilientCache(ttl=60, timeout=1, cb_cooldown=0.2)
         state = {"fail": True}
@@ -335,10 +283,8 @@ class TestResilientCacheRecovery:
 
         for _ in range(3):
             await cache.get("k", fetch)
-        assert await cache.get("k", fetch) == []  # breaker open
+        assert await cache.get("k", fetch) == []
 
-        # The server comes back; after the cooldown the breaker half-opens and, within
-        # a few probes, closes again — no manual reconnect required.
         state["fail"] = False
         recovered = False
         for _ in range(20):
@@ -350,7 +296,6 @@ class TestResilientCacheRecovery:
         assert cache.status_for("k") == IntegrationStatus.ACTIVE
 
     async def test_isolated_per_key(self):
-        """One dead key's breaker must never trip another's."""
         cache = ResilientCache(ttl=60, timeout=1)
 
         async def fails():
@@ -380,8 +325,6 @@ class TestMCPIntegrationCacheKeys:
         assert integration._cache_key(None) == "linear"
 
     def test_oauth_config_key_is_per_user(self):
-        """Each user has their own token, so their discovered tool lists must not share
-        a cache entry."""
         integration = DynamicMCPIntegration(
             "notion", OAuthMCPIntegrationConfig(url="https://example.com/mcp")
         )
@@ -390,13 +333,10 @@ class TestMCPIntegrationCacheKeys:
 
         assert integration._cache_key(user_a) == "notion:1"
         assert integration._cache_key(user_b) == "notion:2"
-        assert integration._cache_key(None) is None  # no user — nothing to key on
+        assert integration._cache_key(None) is None
 
 
 class TestIntegrationDisplayMetadata:
-    """``kind``/``get_tool_names()`` are called per integration by the status endpoints,
-    so they must stay cheap — no live I/O when config already answers the question."""
-
     async def test_mcp_integration_kind_reflects_config_type(self):
         token = DynamicMCPIntegration(
             "linear", TokenMCPIntegrationConfig(url="https://x", token="t")
@@ -430,10 +370,6 @@ class TestIntegrationDisplayMetadata:
     async def test_mcp_integration_tool_names_falls_back_to_discovery_with_no_allowlist(
         self, monkeypatch
     ):
-        """With auto-discovery (no `tools` configured) there is no static name list to
-        read, so this must fall back to the real, cached discovered tools rather than
-        reporting none — otherwise those tools are invisible to the UI's Integrations
-        grouping and leak into the flat Tools list instead."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
 
         calls = 0
@@ -455,9 +391,6 @@ class TestIntegrationDisplayMetadata:
     async def test_mcp_integration_tool_names_reuses_cache_already_primed_by_get_status(
         self, monkeypatch
     ):
-        """get_integration_status() calls get_status() then get_tool_names() per
-        integration — the fallback above must not double the live-fetch cost when
-        get_status() already warmed the same cache key moments earlier."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
 
         calls = 0
@@ -475,7 +408,7 @@ class TestIntegrationDisplayMetadata:
 
         await integration.get_status()
         assert await integration.get_tool_names() == ["list_issues"]
-        assert calls == 1  # second call was a cache hit, not a second live fetch
+        assert calls == 1
 
     async def test_api_integration_kind_defaults_to_api(self):
         class DummyIntegration(APIIntegration):
@@ -492,9 +425,6 @@ class TestIntegrationDisplayMetadata:
         assert await DummyIntegration().get_tool_names() == ["dummy_tool"]
 
     async def test_api_integration_factory_receives_only_declared_kwargs(self):
-        """A tool factory may declare any subset of user/agent/thread_id (or
-        **kwargs) — it's called with only what it accepts, never a spurious TypeError."""
-
         class DummyIntegration(APIIntegration):
             name = "dummy"
             tools = [
@@ -515,8 +445,6 @@ class TestMCPIntegrationGetStatus:
     async def test_wrong_static_token_reports_degraded_on_first_check(
         self, monkeypatch
     ):
-        """A token integration whose credential is simply wrong must not show as
-        connected just because get_status() was never exercised by a chat turn yet."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
 
         async def fails(*args, **kwargs):
@@ -549,8 +477,6 @@ class TestMCPIntegrationGetStatus:
         assert await integration.get_status() == IntegrationStatus.ACTIVE
 
     async def test_reconnect_recovers_a_degraded_integration(self, monkeypatch):
-        """reconnect() is an immediate retry-now: once the underlying problem is fixed
-        it clears the cached failure and re-probes without waiting out the cooldown."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
 
         async def fails(*args, **kwargs):
@@ -572,8 +498,6 @@ class TestMCPIntegrationGetStatus:
         assert await integration.get_status() == IntegrationStatus.ACTIVE
 
     async def test_missing_secret_reports_disconnected_and_contributes_no_tools(self):
-        """A token server with no token configured must not crash at construction —
-        it registers, explains itself via `detail`, and stays out of the way."""
         from django_ai_sdk.integrations.mcp.loader import build_mcp_config_safe
 
         config, needs_setup = build_mcp_config_safe(
@@ -587,19 +511,15 @@ class TestMCPIntegrationGetStatus:
             "linear", config, needs_setup=needs_setup, intended_kind="token"
         )
 
-        assert needs_setup  # a human-readable reason, not an exception
+        assert needs_setup
         assert integration.detail == needs_setup
         assert await integration.get_status() == IntegrationStatus.DISCONNECTED
         assert await integration.get_tools() == []
         assert await integration.get_tool_names() == []
-        # The failed build leaves a *static* placeholder config behind; the reported kind
-        # must still describe what the deployer is configuring, not the placeholder.
         assert integration.kind == "token"
 
 
 class TestWarmupProgress:
-    """A chat names a degraded integration while it prepares, using the real integrations."""
-
     @staticmethod
     def _agent(health_check):
         from django_ai_sdk.agents.base import Agent
@@ -647,9 +567,6 @@ class TestWarmupProgress:
 
 
 class TestAPIIntegrationGetStatus:
-    """A hand-written API integration must report real health too — a down backend
-    shows up as DEGRADED, not a hardcoded ACTIVE."""
-
     async def test_no_health_check_is_always_active(self):
         class NoHealthCheckIntegration(APIIntegration):
             name = "no-health-check"
@@ -696,14 +613,11 @@ class TestAPIIntegrationGetStatus:
         assert await integration.get_status() == IntegrationStatus.DEGRADED
 
         state["fail"] = False
-        await integration.reconnect()  # retry now, don't wait out the cooldown
+        await integration.reconnect()
         assert await integration.get_status() == IntegrationStatus.ACTIVE
 
 
 class TestRegistry:
-    """Each integration app registers its service from ``ready()``; the registry
-    itself is a plain dict fed only by ``register()``."""
-
     async def test_registered_service_is_returned(self):
         instance = ExampleWeatherService()
         register(instance)
@@ -730,8 +644,6 @@ class TestRegistry:
 
 
 class TestIntegrationAppConfig:
-    """``ready()`` is the only path a service takes into the registry."""
-
     async def test_ready_registers_the_configured_integration(self):
         import tests as tests_module
         from django_ai_sdk.integrations.apps import IntegrationAppConfig
@@ -760,15 +672,12 @@ class TestIntegrationAppConfig:
 
 
 class TestExtensibility:
-    """A third integration backend (neither MCP nor APIIntegration) must be pluggable
-    with no special-casing."""
-
     async def test_bare_api_integration_subclass_needs_no_init_override(self):
         class MinimalIntegration(APIIntegration):
             name = "minimal"
             tools = []
 
-        integration = MinimalIntegration()  # must not raise — no required args
+        integration = MinimalIntegration()
         assert await integration.get_tools() == []
         assert await integration.get_status() == IntegrationStatus.ACTIVE
 
@@ -789,11 +698,9 @@ class TestExtensibility:
         resolved = (await get_all_integrations())["custom"]
         assert resolved is instance
         assert await resolved.get_tools() == ["custom-tool"]
-        assert resolved.kind == "api"  # the contract's default, no MCP assumptions
+        assert resolved.kind == "api"
 
     async def test_agent_get_tools_threads_agent_into_factory(self):
-        """A tool factory that runs its own LLM call (e.g. translation) needs the
-        calling agent's model — that's why `agent` is in the contract."""
         from django_ai_sdk.agents.base import Agent
 
         received: dict = {}
@@ -826,10 +733,6 @@ class TestExtensibility:
 
 
 class TestIntegrationFailureIsolation:
-    """A broken or slow integration must not affect another's tools, and must not
-    serialize with it either — the guarantee _get_integration_tools makes via
-    asyncio.gather plus a per-integration try/except."""
-
     async def test_one_failing_integration_does_not_drop_others_tools(self):
         from django_ai_sdk.agents.base import Agent
 
@@ -861,8 +764,6 @@ class TestIntegrationFailureIsolation:
         assert await FakeAgent()._get_integration_tools() == ["healthy-tool"]
 
     async def test_integrations_are_awaited_concurrently_not_serially(self):
-        """If a slow integration and another were awaited one at a time, total
-        wall-clock time would be additive. Assert it isn't."""
         from django_ai_sdk.agents.base import Agent
 
         delay = 0.2
@@ -903,7 +804,6 @@ class TestIntegrationFailureIsolation:
         assert elapsed < delay * 2
 
     async def test_an_unpermitted_integration_contributes_no_tools(self):
-        """Permissions are enforced before tools reach the model, not after."""
         from django_ai_sdk.agents.base import Agent
 
         class ForbiddenIntegration(APIIntegration):
@@ -928,10 +828,7 @@ class TestIntegrationFailureIsolation:
 
 
 class TestIntegrationToolNamespacing:
-    """Two MCP servers can define the same tool name (GitHub and Linear both have
-    ``list_issues``) — nothing prevents it. Haystack requires unique names across
-    everything handed to one agent, so without namespacing this would fail agent
-    construction outright as soon as both were enabled together."""
+    """Haystack requires unique names across everything handed to one agent."""
 
     @dataclass
     class FakeTool:
@@ -976,10 +873,6 @@ class TestIntegrationToolNamespacing:
 
 
 class TestIntegrationHint:
-    """A tool's own description says what it does, not what this deployment's
-    instance of it actually contains -- Integration.hint fills that gap by getting
-    prepended to every tool's description at the same point tools get namespaced."""
-
     @dataclass
     class FakeToolWithDescription:
         name: str
@@ -1046,10 +939,6 @@ class TestIntegrationHint:
 
 @pytest.mark.django_db
 class TestOAuthTokenRefresh:
-    """refresh_oauth_token() goes through Authlib's AsyncOAuth2Client. These cover the
-    HTTP exchange plus the optimistic-concurrency guard against a concurrent refresh
-    (another request, or an overlapping refresh_integrations run) landing first."""
-
     async def _make_token(
         self, user, server_name="notion", refresh_token="old-refresh"
     ):
@@ -1122,11 +1011,9 @@ class TestOAuthTokenRefresh:
 
         assert result is None
         stored = await MCPOAuthToken.objects.aget(pk=token_obj.pk)
-        assert stored.get_access_token() == "old-access"  # untouched by the failure
+        assert stored.get_access_token() == "old-access"
 
     async def test_refresh_without_a_refresh_token_gives_up(self, monkeypatch):
-        """Nothing to exchange — this must fail fast rather than call the token
-        endpoint with an empty grant."""
         from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
         from tests.factories.db import UserFactory
 
@@ -1147,10 +1034,6 @@ class TestOAuthTokenRefresh:
     async def test_refresh_loses_race_reloads_winner_instead_of_clobbering_it(
         self, monkeypatch
     ):
-        """By the time our refresh response comes back, a concurrent refresh has already
-        rotated the row's refresh_token out from under us. Our conditional update must
-        no-op, and the caller must get the winner's tokens — not silently overwrite
-        them with our own."""
         from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
         from tests.factories.db import UserFactory
@@ -1189,15 +1072,12 @@ class TestOAuthTokenRefresh:
             client_id="client-1",
             client_secret="secret-1",
         )
-        # token_obj still holds the pre-race refresh_token in memory — exactly the stale
-        # value a real caller would have if it read the row before the race.
         result = await refresh_oauth_token(token_obj, config)
 
         assert result is not None
         assert result.get_access_token() == "winner-access"
 
     async def test_a_failed_refresh_of_a_disconnected_token_reports_failure(self, monkeypatch):
-        """The row can be deleted (disconnect) while our refresh is in flight."""
         from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
         from tests.factories.db import UserFactory
@@ -1217,8 +1097,6 @@ class TestOAuthTokenRefresh:
 
 @pytest.mark.django_db
 class TestExchangeToken:
-    """The authorization_code exchange goes through Authlib."""
-
     async def test_exchange_returns_token_dict(self, monkeypatch):
         from django_ai_sdk.integrations.mcp.services import exchange_token
 
@@ -1280,16 +1158,6 @@ class TestExchangeToken:
 
 @pytest.mark.django_db
 class TestOAuthRedirectFlow:
-    """The browser-facing half of MCP OAuth: ``IntegrationService.connect()`` (via
-    the generic ``POST /{name}/connect``) hands the user off to the provider,
-    ``oauth_callback`` brings them back and persists the token. There is no dedicated
-    "start" URL — see ``TestNoStartUrl`` below.
-
-    This path had no coverage at all before, which matters more now that it is shared
-    SDK infrastructure rather than one project's local code — every consumer inherits
-    whatever is (or isn't) verified here.
-    """
-
     @staticmethod
     def _request(user, path="/api/integrations/notion/connect", **params):
         from django.contrib.sessions.backends.db import SessionStore
@@ -1342,7 +1210,6 @@ class TestOAuthRedirectFlow:
         )
 
         assert result["redirect_url"].startswith("https://auth.example.com/authorize?")
-        # PKCE material must be held server-side, under the state the callback returns.
         state = parse_qs(urlparse(result["redirect_url"]).query)["state"][0]
         assert request.session[loader_module._K_FLOW.format("notion", state)]["verifier"]
 
@@ -1402,19 +1269,11 @@ class TestOAuthRedirectFlow:
         stored = await MCPOAuthToken.objects.aget(user=user, server_name="notion")
         assert stored.get_access_token() == "fresh-access"
         assert stored.get_refresh_token() == "fresh-refresh"
-        # One-shot PKCE material must not survive the exchange.
         assert loader_module._K_FLOW.format("notion", "the-state") not in request.session
 
     async def test_callback_clears_a_status_cached_before_the_token_existed(
         self, settings, monkeypatch
     ):
-        """Connecting must take effect immediately, not after the cache TTL.
-
-        The settings page checks status before the user connects, which caches
-        "no tools" for them. Without an invalidation on callback that entry
-        outlives the handshake by up to AI_SDK_INTEGRATION_CACHE_TTL (900s), so
-        the agent keeps treating a freshly connected server as unconfigured.
-        """
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.mcp import oauth_views
         from tests.factories.db import UserFactory
@@ -1439,7 +1298,6 @@ class TestOAuthRedirectFlow:
             fetches += 1
             return []
 
-        # Stand in for the pre-connect status check, then prove it is cached.
         await integration._cache.get(key, fetch)
         await integration._cache.get(key, fetch)
         assert fetches == 1
@@ -1458,12 +1316,10 @@ class TestOAuthRedirectFlow:
         response = await oauth_views.oauth_callback(request, "notion")
         assert response.status_code == 302
 
-        # The stale entry is gone, so the next read goes back to the server.
         await integration._cache.get(key, fetch)
         assert fetches == 2
 
     async def test_two_tabs_connecting_the_same_server_each_keep_their_flow(self):
-        """A second tab must not overwrite the first tab's PKCE verifier."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
         from django_ai_sdk.integrations.mcp import loader as loader_module
@@ -1487,8 +1343,6 @@ class TestOAuthRedirectFlow:
         assert verifier == "v1"
 
     async def test_callback_rejects_a_mismatched_state(self, monkeypatch):
-        """CSRF protection for the OAuth handshake: a code arriving with someone else's
-        (or a forged) state must never be exchanged."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.mcp import oauth_views
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
@@ -1549,8 +1403,6 @@ class TestOAuthRedirectFlow:
     async def test_callback_refuses_an_off_site_success_redirect(
         self, settings, monkeypatch
     ):
-        """A misconfigured AI_SDK_MCP_OAUTH_SUCCESS_URL must not turn the callback into
-        an open redirect — it falls back to "/"."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.mcp import oauth_views
         from tests.factories.db import UserFactory
@@ -1581,10 +1433,6 @@ class TestOAuthRedirectFlow:
 
 
 class TestNoStartUrl:
-    """There is no ``oauth-start`` URL: the generic router's ``POST /{name}/connect``
-    covers it. Only the callback must stay a fixed URL, since the identity provider is
-    the one redirecting the browser there."""
-
     def test_oauth_start_no_longer_resolves(self):
         from django.urls import NoReverseMatch, reverse
 
@@ -1601,9 +1449,6 @@ class TestNoStartUrl:
 
 @pytest.mark.django_db
 class TestIntegrationService:
-    """The facade views.py delegates to — mirrors AgentService's shape (resolve by
-    name, permission-check, delegate to the instance)."""
-
     async def test_list_for_user_drops_unpermitted_rows(self):
         from django_ai_sdk.integrations.services import IntegrationService
         from tests.factories.db import UserFactory
@@ -1629,8 +1474,6 @@ class TestIntegrationService:
         assert [r.name for r in rows] == ["visible"]
 
     async def test_list_for_user_isolates_a_broken_integration(self):
-        """One integration's get_status() raising must not drop the others, and must
-        report DEGRADED for itself rather than propagating."""
         from django_ai_sdk.integrations.base import IntegrationStatus
         from django_ai_sdk.integrations.services import IntegrationService
         from tests.factories.db import UserFactory
@@ -1709,9 +1552,6 @@ class TestIntegrationService:
 
 class TestIntegrationPermissions:
     async def test_no_user_gets_no_integration_tools_by_default(self):
-        """The INTEGRATIONS domain default requires an authenticated user, so a system
-        or anonymous context contributes no integration tools at all. Documented because
-        it's easy to mistake for a registry miss when writing a test."""
         from django_ai_sdk.agents.base import Agent
 
         class DefaultPermsIntegration(APIIntegration):
@@ -1733,7 +1573,6 @@ class TestIntegrationPermissions:
 
 
 def test_a_refresh_without_expiry_clears_the_old_expiry():
-    """A stale past expiry would make every fetch refresh again."""
     from datetime import timedelta
 
     from django.utils import timezone
@@ -1749,7 +1588,6 @@ def test_a_refresh_without_expiry_clears_the_old_expiry():
 
 
 def test_a_token_about_to_expire_counts_as_expired():
-    """Refresh a little early: a token expiring mid-request would fail that request."""
     from datetime import timedelta
 
     from django.utils import timezone

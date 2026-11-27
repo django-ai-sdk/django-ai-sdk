@@ -24,7 +24,6 @@ _pending_writes: set[asyncio.Task[Any]] = set()
 
 
 def current() -> dict[str, uuid.UUID] | None:
-    """Return the active correlation ids, if any."""
     return _correlation.get()
 
 
@@ -55,7 +54,6 @@ def bind(
 
 @contextlib.contextmanager
 def active_span(span: Span) -> Generator[None]:
-    """Make ``span`` the span tracer sees"""
     token = _current_span.set(span)
     try:
         yield
@@ -64,12 +62,10 @@ def active_span(span: Span) -> Generator[None]:
 
 
 def current_span() -> Span | None:
-    """Return the innermost span of the context"""
     return _current_span.get()
 
 
 def on_event_loop() -> bool:
-    """Whether the calling thread is running inside an event loop."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -78,7 +74,6 @@ def on_event_loop() -> bool:
 
 
 def schedule(write: Coroutine[Any, Any, Any]) -> None:
-    """Run a trace write on the running loop"""
     task = asyncio.get_running_loop().create_task(write)
     _pending_writes.add(task)
     task.add_done_callback(_pending_writes.discard)
@@ -91,7 +86,6 @@ def _log_write_failure(task: asyncio.Task[Any]) -> None:
 
 
 async def aflush() -> None:
-    """Wait until every trace write scheduled"""
     loop = asyncio.get_running_loop()
     while current := {task for task in _pending_writes if task.get_loop() is loop}:
         await asyncio.wait(current)

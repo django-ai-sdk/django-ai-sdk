@@ -22,77 +22,33 @@ def _knowledge_unavailable(cache_key: str, exc: Exception) -> AiSdkError:
 
 
 class RAGProvider:
-    """
-    RAG provider for RAG pipelines.
-
-    Handles warming up RAG implementations (building indexes),
-    caching RAG instances, and converting them to tools on demand.
-
-    Usage:
-        class MyAgent(Agent):
-            rag_provider = RAGProvider()
-
-            async def get_rag_pipeline(self, memory_id=None):
-                # Return a RAGBase instance
-                return QdrantBM25HybridRAG(documents=docs)
-    """
-
     _MAX_CACHE_SIZE: int = 100
 
     def __init__(self) -> None:
-        # LRU cache: key = "{class_name}_{memory_id}", value = RAG instance.
-        # OrderedDict.move_to_end() on hit keeps recently-used entries at the back;
-        # popitem(last=False) evicts the LRU entry when the cap is reached.
         self._cache: OrderedDict[str, Any] = OrderedDict()
-        # Per-key locks prevent concurrent warmups for the same memory_id.
         # Backends like Qdrant local hold an exclusive file lock during warmup;
         # a second concurrent call for the same key would crash rather than wait.
-        # Using one asyncio.Lock per key keeps the fast path (warm cache) lock-free.
         self._warmup_locks: dict[str, asyncio.Lock] = {}
 
     async def warmup(
         self, agent: Agent, memory_id: str | None = None, force_rebuild: bool = False
     ) -> None:
-        """
-        Warm up the RAG by building indexes.
-
-        Gets or creates the RAG instance and caches the RAG.
-
-        Args:
-            agent: The agent instance
-            memory_id: Optional memory ID for document source
-            force_rebuild: If True, forces a complete rebuild of the index
-        """
         cache_key = self._get_cache_key(agent, memory_id)
         logger.info(f"Warming up RAG for {cache_key} (force_rebuild={force_rebuild})")
 
-        # Get or create the RAG instance
         await self._get_or_create_rag(agent, memory_id, force_rebuild)
         logger.info(f"RAG warmed up for {cache_key}")
 
     async def get_rag_instance(self, agent: Agent, memory_id: str | None = None) -> Any:
         """
-        Get the RAG instance.
-
-        Returns the cached RAG instance which can be used with:
-        - rag.as_tool() to get ComponentTool
-        - rag.get_tool(spec) to get ComponentTool with custom spec
-        - rag.build_pipeline() for direct pipeline access
-
-        Args:
-            agent: The agent instance
-            memory_id: Optional memory ID for document source
-
         Returns:
-            RAGBase instance (e.g., QdrantBM25HybridRAG), or None
+            RAGBase instance, or None
         """
         return await self._get_or_create_rag(agent, memory_id, False)
 
     def get_cached_rag_instance(self, agent: Agent, memory_id: str | None = None) -> Any:
         """Return the cached RAG instance without warming up or creating a new one.
-
-        Use instead of get_rag_instance() when a second connection would conflict
-        (e.g. Qdrant's exclusive local file lock). Returns None if not yet warmed.
+        Returns None if not yet warmed.
         """
         cache_key = self._get_cache_key(agent, memory_id)
         return self._cache.get(cache_key)
@@ -106,27 +62,17 @@ class RAGProvider:
         citation_registry: SourceRegistry | None = None,
         citation_formatter: SourceFormatter | None = None,
     ) -> Any:
-        """Get a ComponentTool for the given memory."""
         from django_ai_sdk.adapters.citations import collect_sources  # noqa: PLC0415
 
         rag_instance = await self.get_rag_instance(agent, memory_id)
         tool = await self.build_tool(rag_instance, spec=spec)
 
-        # Seed the citation registry with sources from the RAG's tool
         if tool is not None and citation_registry is not None:
             collect_sources(tool, citation_registry, formatter=citation_formatter)
         return tool
 
     async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Any:
-        """Build a ComponentTool from a RAG instance.
-
-        Uses the RAG's spec-aware get_tool when a spec is given, otherwise
-        falls back to as_tool.
-
-        Args:
-            rag_instance: The RAG instance from get_rag_instance()
-            spec: Optional tool spec for custom names/descriptions
-
+        """
         Returns:
             ComponentTool ready for ToolAgent, or None
         """
@@ -142,18 +88,13 @@ class RAGProvider:
         return None
 
     def clear_cache(self) -> None:
-        """Clear the RAG cache."""
         self._cache.clear()
         logger.debug("RAG cache cleared")
 
     async def add_documents(
         self, agent: Agent, memory_id: str | None, documents: list[RagDocument]
     ) -> bool:
-        """Add documents to this memory's index; True when something was written.
-
-        Writes to the RAG cached in this process, or else to the memory's index when it
-        lives on a server (see `_shared_rag`), so a task worker's upload reaches chat.
-        """
+        """Add documents to this memory's index; True when something was written."""
         cache_key = self._get_cache_key(agent, memory_id)
         try:
             rag = self._cache.get(cache_key) or await self._shared_rag(agent, memory_id)
@@ -168,10 +109,7 @@ class RAGProvider:
     async def remove_documents(
         self, agent: Agent, memory_id: str | None, document_ids: list[str]
     ) -> bool:
-        """Remove documents from this memory's index; True when something was removed.
-
-        Same index as `add_documents`: the cached RAG, or else a server index.
-        """
+        """Remove documents from this memory's index; True when something was removed."""
         cache_key = self._get_cache_key(agent, memory_id)
         try:
             rag = self._cache.get(cache_key) or await self._shared_rag(agent, memory_id)
@@ -184,53 +122,30 @@ class RAGProvider:
         return True
 
     async def _shared_rag(self, agent: Agent, memory_id: str | None) -> Any:
-        """This memory's RAG when its index lives on a server, else None.
-
-        A server index is shared by every process, so writing it from the process that
-        saved the document (e.g. a task worker) reaches the RAG cached by the web
-        process. Local and in-memory indexes belong to one process. Not cached here:
-        the writing process doesn't need to keep a warm index.
-        """
         rag = await agent.get_rag_pipeline(memory_id)
         storage = getattr(getattr(rag, "config", None), "storage", None)
         if not getattr(storage, "is_server", False):
             return None
-        await rag.warmup()  # reuses the server collection, or creates it for a first document
+        await rag.warmup()
         return rag
 
     async def reindex(
         self, agent: Agent, memory_id: str | None = None, force_rebuild: bool = False
     ) -> Any:
-        """
-        Reindex the RAG by clearing cache and rebuilding.
-
-        Args:
-            agent: The agent instance
-            memory_id: Optional memory ID for document source
-            force_rebuild: If True, forces a complete rebuild of the index
-
-        Returns:
-            The reindexed RAG instance.
-        """
+        """Reindex the RAG by clearing cache and rebuilding."""
         cache_key = self._get_cache_key(agent, memory_id)
         logger.info(f"Reindexing RAG for {cache_key} (force_rebuild={force_rebuild})")
 
-        # Clear this entry from cache
         if cache_key in self._cache:
             del self._cache[cache_key]
 
-        # Warm up again (rebuilds indexes and caches)
         await self.warmup(agent, memory_id, force_rebuild)
 
-        # Return the cached RAG
         result = self._cache.get(cache_key)
         logger.info(f"RAG reindexed for {cache_key}")
         return result
 
-    # TODO: maybe we want to have some RagKey object
-    # that would support many key types (agent, memory, etc)
     def _get_cache_key(self, agent: Agent, memory_id: str | None) -> str:
-        """Generate cache key for this agent and memory."""
         return f"{agent.__class__.__name__}_{memory_id or 'default'}"
 
     async def _get_or_create_rag(
@@ -239,40 +154,18 @@ class RAGProvider:
         memory_id: str | None,
         force_rebuild: bool = False,
     ) -> Any:
-        """
-        Get cached RAG or create and cache it.
-
-        Uses double-checked locking to handle concurrent calls for the same
-        cache key safely:
-        - Fast path: warm cache is returned immediately without acquiring any lock.
-        - Slow path: a per-key asyncio.Lock serializes concurrent warmups so that
-          only one coroutine builds the index while others wait, then get the cached
-          result instead of repeating the expensive (and potentially exclusive-lock-
-          holding) warmup.
-
-        Args:
-            agent: The agent instance
-            memory_id: Optional memory ID for document source
-            force_rebuild: If True, forces a complete rebuild of the index
-        """
         cache_key = self._get_cache_key(agent, memory_id)
 
-        # Fast path: return immediately if already cached and no rebuild requested.
         if cache_key in self._cache and not force_rebuild:
             logger.debug(f"Using cached RAG for {cache_key}")
-            self._cache.move_to_end(cache_key)  # mark as recently used
+            self._cache.move_to_end(cache_key)
             return self._cache[cache_key]
 
-        # Slow path: serialize warmup per key.
-        # setdefault is a single dict operation — no await between check and insert,
-        # so concurrent coroutines always resolve to the same Lock object for a key.
         lock = self._warmup_locks.setdefault(cache_key, asyncio.Lock())
         async with lock:
-            # Re-check after acquiring the lock: a previous waiter may have already
-            # populated the cache while we were waiting.
             if cache_key in self._cache and not force_rebuild:
                 logger.debug(f"Using cached RAG for {cache_key} (post-lock cache hit)")
-                self._cache.move_to_end(cache_key)  # mark as recently used
+                self._cache.move_to_end(cache_key)
                 return self._cache[cache_key]
 
             logger.debug(f"Creating RAG for {cache_key} (force_rebuild={force_rebuild})")
@@ -287,12 +180,9 @@ class RAGProvider:
             except Exception as exc:
                 raise _knowledge_unavailable(cache_key, exc) from exc
             if rag is None:
-                # A memory without documents has no index yet. Not cached, so its first
-                # document gets one on the next use.
                 return None
             self._cache[cache_key] = rag
 
-            # Evict LRU entries when over the cap; clean up their locks too
             while len(self._cache) > self._MAX_CACHE_SIZE:
                 evicted_key, _ = self._cache.popitem(last=False)
                 self._warmup_locks.pop(evicted_key, None)

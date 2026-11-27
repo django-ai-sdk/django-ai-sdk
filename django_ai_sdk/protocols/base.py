@@ -11,19 +11,15 @@ if TYPE_CHECKING:
 
 
 class BaseProtocolHandler(ABC):
-    """Base class for protocol handlers."""
-
     @abstractmethod
     def to_chat_messages(
         self,
         protocol_messages: list[Any],
     ) -> list[ChatMessage]:
-        """Convert protocol-specific messages to internal ChatMessage format."""
         pass
 
     @abstractmethod
     def from_chat_messages(self, chat_messages: list[ChatMessage]) -> list[dict[str, Any]]:
-        """Convert internal ChatMessages to protocol-specific message format."""
         pass
 
     @abstractmethod
@@ -32,5 +28,4 @@ class BaseProtocolHandler(ABC):
         adapter: Streamable,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[bytes, None]:
-        """Generate SSE-formatted streaming response from normalized events."""
         yield cast("bytes", None)  # pragma: no cover

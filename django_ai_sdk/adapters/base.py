@@ -22,7 +22,7 @@ from django_ai_sdk.adapters.run import (
     get_user_message,
     get_user_text,
 )
-from django_ai_sdk.adapters.run import Run as Run  # re-exported: Run lived here
+from django_ai_sdk.adapters.run import Run as Run
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
 from django_ai_sdk.agents.tool_agent import decode_tool_result, returned_error
@@ -71,12 +71,10 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _SENTINEL: object = object()
-# a block of the answer has its citations
 _CITED: object = object()
 
 
 def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
-    """Parse tool result as JSON if valid, otherwise return as string."""
     try:
         return json.loads(str(arguments))
     except (json.JSONDecodeError, ValueError):
@@ -84,7 +82,6 @@ def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
 
 
 def parse_tool_output(obj: Any) -> Any:
-    """Make a Haystack tool output JSON serializable."""
     if hasattr(obj, "to_dict"):
         obj = obj.to_dict()
 
@@ -101,10 +98,6 @@ def parse_tool_output(obj: Any) -> Any:
 
 
 def stored_tool_output(result: ToolCallResult) -> dict[str, Any]:
-    """A tool result as stored and streamed, decoded once.
-
-    `error` is set when the call raised or returned {"error": ...}.
-    """
     output = parse_tool_output(result.to_dict())
     output["error"] = bool(result.error) or returned_error(output.get("result"))
     return output
@@ -114,7 +107,6 @@ _TRUNCATION_NOTE = "\n\n... truncated, {omitted} chars omitted"
 
 
 def get_tool_result_text(tool_call: dict[str, Any]) -> str:
-    """Return a stored tool call's result as plain text for history."""
     result = tool_call.get("result")
     if result is None:
         return ""
@@ -124,10 +116,6 @@ def get_tool_result_text(tool_call: dict[str, Any]) -> str:
 
 
 def truncate_tool_result(text: str) -> str:
-    """Cap a replayed tool result so one big response cannot own the context.
-
-    Limit: ``AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT``; 0 or below disables it.
-    """
     limit = resolve_setting("AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT", 4000)
     if not isinstance(limit, int) or limit <= 0 or len(text) <= limit:
         return text
@@ -138,7 +126,6 @@ def _get_message_pairs(
     messages: list[ChatMessage],
     has_handoff: Callable[[ChatMessage], list[dict[str, Any]]],
 ) -> list[tuple[ChatMessage | None, list[ChatMessage]]]:
-    """Split a conversation into handoff messages and the plain runs between."""
     runs: list[tuple[ChatMessage | None, list[ChatMessage]]] = []
     current: list[ChatMessage] = []
     for message in messages:
@@ -155,7 +142,6 @@ def _get_message_pairs(
 
 
 def get_reasoning_text(reasoning: ReasoningContent) -> str:
-    """A chunk's reasoning text, also when the provider sends raw reasoning."""
     if reasoning.reasoning_text:
         return reasoning.reasoning_text
     parts = (reasoning.extra or {}).get("content") or []
@@ -163,11 +149,9 @@ def get_reasoning_text(reasoning: ReasoningContent) -> str:
 
 
 def get_error_chunk(e: Exception, info: ErrorInfo) -> MessageChunk:
-    """The stored error: raw text for admins, plus what a client sees."""
     return MessageChunk(
         type="error",
         content={
-            # A bare TimeoutError() has no text; the type then tells the admin something.
             "error_message": str(e) or type(e).__name__,
             "error_type": type(e).__name__,
             "error_code": info.spec.code,
@@ -181,25 +165,16 @@ def get_error_event(info: ErrorInfo) -> ErrorEvent:
 
 
 class Stream:
-    """Adapter for Haystack Pipelines that emits streaming events."""
-
     model: str | None = None
     instructions: str | None = None
     suggestion_generator: SuggestionGenerator | None = None
-    # Per-run context for the agent's hooks, e.g. {"required_tools": [...]}.
     hook_context: dict[str, Any] | None = None
-    # Set per run by chat.
     turn_request: TurnRequest | None = None
-    # Artifacts shown after a tool's result (Agent.tool_artifacts), and the thread and
-    # user they are stored for; set per run by Agent.stream.
-    tool_artifacts: dict[str, ToolArtifact] = {}  # noqa: RUF012
+    tool_artifacts: dict[str, ToolArtifact] = {}
     thread_id: str | None = None
     user: Any = None
-    # agent to use for citation grounding, if any; set per run
     citation_agent: Any = None
-    # grounds the answer while it streams; set per stream
     _grounder: Grounder | None = None
-    # the citations tool call shown while the answer streams
     _citations_call_id: str | None = None
     _turn: StreamTurn | None = None
 
@@ -227,8 +202,6 @@ class Stream:
         self.suggestion_generator = suggestion_generator
         self._persisted_tool_ids: set[str] = set()
         self._persisted_tool_output_ids: set[str] = set()
-        # Artifacts stored during this answer, deleted if the answer is withheld.
-        # Artifact tools also add to this list through turn_artifacts.
         self._artifact_ids: list[str] = []
         self.message_result: ChatMessage | None = None
         self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
@@ -244,25 +217,20 @@ class Stream:
                     cg = component.chat_generator
                     self.model_name = getattr(cg, "model", None) or getattr(cg, "model_name", None)
 
-        # Tool name and subagent name, for all subagents this agent delegated to.
         self._handoff_tools: dict[str, str] = {
             tool.name: getattr(tool._component, "name", "") or tool.name
             for tool in (getattr(self.agent_component, "tools", None) or [])
             if isinstance(getattr(tool, "_component", None), SubagentStreamFilter)
         }
-        # Tool name and receipt keys, kept when oversight withholds the answer; a
-        # subagent's tool calls are stored on this answer too.
         self._receipt_keys = receipt_keys(getattr(self.agent_component, "tools", None))
 
     @staticmethod
     def get_handoff_calls(message: ChatMessage) -> list[dict[str, Any]]:
-        """Return the subagent delegations recorded on an assistant message."""
         if message.role != "assistant":
             return []
         return [tc for tc in message.tool_calls if tc.get("handoff")]
 
     def replay_handoff(self, message: ChatMessage) -> list[HaystackChatMessage]:
-        """Rebuild a delegation as the agent tool pair."""
         calls = [
             ToolCall(
                 id=tc.get("id") or str(uuid.uuid4()),
@@ -271,8 +239,6 @@ class Stream:
             )
             for tc in self.get_handoff_calls(message)
         ]
-        # Recorded with the turn that made them: the run hands them back, but they are not this
-        # answer's, so they count as stored already.
         ids = [call.id for call in calls if call.id]
         self._persisted_tool_ids.update(ids)
         self._persisted_tool_output_ids.update(ids)
@@ -287,11 +253,9 @@ class Stream:
         return replayed
 
     def get_messages(self, messages: list[ChatMessage]) -> list[HaystackChatMessage]:
-        """Convert internal messages to Haystack ChatMessage format."""
         conversation = [m for m in messages if m.role in ("user", "assistant")]
         converted_messages: list[HaystackChatMessage] = []
 
-        # A handoff replays as an assistant/tool pair
         for message, group in _get_message_pairs(conversation, self.get_handoff_calls):
             if message is not None:
                 converted_messages.extend(self.replay_handoff(message))
@@ -303,9 +267,7 @@ class Stream:
                     elif msg.role == "assistant":
                         converted_messages.append(HaystackChatMessage.from_assistant(msg.content))
                 continue
-            # merging is text-only, inlined images are dropped here
             texts = [m.model_copy(update={"content": get_user_text(m)}) for m in group]
-            # Merged, attachment context is no longer apart: the gate judges all of it.
             hinted = any(a.context for m in group for a in m.attachments)
             meta = {ATTACHMENT_CONTEXT_META_KEY: 0} if hinted else None
             for role, content in merge_messages(texts):
@@ -314,8 +276,6 @@ class Stream:
                 elif role == "assistant":
                     converted_messages.append(HaystackChatMessage.from_assistant(content))
 
-        # TODO: temporary fix returning a system message; support runs without user
-        # input (a handoff from another agent or system).
         if not converted_messages:
             logger.warning("No messages available for Haystack pipeline!")
             converted_messages.append(HaystackChatMessage.from_system("No messages available."))
@@ -323,7 +283,6 @@ class Stream:
         return converted_messages
 
     def get_attribution(self, tool_name: str, subagent: str | None = None) -> dict[str, str]:
-        """Metadata naming attribution ran a tool call."""
         if subagent:
             return {"agent": subagent}
         if handoff := self._handoff_tools.get(tool_name):
@@ -331,11 +290,9 @@ class Stream:
         return {}
 
     def get_text_chunk(self, content: str) -> MessageChunk:
-        """Create a text MessageChunk."""
         return MessageChunk(type="text", content=content)
 
     def get_tool_chunks(self, message: HaystackChatMessage) -> list[MessageChunk]:
-        """Convert Haystack message tool calls to MessageChunks."""
         chunks = []
 
         for tool_call in message.tool_calls:
@@ -375,7 +332,6 @@ class Stream:
         return chunks
 
     def _persist_tool(self, stream_writer: StreamWriter | None, chunk: MessageChunk) -> None:
-        """Store a tool chunk live, recording its id so get_pipeline_result skips it."""
         if not stream_writer:
             return
         ids = (
@@ -389,7 +345,6 @@ class Stream:
     async def _tool_artifact(
         self, stream_writer: StreamWriter | None, result: ToolCallResult
     ) -> AsyncGenerator[StreamEvent, None]:
-        """The artifact `tool_artifacts` maps to this tool, as its own tool call events."""
         spec = self.tool_artifacts.get(result.origin.tool_name)
         if spec is None or not self.thread_id:
             return
@@ -436,7 +391,6 @@ class Stream:
         if not (registry and registry.all and self.thread_id and self.citation_agent):
             return
         answer = stream_writer.text if stream_writer else ""
-        # after the answer: how long to wait for the blocks still being grounded
         timeout = resolve_setting("AI_SDK_CITATION_TIMEOUT", 10.0)
         grounder = self._grounder or Grounder(registry, self.citation_agent)
         try:
@@ -445,7 +399,6 @@ class Stream:
                 async for _ in grounder.wait(answer, timeout):
                     for event in self._partial_citations(grounder):
                         yield event
-                # Drop quotes that are no longer in the answer after masking.
                 data = rebase(grounder.citations(), answer)
         except Exception:
             logger.exception("Placing citations failed; the answer has none")
@@ -462,7 +415,6 @@ class Stream:
             return
 
         name = CitationsArtifact.tool_name()
-        # the stored citations replace the partial ones shown in the same tool call
         shown = self._citations_call_id
         tool_call_id = shown or f"{name}-{payload['artifact_id']}"
         self._persist_tool(
@@ -486,10 +438,6 @@ class Stream:
         yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=payload)
 
     def _partial_citations(self, grounder: Grounder | None) -> list[StreamEvent]:
-        """The citations of the blocks grounded so far, shown while the answer streams.
-
-        Not stored: get_citations_artifact stores the whole answer's into the same tool call.
-        """
         from django_ai_sdk.artifacts.schemas import CitationsArtifact  # noqa: PLC0415
 
         data = grounder.citations() if grounder else None
@@ -517,7 +465,6 @@ class Stream:
         attribution: dict[str, str],
         tool_input: Any,
     ) -> ToolInputCompleteEvent:
-        """Store a tool call's complete input and return the event announcing it."""
         self._persist_tool(
             stream_writer,
             MessageChunk(
@@ -542,7 +489,6 @@ class Stream:
         haystack_messages: list[HaystackChatMessage],
         streaming_callback: Any,
     ) -> asyncio.Task[Any]:
-        """Create and schedule the pipeline or agent coroutine as a Task."""
         if self.agent_component:
             coro = self._run_agent(self.agent_component, haystack_messages, streaming_callback)
         else:
@@ -566,9 +512,8 @@ class Stream:
         queue: asyncio.Queue[StreamingChunk | object],
         stream_writer: StreamWriter | None,
     ) -> AsyncGenerator[StreamEvent, None]:
-        """Consume queue and yield stream events."""
-        pending: dict[str, tuple[str, dict[str, str], str]] = {}  # id -> name, attribution, args
-        at_index: dict[int, str] = {}  # delta index -> tool call id
+        pending: dict[str, tuple[str, dict[str, str], str]] = {}
+        at_index: dict[int, str] = {}
         while True:
             item = await queue.get()
             if item is _SENTINEL:
@@ -589,7 +534,6 @@ class Stream:
                     self._grounder.feed(text)
                 yield TextChunkEvent(content=text)
 
-            # Reasoning models stream their summary separately from the answer.
             if chunk.reasoning and (reasoning := get_reasoning_text(chunk.reasoning)):
                 if stream_writer:
                     stream_writer.add_chunk(MessageChunk(type="reasoning", content=reasoning))
@@ -601,7 +545,6 @@ class Stream:
                     if tc.tool_name:
                         tc_id = tc.id or str(uuid.uuid4())
                         at_index[tc.index] = tc_id
-                        # marks the stored history
                         attribution = self.get_attribution(tc.tool_name, subagent)
                         pending[tc_id] = (tc.tool_name, attribution, "")
                         self._persist_tool(
@@ -626,7 +569,6 @@ class Stream:
                         tc_id = tc.id or at_index.get(tc.index, "")
                     if tc_id not in pending:
                         continue
-                    # Arguments arrive in fragments: the input is complete once it parses.
                     name, attribution, streamed = pending[tc_id]
                     streamed += tc.arguments or ""
                     try:
@@ -640,7 +582,6 @@ class Stream:
             if chunk.tool_call_result:
                 result = chunk.tool_call_result
                 tool_call_id = result.origin.id or str(uuid.uuid4())
-                # Never parsed as JSON: the call that actually ran carries the input.
                 if tool_call_id in pending:
                     name, attribution, _ = pending.pop(tool_call_id)
                     yield self._tool_input(
@@ -651,7 +592,6 @@ class Stream:
                         result.origin.arguments,
                     )
                 if result.error:
-                    # The result may contain sensitive data, so log it at debug only.
                     logger.warning(f"Tool call failed: tool={result.origin.tool_name}")
                     logger.debug(f"Tool call result: {result.result}")
                 if self._turn is not None:
@@ -715,7 +655,6 @@ class Stream:
         self,
         messages: list[ChatMessage],
     ) -> SuggestionEvent | None:
-        """Generate follow-up suggestions, returning a SuggestionEvent or None."""
         if not (self.suggestion_generator and self.message_result):
             return None
         try:
@@ -758,7 +697,6 @@ class Stream:
         async def streaming_callback(chunk: StreamingChunk) -> None:
             await queue.put(chunk)
             if chunk.tool_call_result and chunk.tool_call_result.error:
-                # The result may contain sensitive data, so log it at debug only.
                 logger.warning(f"Tool call failed: tool={chunk.tool_call_result.origin.tool_name}")
                 logger.debug(f"Tool call result: {chunk.tool_call_result.result}")
 
@@ -777,7 +715,6 @@ class Stream:
             queue,
             receipts=self._receipt_keys,
         )
-        # Why the turn ended early: the exception name, or "disconnected".
         turn_error = ""
 
         try:
@@ -804,7 +741,6 @@ class Stream:
             if registry is not None and self.thread_id and self.citation_agent and stream_writer:
 
                 def cited() -> None:
-                    # A held answer shows no citations while it streams.
                     if not turn.hold:
                         queue.put_nowait(_CITED)
 
@@ -836,7 +772,6 @@ class Stream:
                 return
 
             if turn.blocked_gate_result is not None:
-                # The gate blocked the question: nothing is stored.
                 _finalize_called = True
                 for event in turn.blocked_reply_events():
                     yield event
@@ -859,7 +794,6 @@ class Stream:
 
             yield MessageEndEvent(finish_reason=finish_reason)
 
-            # No follow-up suggestions for a masked or withheld answer.
             if not finished.changed and (
                 suggestion := await self.get_suggestions(turn.as_gated(messages))
             ):
@@ -899,7 +833,6 @@ class Stream:
                     turn.end_early()
                     self.message_result = await stream_writer.finalize("cancelled")
             finally:
-                # Close the turn even when storing failed, so its masking is cancelled.
                 await turn.aclose(turn_error)
 
         yield StreamEndEvent()

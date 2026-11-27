@@ -1,5 +1,3 @@
-"""Today's date and time tool."""
-
 from __future__ import annotations
 
 from django.utils import timezone
@@ -7,7 +5,6 @@ from haystack.tools import Tool
 
 
 def get_datetime() -> dict:
-    """Get current time and date in Europe/Amsterdam timezone."""
     tz = timezone.get_current_timezone()
     nowtz = timezone.now().astimezone(tz)
 
@@ -18,7 +15,6 @@ def get_datetime() -> dict:
 
 
 def get_today(**kwargs: object) -> Tool:
-    """Current date and time tool."""
     return Tool(
         name="get_today",
         parameters={},

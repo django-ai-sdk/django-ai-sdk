@@ -1,9 +1,3 @@
-"""Workflows: stored definitions, their runs and run history.
-
-Over HTTP only registered or stored workflows run, by key. A definition sent in a
-request is never run. `WorkflowService.run` is for trusted Python code only.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Collection
@@ -125,7 +119,6 @@ async def list_workflow_runs(
 async def _run_detail(request: HttpRequest, run_id: str, workflow_id: str | None) -> Any:
     run = await WorkflowService.get_run(run_id, user=request.user, workflow_id=workflow_id)
     if run is None:
-        # Absent covers both "no such run" and "not yours", by design.
         raise NotFound("Run not found")
     steps = [
         StepRunOut(
@@ -211,5 +204,8 @@ async def decide_workflow_step(
 
 
 def get_workflows_router(*, exclude: Collection[str] = (), **router_kwargs: Any) -> Router:
-    """A new Router with the workflow endpoints; mount with ``api.add_router("/", ...)``."""
+    """A new Router with the workflow endpoints; mount with ``api.add_router("/", ...)``.
+
+    Only registered or stored workflows run, by key; a definition sent in a request never runs.
+    """
     return routes.build(exclude=exclude, **router_kwargs)

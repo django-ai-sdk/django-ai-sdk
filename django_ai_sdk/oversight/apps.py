@@ -1,9 +1,3 @@
-"""The oversight app: deleting a thread or user forgets what oversight holds about it.
-
-Opt-in apps on top call `require_apps` and `extend` from their own `ready()`, so
-core never names them.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -33,7 +27,6 @@ class OversightConfig(AppConfig):
     verbose_name = "Oversight"
 
     def ready(self) -> None:
-        # Load the packs first so an app's policy can extend them by name.
         import django_ai_sdk.oversight.packs  # noqa: F401
 
         autodiscover_modules("oversight")
@@ -69,7 +62,6 @@ def forget_deleted_thread(sender: Any, instance: Any, **kwargs: Any) -> None:
 
     thread_id = str(instance.pk)
     try:
-        # Savepoint, so a failure here does not break the thread delete.
         with transaction.atomic():
             if Turn.objects.filter(thread_id=thread_id).exists():
                 forget_thread(thread_id)
@@ -82,7 +74,6 @@ def forget_deleted_user(sender: Any, instance: Any, **kwargs: Any) -> None:
 
     actor_id = str(instance.pk)
     try:
-        # Savepoint, so a failure here does not break the user delete.
         with transaction.atomic():
             forget_actor(actor_id)
     except Exception:
@@ -109,17 +100,11 @@ def require_apps(app_name: str, *needed: str) -> None:
             raise ImproperlyConfigured(f"{app_name} needs {name} in INSTALLED_APPS")
 
 
-# What the installed opt-in apps added (`extend`).
 MODEL_PERMISSIONS: dict[Any, str] = {}
 ROUTE_MODULES: list[str] = []
 
 
 def extend(*, permissions: Mapping[Any, str] | None = None, routes: str = "") -> None:
-    """Add an opt-in app's operations and routes from its `ready()`. Idempotent.
-
-    `permissions` maps each operation to the model permission it needs; `routes` is
-    a module whose `routes` table `get_oversight_router()` mounts.
-    """
     MODEL_PERMISSIONS.update(permissions or {})
     if routes and routes not in ROUTE_MODULES:
         ROUTE_MODULES.append(routes)

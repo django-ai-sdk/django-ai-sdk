@@ -1,5 +1,3 @@
-"""Reading one agent must agree with listing them."""
-
 import uuid
 
 import pytest

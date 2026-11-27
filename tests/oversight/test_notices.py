@@ -1,5 +1,3 @@
-"""What the client and the person are told about what a rule did."""
-
 from __future__ import annotations
 
 import json
@@ -111,8 +109,6 @@ class TestWhatTheClientIsTold:
 
 @pytest.mark.django_db(transaction=True)
 class TestRuleNotices:
-    """A rule's notice tells the person what it did, even a queue they would never see."""
-
     async def test_a_queue_is_told_at_the_gate(self):
         notice = (await (await start("test-told", "wire it now")).gate()).notice
         assert notice["outcome"] == "flagged"
@@ -121,12 +117,10 @@ class TestRuleNotices:
         ]
 
     async def test_what_the_person_cannot_see_is_not_told(self):
-        # A queue, an alert or a notification without a notice: the client learns nothing.
         guard = await start("test-told", "do it quietly")
         assert (await guard.gate()).notice is None
         assert (await guard.finish("Done.")).notice is None
         assert [m.rule.name for m in guard.matched if m.acted] == ["quiet_review"]
-        # A developer view still shows it.
         with override_settings(AI_SDK_OVERSIGHT={"CLIENT_DETAIL": "full"}):
             notice = (await (await start("test-told", "do it quietly")).gate()).notice
         assert notice["outcome"] == "flagged" and notice["rules"] == ["quiet_review"]

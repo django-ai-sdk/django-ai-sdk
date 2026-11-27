@@ -4,12 +4,6 @@ from django_ai_sdk.common import Prompt, prompt
 
 
 def build_title_generation_prompt(max_length: int) -> Prompt:
-    """Prompt template used for thread title generation.
-
-    `max_length` is passed in (rather than hardcoded) so it can be kept in
-    sync with the `Thread.title` column width - it's only a hint for the
-    model, storage still enforces the real limit.
-    """
     return prompt(f"""\
         ### Task:
         Generate a concise, 3-5 word title summarizing the chat history.

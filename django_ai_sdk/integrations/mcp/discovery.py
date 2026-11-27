@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Plain TTL memo: discovery needs expiry, not a circuit breaker.
 _cache: dict[str, tuple[float, OAuthDiscovery]] = {}
 
 
@@ -42,7 +41,6 @@ def _allowed_issuer_domains() -> list[str] | None:
 
 
 def _is_unsafe_ip(ip_str: str) -> bool:
-    """Private, loopback, reserved or link-local (incl. cloud metadata); fails closed."""
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
@@ -51,7 +49,6 @@ def _is_unsafe_ip(ip_str: str) -> bool:
 
 
 async def _is_safe_url(url: str) -> bool:
-    """SECURITY: http(s) only, and every DNS answer must be public (SSRF guard)."""
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
@@ -86,10 +83,6 @@ async def discover(
     allowed_issuer_domains: list[str] | None = None,
     use_cache: bool = True,
 ) -> OAuthDiscovery:
-    """Discover OAuth endpoints for an MCP server per RFC 9728; cached in-process.
-
-    allowed_issuer_domains: None allows any, [] none. Raises ValueError on any failure.
-    """
     now = time.monotonic()
     if use_cache and mcp_url in _cache:
         expires_at, cached = _cache[mcp_url]
@@ -131,7 +124,6 @@ async def discover(
 
 
 async def _probe_www_auth(client: httpx.AsyncClient, mcp_url: str) -> str | None:
-    """resource_metadata URL from the 401 WWW-Authenticate header, or None."""
     try:
         response = await client.post(
             mcp_url,
@@ -201,7 +193,6 @@ async def _validate_issuers(
         if not await _is_valid_issuer(issuer):
             raise ValueError(f"Invalid issuer format: {issuer}")
 
-        # Entries may be bare hostnames or full URLs.
         if domains_to_check is not None:
             issuer_domain = urlparse(issuer).netloc
             normalized = {urlparse(d).netloc if "://" in d else d for d in domains_to_check}

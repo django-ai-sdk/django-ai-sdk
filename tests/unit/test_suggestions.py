@@ -1,5 +1,3 @@
-"""Follow-up suggestions come from AI_SDK_TASK_MODEL when set, else the chat agent."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -41,7 +39,6 @@ async def test_the_task_model_suggests_when_set(settings: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_suggesting_is_not_a_turn_of_its_own() -> None:
-    """A side task over a turn oversight already judged: the agent's policy does not run again."""
     from django_ai_sdk.agents.base import Agent
 
     agent = MagicMock(spec=Agent, run=AsyncMock(return_value=REPLY))

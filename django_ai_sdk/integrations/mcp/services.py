@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 
 async def _mcp_config(server_name: str) -> MCPIntegrationConfig | None:
-    """The MCP config for one registered integration, or None if it isn't one."""
     from django_ai_sdk.integrations.mcp.loader import DynamicMCPIntegration
     from django_ai_sdk.integrations.registry import get_integrations
 
@@ -36,7 +35,6 @@ async def _mcp_config(server_name: str) -> MCPIntegrationConfig | None:
 
 
 def build_pkce_params() -> tuple[str, str, str]:
-    """Generate PKCE parameters: (verifier, challenge, state)."""
     pkce = PKCEParameters.generate()
     return pkce.code_verifier, pkce.code_challenge, secrets.token_urlsafe(32)
 
@@ -66,7 +64,6 @@ def build_auth_url(
 async def get_or_register_client(
     server_name: str, redirect_uri: str, discovery: OAuthDiscovery
 ) -> tuple[str, str]:
-    """Return (client_id, client_secret), registering dynamically if needed."""
     server = await _mcp_config(server_name)
     if not server or server.type != "oauth":
         raise NotFound(f"Server {server_name!r} not found or not OAuth type")
@@ -133,10 +130,6 @@ async def exchange_token(
     client_id: str,
     client_secret: str = "",
 ) -> dict:
-    """Exchange an authorization code for a token.
-
-    Raises one of loader.HTTP_ERRORS on transport errors, ValueError on a bad response.
-    """
     from django_ai_sdk.integrations.mcp.loader import build_oauth_client
 
     client = build_oauth_client(client_id, client_secret)
@@ -168,7 +161,6 @@ async def store_token(user: UserType, server_name: str, token_response: dict) ->
 
 
 async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthToken:
-    """Refresh a user's stored OAuth access token; raises ValueError on failure."""
     if not user:
         raise ValueError("User required")
 
@@ -191,7 +183,6 @@ async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthT
 
 
 async def get_oauth_discovery(server_name: str) -> OAuthDiscovery:
-    """OAuth endpoints for a server: static if configured, else RFC 9728 discovery."""
     server = await _mcp_config(server_name)
     if not server or server.type != "oauth":
         raise NotFound(f"Server {server_name!r} not found or not OAuth type")

@@ -14,14 +14,12 @@ if TYPE_CHECKING:
 
 APP_LABEL = "django_ai_sdk_workflows"
 
-# Tries at a free slug when saves race for the same name.
 SLUG_ATTEMPTS = 3
 
 
 class Workflow(models.Model):
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)
     name = models.CharField(max_length=255)
-    # Registry key shared with code-declared workflows.
     slug = models.SlugField(unique=True, max_length=NAME_MAX_LENGTH)
     definition = models.JSONField(default=dict)
     active = models.BooleanField(default=True, db_index=True)
@@ -42,7 +40,6 @@ class Workflow(models.Model):
         verbose_name = "Workflow"
         verbose_name_plural = "Workflows"
         constraints = [
-            # "adhoc" keys unstored runs; a row with it would share their channel and rules.
             models.CheckConstraint(
                 condition=~models.Q(slug=ADHOC), name="django_ai_sdk_workflow_slug_not_adhoc"
             ),
@@ -58,7 +55,6 @@ class Workflow(models.Model):
         if self.slug:
             self._save_named(*args, **kwargs)
             return
-        # Concurrent saves can pick the same slug; the loser retries with the next one.
         for attempt in range(SLUG_ATTEMPTS):
             self.slug = self._unique_slug()
             try:
@@ -70,7 +66,6 @@ class Workflow(models.Model):
                     raise
 
     def _save_named(self, *args: Any, **kwargs: Any) -> None:
-        # The definition's name is always the slug, so a row cannot claim another's name.
         if isinstance(self.definition, dict) and self.definition.get("name") != self.slug:
             self.definition = {**self.definition, "name": self.slug}
             if kwargs.get("update_fields") is not None:
@@ -78,14 +73,11 @@ class Workflow(models.Model):
         super().save(*args, **kwargs)
 
     def has_slug(self, slug: str) -> bool:
-        """True when another row holds `slug`."""
         return Workflow.objects.exclude(pk=self.pk).filter(slug=slug).exists()
 
     def _unique_slug(self) -> str:
-        """A slug derived from `name`, suffixed until it is free."""
         base = (slugify(self.name) or f"workflow-{str(self.pk)[:8]}")[:NAME_MAX_LENGTH]
         slug, suffix = base, 2
-        # A row may share a registered name: the registered one wins; the row is reached by id.
         while slug == ADHOC or self.has_slug(slug):
             tail = f"-{suffix}"
             slug = f"{base[: NAME_MAX_LENGTH - len(tail)]}{tail}"
@@ -95,7 +87,6 @@ class Workflow(models.Model):
 
 class WorkflowRunQuerySet(models.QuerySet):
     def held(self, pk: Any, attempt: int) -> WorkflowRunQuerySet:
-        """The run, if `attempt` still holds it: the latest claim, still running."""
         return self.filter(pk=pk, attempt=attempt, status=WorkflowRun.Status.RUNNING)
 
 
@@ -107,7 +98,6 @@ class WorkflowRun(models.Model):
         RUNNING = "running", "Running"
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
-        # Stopped by a person (`WorkflowService.cancel`).
         CANCELLED = "cancelled", "Cancelled"
 
     workflow = models.ForeignKey(
@@ -121,16 +111,12 @@ class WorkflowRun(models.Model):
         max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True
     )
     workflow_definition = models.JSONField(null=True, blank=True)
-    # Server-set, never by the caller: slug, registered name or "adhoc".
-    # Step turns run on channel "workflow:<workflow_key>:<step>".
     workflow_key = models.CharField(max_length=NAME_MAX_LENGTH, default=ADHOC, db_index=True)
-    # "manual", "cron:<trigger>" or "event:<trigger>".
     trigger = models.CharField(max_length=120, default="manual", db_index=True)
 
     inputs = models.JSONField(default=dict, blank=True)
     outputs = models.JSONField(null=True, blank=True)
     error = models.TextField(blank=True, default="")
-    # The DBOS workflow id of the current attempt (`workflows.durable.workflow_id`).
     task_id = models.CharField(max_length=128, null=True, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -139,7 +125,6 @@ class WorkflowRun(models.Model):
         on_delete=models.SET_NULL,
         related_name="workflow_runs",
     )
-    # Who asked for the run (user or operator firing a trigger); cannot approve it.
     started_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -147,9 +132,7 @@ class WorkflowRun(models.Model):
         on_delete=models.SET_NULL,
         related_name="+",
     )
-    # Claim count; a worker writes only while its attempt is the latest.
     attempt = models.PositiveIntegerField(default=0)
-    # Refreshed at the claim and at every step: when the run last made progress.
     heartbeat_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -171,12 +154,10 @@ class WorkflowRun(models.Model):
         verbose_name = "Workflow Run"
         verbose_name_plural = "Workflow Runs"
         indexes = [
-            # A trigger's latest run: every cron fire, and the triggers listing.
             models.Index(
                 fields=["workflow_key", "trigger", "-created_at"],
                 name="ai_sdk_wfrun_trigger_latest",
             ),
-            # A stored workflow's runs, and one user's runs, newest first.
             models.Index(fields=["workflow", "-created_at"], name="ai_sdk_wfrun_workflow_latest"),
             models.Index(fields=["user", "-created_at"], name="ai_sdk_wfrun_user_latest"),
         ]
@@ -194,7 +175,6 @@ class StepRun(models.Model):
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
         SKIPPED = "skipped", "Skipped"
-        # An approval step waiting for a person's decision.
         WAITING = "waiting", "Waiting"
 
     run = models.ForeignKey(WorkflowRun, on_delete=models.CASCADE, related_name="steps")
@@ -206,9 +186,7 @@ class StepRun(models.Model):
     output = models.JSONField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     error = models.TextField(blank=True, default="")
-    # One line on the outcome: why a step was skipped, or how it failed.
     detail = models.CharField(max_length=255, blank=True, default="")
-    # The oversight turn the step's model call opened, if it opened one.
     turn_id = models.CharField(max_length=64, blank=True, default="")
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)

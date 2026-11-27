@@ -1,17 +1,3 @@
-"""Rules: when a condition over lens answers holds, act.
-
-    Rule(
-        "injection_in_question",
-        when=L("injection_question").is_true & L("injection_question").confident(0.9),
-        then=Block("I can't help with that request."),
-        mode=Mode.ENFORCE,
-    )
-
-Rules start in report mode, so false positives are known before they block anyone. A test
-on a lens without a usable answer is false (see `L(name).missing`); on a lens that failed
-this turn it is unknown, so `~L("grounded").is_true` does not match a failure.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Set
@@ -27,7 +13,6 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.oversight.types import Answer
 
-# op -> test(answer value, operand)
 OPS: dict[str, Any] = {
     "is_true": lambda v, _: v is True or (isinstance(v, list) and bool(v)),
     "is_false": lambda v, _: v is False or v == [],
@@ -40,7 +25,6 @@ OPS: dict[str, Any] = {
     "in": lambda v, x: v in x if not isinstance(v, list) else bool(set(v) & set(x)),
     "contains": lambda v, x: isinstance(v, list | str) and x in v,
 }
-# Ops that read the answer itself, not its value.
 META_OPS = {"missing", "present", "confident", "unsure", "disputed"}
 
 
@@ -51,7 +35,7 @@ def _num(value: Any) -> float | None:
 
 
 class Condition:
-    """A test over a turn's answers, keyed by lens name. Raises ValueError for a bad node."""
+    """Raises ValueError for a bad node."""
 
     __slots__ = ("node",)
 
@@ -105,7 +89,6 @@ def _node_matches(
     node: Mapping[str, Any], answers: Mapping[str, Answer], unknown: Set[str]
 ) -> bool | None:
     if "all" in node or "any" in node:
-        # Kleene logic: one False decides an `all`, one True an `any`.
         decisive = "any" in node
         results = [_node_matches(child, answers, unknown) for child in _children(node)]
         if decisive in results:
@@ -138,7 +121,6 @@ def _node_matches(
 
 
 def _validated(node: Any) -> dict[str, Any]:
-    """Reject a bad op or operand now, not on every turn."""
     if not isinstance(node, Mapping):
         raise ValueError(f"{node!r} is not a condition")
     for key in ("all", "any"):
@@ -165,9 +147,6 @@ def _validated(node: Any) -> dict[str, Any]:
 
 
 class L:
-    """A lens by name. Its operators build conditions."""
-
-    # __eq__ builds a condition, so an L cannot be hashed.
     __hash__ = None  # type: ignore[assignment]
 
     def __init__(self, name: str) -> None:
@@ -196,7 +175,6 @@ class L:
     def disputed(self) -> Condition:
         return self._test("disputed")
 
-    # Returns a condition instead of a bool, so the signature differs from object's.
     def __eq__(self, value: object) -> Condition:  # ty: ignore[incompatible-method-override]
         return self._test("eq", value)
 
@@ -230,9 +208,7 @@ class L:
 
 class Action:
     kind: ClassVar[str] = ""
-    # What the turn becomes when the action is enforced.
     outcome: ClassVar[Outcome] = Outcome.FLAGGED
-    # Stages where the action can still change the turn. Elsewhere it is only recorded.
     effective: ClassVar[tuple[Stage, ...]] = tuple(Stage)
 
     def params(self) -> dict[str, Any]:
@@ -255,8 +231,6 @@ def _severity(value: str) -> str:
 
 
 class Alert(Action):
-    """Mark the turn for attention at `severity`."""
-
     kind = "alert"
 
     def __init__(self, severity: str = "warning") -> None:
@@ -267,11 +241,7 @@ class Alert(Action):
 
 
 class Mask(Action):
-    """Mask the spans `lenses` found (default: every lens the rule reads).
-
-    Gate: before the model or thread sees the question. Finish: the stored answer,
-    and the client replaces its copy. Reflect: the stored message, afterwards.
-    """
+    """Mask the spans `lenses` found (default: every lens the rule reads)."""
 
     kind = "mask"
     outcome = Outcome.MASKED
@@ -290,7 +260,7 @@ class Mask(Action):
 
 
 class RestrictTools(Action):
-    """Remove the tools in `names` for this turn. An empty list removes all tools."""
+    """An empty list removes all tools."""
 
     kind = "restrict_tools"
     outcome = Outcome.RESTRICTED
@@ -304,13 +274,10 @@ class RestrictTools(Action):
 
 
 class Block(Action):
-    """Block the turn: the question never reaches the model, or the answer the user."""
-
     kind = "block"
     outcome = Outcome.BLOCKED
     effective = (Stage.GATE, Stage.TOOL, Stage.FINISH)
 
-    # A lazy translation. Call str() on it where it is stored or sent.
     DEFAULT_MESSAGE = _("This request can't be answered here.")
 
     def __init__(self, message: str | Promise = "") -> None:
@@ -321,8 +288,6 @@ class Block(Action):
 
 
 class Queue(Action):
-    """Add the turn to review queue `queue`."""
-
     kind = "queue"
 
     def __init__(self, queue: str = "default") -> None:
@@ -349,17 +314,13 @@ ACTION_KINDS: dict[str, type[Action]] = {
     cls.kind: cls for cls in (Alert, Mask, RestrictTools, Block, Queue, Notify)
 }
 
-# Enforcement order; a rule's notice describes its first user-facing action in it.
 ACTION_ORDER = ("block", "restrict_tools", "mask", "queue", "notify", "alert")
-# The client is never told about a queue, alert or notification (SEC-20) unless
-# the rule's notice says so.
 USER_FACING = frozenset({"block", "restrict_tools", "mask"})
 
 
 def build_from_kind[T](
     registry: Mapping[str, T], node: Mapping[str, Any], what: str
 ) -> tuple[T, dict[str, Any]]:
-    """Return `registry[node["kind"]]` and the rest of `node`."""
     rest = dict(node)
     kind = rest.pop("kind", "")
     if kind not in registry:
@@ -373,7 +334,7 @@ def action_from_dict(node: Mapping[str, Any]) -> Action:
 
 
 class Rule:
-    """When `when` matches, do `then`. Reports only until its mode is raised."""
+    """Reports only until its mode is raised."""
 
     def __init__(
         self,
@@ -390,9 +351,7 @@ class Rule:
         self.when = when if isinstance(when, Condition) else Condition(when)
         self.then = [then] if isinstance(then, Action) else list(then)
         self.mode = Mode(mode)
-        # Shown when the rule blocks (or takes a tool away); overrides Block's message.
         self.message = message
-        # Shown whenever the rule acts. Empty: queue or alert without telling the user.
         self.notice = notice
         self.description = description
 

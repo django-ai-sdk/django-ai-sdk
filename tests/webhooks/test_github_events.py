@@ -1,9 +1,3 @@
-"""Tests for the shipped GitHub webhook integration.
-
-Only the comment-posting call is faked; signatures are real HMACs over real
-bytes, because a verifier that passes a stubbed signature proves nothing.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -83,8 +77,6 @@ def github():
 
 
 class TestSignatureVerification:
-    """A request is answered only if GitHub signed it."""
-
     def test_a_real_signature_passes(self, github, rf):
         assert github.verify(_request(rf, _pull_request())) is True
 
@@ -97,7 +89,6 @@ class TestSignatureVerification:
         assert github.verify(request) is False
 
     def test_the_deprecated_sha1_scheme_fails(self, github, rf):
-        # sha1 signatures are deprecated; only sha256 is accepted.
         body = json.dumps(_pull_request()).encode()
         digest = hmac.new(SECRET.encode(), body, hashlib.sha1).hexdigest()
         request = rf.post(
@@ -126,8 +117,6 @@ class TestSignatureVerification:
 
 
 class TestParse:
-    """parse turns a reviewable pull request event into a question, and ignores the rest."""
-
     def test_the_handshake_is_acknowledged(self, github, rf):
         assert github.parse(_request(rf, {"zen": "Design for failure."}, event="ping")) is None
 
@@ -193,8 +182,6 @@ class TestParse:
 
 
 class TestReply:
-    """The answer is posted as a comment on the pull request."""
-
     @staticmethod
     def _event():
         return InboundEvent(
@@ -228,7 +215,6 @@ class TestReply:
         assert "403" in caplog.text
 
     async def test_an_unreachable_api_is_logged_not_raised(self, github, caplog):
-        # The event is already claimed, so a raise would only lose the reply quietly.
         import httpx
 
         with patch("httpx.AsyncClient.post", AsyncMock(side_effect=httpx.ConnectTimeout("t"))):
@@ -243,8 +229,6 @@ class TestReply:
 
 
 class TestConfiguration:
-    """A half-configured webhook degrades instead of breaking the site."""
-
     def test_a_fully_configured_integration_has_no_detail(self, github):
         assert github.detail is None
 
