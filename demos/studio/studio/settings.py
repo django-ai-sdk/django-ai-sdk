@@ -72,6 +72,7 @@ AI_SDK_WORKFLOWS = {
 AI_SDK_PERMISSIONS = {
     "memory": ["apps.memories.permissions.AllowAnonymousMemoryPermission"],
     "thread": ["apps.agents.permissions.DemoThreadPermission"],
+    "workflow": ["apps.agents.permissions.StudioWorkflowPermission"],
 }
 
 AI_SDK_VISION_MODEL = env("AI_SDK_VISION_MODEL", default=None)
