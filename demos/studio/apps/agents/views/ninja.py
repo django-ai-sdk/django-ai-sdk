@@ -39,6 +39,7 @@ class UserDetailSchema(Schema):
     first_name: str
     last_name: str
     email: str
+    is_staff: bool
 
 
 class UserUpdateSchema(Schema):

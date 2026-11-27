@@ -7,6 +7,7 @@ from ninja import NinjaAPI
 from ninja.security import SessionAuth
 
 from apps.agents.views.ninja import router as studio_router
+from apps.agents.views.oversight import router as oversight_router
 
 api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0", auth=SessionAuth())
 ai_sdk_routers.register_error_handlers(api)
@@ -17,6 +18,8 @@ api.add_router("/", ai_sdk_routers.get_workflows_router())
 api.add_router("/memories", ai_sdk_routers.get_memories_router())
 api.add_router("/integrations", ai_sdk_routers.get_integrations_router())
 api.add_router("/", studio_router)
+api.add_router("/", ai_sdk_routers.get_oversight_router())
+api.add_router("/oversight", oversight_router)
 
 
 urlpatterns = [
