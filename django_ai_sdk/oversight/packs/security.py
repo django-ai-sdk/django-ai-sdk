@@ -34,8 +34,6 @@ INJECTION_PATTERNS = {
         r"(?:previous|prior|above|earlier|preceding|your|system)\s{1,4}"
         r"(?:(?:system|previous|prior|safety)\s{1,4}){0,2}"
         r"(?:instructions|directions|guidelines|rules|prompts?)\b",
-        r"\bnegeer\s{1,4}(?:(?:alle|de|je|jouw|eerdere|vorige|bovenstaande)\s{1,4}){0,3}"
-        r"(?:instructies|regels)\b",
     ],
     "reveal": [
         r"\b(?:reveal|print|repeat|leak|output|show\s{1,4}me|tell\s{1,4}me)\s{1,4}(?:your|the)"

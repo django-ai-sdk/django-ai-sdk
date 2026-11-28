@@ -28,7 +28,6 @@ from django_ai_sdk.oversight.content import (
 )
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
-from django_ai_sdk.oversight.patterns import DEFAULT_PII_KINDS
 from django_ai_sdk.oversight.recording import split_answer
 from django_ai_sdk.oversight.reflection import run_reflection
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, TextSpan, ToolCall
@@ -46,7 +45,7 @@ from tests.oversight.helpers import (
 EMAIL = "jan@example.com"
 
 
-BSN = "111222333"
+CARD = "4111111111111111"
 
 
 KEY = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD"
@@ -58,7 +57,7 @@ NAME = "Jan Jansen"
 IBAN = "NL91ABNA0417164300"
 
 
-SECRETS = (EMAIL, BSN, KEY, NAME, "Jansen")
+SECRETS = (EMAIL, CARD, KEY, NAME, "Jansen")
 
 
 MASTER = base64.b64encode(b"k" * 32).decode()
@@ -75,7 +74,7 @@ def _naming_judge(text, context):
 
 
 def _judged(text, context):
-    return Answer(value=True, confidence=0.9, rationale=f"It quotes {NAME}, {EMAIL}, {BSN}, {KEY}")
+    return Answer(value=True, confidence=0.9, rationale=f"It quotes {NAME}, {EMAIL}, {CARD}, {KEY}")
 
 
 def _taken(text, context):
@@ -94,7 +93,7 @@ def _later(text, context):
 class PrivacyPolicy(Policy):
     name = "test-privacy"
     lenses = [
-        PIILens(name="pii_in", stages=[Stage.GATE], kinds=[*DEFAULT_PII_KINDS, "bsn"]),
+        PIILens(name="pii_in", stages=[Stage.GATE]),
         FnLens(name="who", answer=Entities, stages=[Stage.GATE], fn=_naming_judge),
         FnLens(name="judged", subject=Subject.ANSWER, stages=[Stage.FINISH], fn=_judged),
         FnLens(
@@ -141,8 +140,8 @@ async def run_turn(
     with override_settings(AI_SDK_OVERSIGHT={"CAPTURE": capture, **settings}):
         messages = [
             ChatMessage(role="user", content=f"Earlier: I am {NAME}, mail {EMAIL}, key {KEY}"),
-            ChatMessage(role="assistant", content=f"Noted, {NAME}, BSN {BSN}"),
-            ChatMessage(role="user", content=f"Now: {NAME} {EMAIL} BSN {BSN}"),
+            ChatMessage(role="assistant", content=f"Noted, {NAME}, card {CARD}"),
+            ChatMessage(role="user", content=f"Now: {NAME} {EMAIL} card {CARD}"),
         ]
         guard = await TurnGuard.start(
             make_agent([], None, policy="test-privacy"),
@@ -159,7 +158,7 @@ async def run_turn(
                     "key": f"https://crm/{EMAIL}",
                     "title": f"File of {NAME} {EMAIL}",
                     "url": f"https://crm/{EMAIL}",
-                    "content": f"{NAME}: mail {EMAIL}, BSN {BSN}, {KEY}",
+                    "content": f"{NAME}: mail {EMAIL}, card {CARD}, {KEY}",
                     "kind": "doc",
                 }
             ]
@@ -168,11 +167,11 @@ async def run_turn(
             ToolCall(
                 id="c1",
                 name="lookup",
-                arguments={"q": f"{NAME} {EMAIL} {BSN}"},
-                result=f"Found {NAME}, {EMAIL}, BSN {BSN}, key {KEY}",
+                arguments={"q": f"{NAME} {EMAIL} {CARD}"},
+                result=f"Found {NAME}, {EMAIL}, card {CARD}, key {KEY}",
             )
         )
-        await guard.finish(f"Answer for {NAME}: {EMAIL}, BSN {BSN}")
+        await guard.finish(f"Answer for {NAME}: {EMAIL}, card {CARD}")
         return await closed_turn(guard)
 
 
@@ -206,7 +205,7 @@ class TestWhatCaptureKeeps:
         turn = await run_turn(capture)
         assert _leaks(await sync_to_async(_rows)(turn)) == []
         answer_rows = await sync_to_async(_by_lens)(turn)
-        assert answer_rows["pii_in"].value == ["bsn", "email"]
+        assert answer_rows["pii_in"].value == ["credit_card", "email"]
         assert answer_rows["who"].value == [FOUND]
         assert answer_rows["taken"].value == [FOUND]
         assert turn.labels["who"] == turn.labels["taken"] == [FOUND]
@@ -225,7 +224,7 @@ class TestWhatCaptureKeeps:
         turn = await run_turn("masked")
         kept = await _kept(turn)
         assert _leaks(json.dumps(kept)) == []
-        assert kept["input"] == "Now: [PERSON] [EMAIL] BSN [BSN]"
+        assert kept["input"] == "Now: [PERSON] [EMAIL] card [CREDIT_CARD]"
         assert (
             kept["history"][0]["content"] == "Earlier: I am [PERSON], mail [EMAIL], key [API_KEY]"
         )
@@ -235,12 +234,12 @@ class TestWhatCaptureKeeps:
             "File of [PERSON] [EMAIL]",
         )
         [call] = kept["tool_calls"]
-        assert call["result"] == "Found [PERSON], [EMAIL], BSN [BSN], key [API_KEY]"
-        assert call["arguments"] == {"q": "[PERSON] [EMAIL] [BSN]"}
+        assert call["result"] == "Found [PERSON], [EMAIL], card [CREDIT_CARD], key [API_KEY]"
+        assert call["arguments"] == {"q": "[PERSON] [EMAIL] [CREDIT_CARD]"}
         answer_rows = await sync_to_async(_by_lens)(turn)
         texts = kept["texts"]
         assert texts[str(answer_rows["judged"].id)] == {
-            "rationale": "It quotes [PERSON], [EMAIL], [BSN], [API_KEY]"
+            "rationale": "It quotes [PERSON], [EMAIL], [CREDIT_CARD], [API_KEY]"
         }
         assert texts[str(answer_rows["who"].id)]["value"] == ["[PERSON]"]
         assert texts[str(answer_rows["taken"].id)] == {
@@ -291,7 +290,7 @@ class TestTheRecordsValue:
         from django_ai_sdk.oversight.packs.quality import TakenFrom
         from django_ai_sdk.oversight.lenses import PIILens
 
-        titles = Answer(value=[f"Dossier {EMAIL} (BSN {BSN})"], answerer="typesafe")
+        titles = Answer(value=[f"Dossier {EMAIL} (card {CARD})"], answerer="typesafe")
         assert stored_value(TakenFrom(), titles) == [FOUND]
         assert stored_value(PIILens(), Answer(value=["email"], answerer="patterns")) == ["email"]
         assert stored_value(PIILens(), Answer(value=["email"], answerer="human")) == [FOUND]
@@ -316,10 +315,6 @@ class TestTheRecordsValue:
         }
         for capture in ("metadata", "none"):
             assert split_answer(lens, "finish", answer, keep=capture_masker(capture))[1] == {}
-
-    def test_the_record_masks_a_number_whatever_label_precedes_it(self):
-        keep = capture_masker("masked")
-        assert keep.text("factuurnummer: 111222333") == "factuurnummer: [BSN]"
 
     def test_a_found_name_is_masked_before_the_detectors_cut_it_apart(self):
         keep = capture_masker("masked", {f"Jan Jansen <{EMAIL}>": "person"})

@@ -35,27 +35,10 @@ def iban_ok(value: str) -> bool:
     return int(number) % 97 == 1
 
 
-def bsn_ok(value: str) -> bool:
-    """Dutch BSN 11-check, the last digit weighted -1."""
-    digits = re.sub(r"\D", "", value)
-    if len(digits) == 8:
-        digits = "0" + digits
-    if len(digits) != 9 or digits == "000000000":
-        return False
-    weights = [9, 8, 7, 6, 5, 4, 3, 2, -1]
-    return sum(int(d) * w for d, w in zip(digits, weights, strict=True)) % 11 == 0
-
-
-# Dutch postcodes never use SA, SD or SS.
-_NOT_POSTCODE_LETTERS = (
-    "SA SD SS KB MB GB TB PB OK AM PM AD BC CE HZ MS PX PT EM KM CM MM KG MG ML HP KW MW GW "
-    "TV PC VS AN AS AT BE BY DO GO HE IF IN IS IT ME MY NO OF ON OR SO TO UP US WE"
-).split()
-
 _SEP = r"[\s\-./\u200b\u200c\u200d\u2060\ufeff]"
 
-_AT = r"\s{0,3}(?:[\[({<]\s{0,3}(?i:at|@)\s{0,3}[\])}>]|\s(?i:apenstaartje)\s)\s{0,3}"
-_DOT = r"(?:\.|\s{0,3}(?:[\[({<]\s{0,3}(?i:dot|punt|\.)\s{0,3}[\])}>]|\s(?i:dot|punt)\s)\s{0,3})"
+_AT = r"\s{0,3}[\[({<]\s{0,3}(?i:at|@)\s{0,3}[\])}>]\s{0,3}"
+_DOT = r"(?:\.|\s{0,3}(?:[\[({<]\s{0,3}(?i:dot|\.)\s{0,3}[\])}>]|\s(?i:dot)\s)\s{0,3})"
 _SPELLED_EMAIL = (
     rf"(?<![\w+-])[\w+-]{{1,64}}+(?:{_DOT}[\w+-]{{1,64}}+){{0,4}}"
     rf"{_AT}[\w-]{{1,63}}+(?:{_DOT}[\w-]{{1,63}}+){{1,8}}\b"
@@ -65,20 +48,12 @@ PII_PATTERNS: dict[str, str] = {
     "email": rf"\b[\w.+-]{{1,64}}[@\uff20][\w-]{{1,63}}(?:\.[\w-]{{1,63}}){{1,8}}\b|{_SPELLED_EMAIL}",
     "iban": rf"\b[A-Za-z]{{2}}\d{{2}}(?:{_SEP}?[A-Za-z0-9]{{4}}){{2,7}}(?:{_SEP}?[A-Za-z0-9]{{1,4}})?\b",
     "credit_card": r"\b(?:\d[ -]?){12,18}\d\b",
-    "bsn": rf"(?<!\d)(?:\d{{9}}|\d{{4}}{_SEP}\d{{2}}{_SEP}\d{{3}}|\d{{3}}{_SEP}\d{{3}}{_SEP}\d{{3}})(?!\d)",
     "phone": r"(?<![\w+])(?:\+|00)\d{1,3}[\s-]?(?:\(0\)[\s-]?)?\d(?:[\s-]?\d){6,11}\b",
-    "phone_nl": rf"(?<![\w+])(?!\d\d([-./])\d\d\1\d{{4}}\b)"
-    rf"(?:\(0\d{{1,3}}\)\s?(?:{_SEP}?\d){{6,8}}|0(?:{_SEP}?\d){{9}})(?!\d)",
     "ip_address": r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b",
-    "postcode_nl": rf"\b[1-9]\d{{3}}\s?(?!(?:{'|'.join(_NOT_POSTCODE_LETTERS)})\b)[A-Z]{{2}}\b",
 }
-PII_VERIFY: dict[str, Verifier] = {"iban": iban_ok, "credit_card": luhn_ok, "bsn": bsn_ok}
-PII_NOT_AFTER: dict[str, str] = {
-    "bsn": r"(?i)\b(?:invoice|factuur|order|bestel|bestelling)"
-    r"(?:nummer|nr|number)?(?:\s*(?:no|nr|number|nummer|#)\.?)?\s*[:#]?\s*$",
-}
+PII_VERIFY: dict[str, Verifier] = {"iban": iban_ok, "credit_card": luhn_ok}
+PII_NOT_AFTER: dict[str, str] = {}
 DEFAULT_PII_KINDS: tuple[str, ...] = ("email", "iban", "credit_card", "phone", "ip_address")
-COUNTRY_PII_KINDS: tuple[str, ...] = ("bsn", "phone_nl", "postcode_nl")
 
 _PASSWORD_VALUE = (
     r"""(?:(["'])[^"'\n]{6,128}\1|(?=\S*?(?:\d|[!@#$%^&*_+=~|\\/<>{}\[\]-]\S))\S{6,})"""
@@ -97,7 +72,7 @@ SECRET_PATTERNS: dict[str, str] = {
     + r"(?:[\s\S]*?"
     + _PEM_LINE.format("END")
     + r"|[\s\S]*)",
-    "password_assignment": r"(?i)(?<![a-z0-9])(?:password|passwd|wachtwoord|pwd)[\"']?\s*[:=]\s*"
+    "password_assignment": r"(?i)(?<![a-z0-9])(?:password|passwd|pwd)[\"']?\s*[:=]\s*"
     + _PASSWORD_VALUE,
 }
 
@@ -105,8 +80,7 @@ WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 REFUSAL_PATTERNS: list[str] = [
     r"\b(I can(?:no|')t help|I(?:'m| am) (?:not able|unable) to|I (?:won't|will not) "
-    r"(?:help|provide)|sorry, (?:but )?I can(?:no|')t|ik kan (?:je )?(?:daar )?niet (?:mee )?helpen"
-    r"|dat kan ik niet)"
+    r"(?:help|provide)|sorry, (?:but )?I can(?:no|')t)"
 ]
 
 
@@ -161,6 +135,23 @@ def finds_personal_or_secret(text: str) -> bool:
     return bool(regex_spans(_SECRETS, text)) or any(
         next(valid_spans(pattern, PII_VERIFY.get(kind), text), None) for kind, pattern in _PII
     )
+
+
+def register_pii_kind(
+    name: str, pattern: str, *, verify: Verifier | None = None, not_after: str | None = None
+) -> None:
+    """Add a personal data kind that a PIILens may name in `kinds`, in code or in a stored definition.
+
+    `verify` drops a match that fails it, such as a checksum. `not_after` is a regex for the
+    text right before a match that makes it no match, such as an invoice label. Register
+    before the first turn: in the app's `oversight` module or in `AppConfig.ready()`.
+    """
+    PII_PATTERNS[name] = pattern
+    _PII.extend(compile_patterns({name: pattern}))
+    if verify:
+        PII_VERIFY[name] = verify
+    if not_after:
+        PII_NOT_AFTER[name] = not_after
 
 
 def mask_secrets(text: str) -> str:

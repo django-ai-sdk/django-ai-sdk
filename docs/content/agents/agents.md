@@ -394,7 +394,7 @@ start_run_tool = with_receipt(
 `with_receipt(tool, *keys)` sets `tool.receipt_keys` and returns the tool; setting the attribute yourself works the same. The result must be a dict (or its JSON).
 
 :::details[How the receipt's values are screened]
-The SDK trusts the declared keys, because you, the tool's author, chose them. It still screens their values. It keeps only whole numbers and short id-like strings (letters, digits, `_ . : -`, up to 128 characters), and none that the built-in personal data or secret patterns find (an IBAN, a BSN, an API key). It leaves anything else out. The stored call and its released card get `{**receipt, "withheld": true}` as the result. Arguments stay dropped. A failed call keeps nothing. The SDK reads receipts from the streaming agent's tools and its subagents', at any depth (`Stream`).
+The SDK trusts the declared keys, because you, the tool's author, chose them. It still screens their values. It keeps only whole numbers and short id-like strings (letters, digits, `_ . : -`, up to 128 characters), and none that the built-in personal data or secret patterns find (an IBAN, an API key, or a kind you registered with `register_pii_kind`). It leaves anything else out. The stored call and its released card get `{**receipt, "withheld": true}` as the result. Arguments stay dropped. A failed call keeps nothing. The SDK reads receipts from the streaming agent's tools and its subagents', at any depth (`Stream`).
 :::
 
 ---
