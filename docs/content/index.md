@@ -30,6 +30,9 @@ Wire agents to HTTP endpoints
 :::card[How It Works]{href="architecture/how-it-works.md"}
 Requests flow through the SDK
 :::
+:::card[Demo project]{href="getting-started/demo.md"}
+Studio, a Django app built on the SDK
+:::
 :::card[Developer Manual]{href="manual/index.md"}
 Internals and contribution guide
 :::

@@ -254,7 +254,7 @@ from django_ai_sdk.generators import build_kwargs
 
 
 def vertex_chat(**kwargs):
-    """Anthropic on Vertex AI - needs django-ai-sdk[anthropic]."""
+    """Anthropic on Vertex AI. Needs django-ai-sdk[anthropic]."""
     return AnthropicVertexChatGenerator(**build_kwargs({"region": "europe-west1"}, kwargs))
 ```
 

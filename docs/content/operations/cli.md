@@ -43,7 +43,7 @@ python manage.py warmup_rag --force-rebuild
 ```bash
 python manage.py reindex_memories                 # every memory
 python manage.py reindex_memories --memory <id>   # one memory
-python manage.py reindex_memories --agent StrohmRuntimeAgent
+python manage.py reindex_memories --agent SupportAgent
 ```
 
 Rebuilds each memory's index once, from scratch, after a change to how documents are indexed: chunk size or overlap, `meta_fields_to_embed`, the embedding models. An index belongs to a memory, not to an agent, so the RAG config of one agent builds them all. `--agent` picks that agent and defaults to the first agent with a RAG provider. `warmup_rag --force-rebuild` instead rebuilds each memory once per agent. The command skips memories without documents. It reports a failure per memory and exits with an error.

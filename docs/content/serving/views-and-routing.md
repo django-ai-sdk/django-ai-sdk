@@ -255,7 +255,7 @@ await MemoryService.unlink_memories(old_agent_id, thread_id, user=request.user)
 await ThreadService.update_thread(thread_id, metadata={"agent_id": new_agent_id}, user=request.user)
 await MemoryService.link_memories(new_agent_id, thread_id, user=request.user)
 
-# Messages — rate, soft delete, restore
+# Messages: rate, soft delete, restore
 await ThreadService.rate_message(
     thread_id, message_id, rating, feedback="...", user=request.user
 )

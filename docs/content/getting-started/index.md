@@ -9,4 +9,7 @@ Install the SDK, define an agent and wire it to a streaming chat endpoint.
 :::card[Quick Start]{href="quickstart.md"}
 Build your first agent in 5 minutes
 :::
+:::card[Demo project]{href="demo.md"}
+Studio: every feature in one Django app
+:::
 ::::

@@ -209,7 +209,7 @@ AI_SDK_WORKFLOWS = {"STEPS": {"ocr": "myapp.steps.OcrStep"}}
 ```
 
 ```python
-# myapp/workflows.py — autodiscovered on startup
+# myapp/workflows.py, autodiscovered on startup
 from django_ai_sdk.workflows import FieldDefinition, StepDefinition, WorkflowDefinition, register_workflow
 
 register_workflow(

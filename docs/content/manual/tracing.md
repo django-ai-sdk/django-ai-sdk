@@ -203,7 +203,7 @@ Trace.objects.for_thread(thread.id).subagent_usage()
 #  '9c04e8aa-...': {'agent_name': 'Fact Checker', 'prompt_tokens': 412, ...}}
 
 Trace.objects.subagent_ids()                      # ['7f3a2c11-...', '9c04e8aa-...']
-Trace.objects.subagent_names()                    # ['Fact Checker', 'Research Planner'] — display only
+Trace.objects.subagent_names()                    # ['Fact Checker', 'Research Planner'], for display only
 Trace.objects.subagents("7f3a2c11-...")           # just that subagent's wrapper spans
 ```
 
@@ -213,7 +213,7 @@ The service layer returns the per-subagent usage in the same call as the plain t
 
 ```python
 usage = await TraceService.thread_token_usage(thread.id, user=request.user)
-usage.total_tokens        # 10142 — the whole thread, subagents included
+usage.total_tokens        # 10142: the whole thread, subagents included
 usage.by_subagent
 # {'7f3a2c11-...': TokenUsage(agent_name='Research Planner', prompt_tokens=8210,
 #                              completion_tokens=1932, total_tokens=10142)}

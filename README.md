@@ -6,18 +6,14 @@
   <i>Build AI agents in Django. Batteries included.</i>
 </div>
 
-## Project Status: Read This First
+## Project status: read this first
 
-This is a **beta**. The API may still change as we find better patterns.
-Here's what that means for you:
+This is a **beta**. Here's what that means for you:
 
-- **API may still evolve**: some interfaces will shift as we find better patterns.
-- **Not for production yet**: use this for experimentation, prototypes, and side projects. Keep critical workloads elsewhere until we hit stable.
-- **Watch the repo**: Things change quickly. Star & watch to stay in the loop.
-- **Your feedback shapes the SDK**: Break things, open issues, tell us what hurts.
-
-We'd love to have you along for the ride, just keep your seatbelt on.
-
+- **The API may still change** as we find better patterns.
+- **Not for production yet.** Use it for experiments, prototypes and side projects. Keep critical workloads elsewhere until the API is stable.
+- **Watch the repo.** Releases come often. Star and watch it to see them.
+- **Your feedback shapes the SDK.** Break things, open issues and tell us what hurts.
 
 ## Install
 
@@ -31,7 +27,7 @@ Or with uv:
 uv add django-ai-sdk
 ```
 
-## Quick Start
+## Quick start
 
 ### 1. Add to INSTALLED_APPS
 
@@ -148,7 +144,7 @@ except Blocked as blocked:
     answer = blocked.message  # the policy's own text for the person asking
 ```
 
-See the [Oversight guide](docs/content/oversight.md) for the rest, and its limitations.
+See the [Oversight guide](docs/content/oversight/oversight.md) for the rest, and its limitations.
 
 ## Features
 
@@ -160,28 +156,36 @@ See the [Oversight guide](docs/content/oversight.md) for the rest, and its limit
   wait days for an approval, and start from cron or webhook triggers.
 - **Subagents**: Agents can delegate to other agents as tools, so one agent can
   orchestrate specialists instead of doing everything itself.
-- **Tool Calling**: MCP, memory, and custom tools, all managed by your Agent.
-- **Streaming Responses**: Built-in SSE streaming. Works with Vercel AI SDK protocol.
-- **Conversation Storage**: Automatic message persistence. Thread-based history out of the box.
-- **RAG Pipelines**: BM25, ChromaDB, and Qdrant hybrid search with query expansion,
-  for when an agent needs to ground itself in your documents.
-- **Artifacts**: 16 structured UI types (tables, plans, approval cards, code blocks, and more)
-  submitted by the LLM via tool calls.
-- **File Processing**: Document upload with pipeline-based processing (text, CSV, JSON,
-  DOCX, PPTX, XLSX. Extraction transforms for metadata embedding.
+- **Tool calling**: MCP, memory and your own functions as tools, declared on the agent.
+- **Streaming responses**: SSE streaming that speaks the Vercel AI SDK protocol.
+- **Conversation storage**: Every message is stored in its thread, with no code of your own.
+- **RAG pipelines**: BM25, ChromaDB and Qdrant hybrid search with query expansion,
+  so an agent can answer from your documents.
+- **Artifacts**: 16 structured UI types, such as tables, plans, approval cards and code
+  blocks, that the model submits through tool calls.
+- **File processing**: Uploads of text, CSV, JSON, DOCX, PPTX and XLSX run through a
+  processing pipeline. Extraction transforms add metadata to the embeddings.
 - **Integrations**: Third-party tools as self-registering Django apps, with caching,
   circuit breaking and OAuth built in.
 - **Tracing**: Opt-in Haystack tracing persisted to the ORM, with per-thread and
   per-message token accounting.
-- **Oversight**: Lenses ask one typed question about every turn, answered by code, a
-  classifier or a model judge as you pick per lens; rules block, mask or queue for a
-  person, starting in report mode; every turn of an agent with a policy, on the SDK's
-  entry points, is checked and recorded, masked by default.
-- **Reindexing**: Hot-reload documents. Cached embeddings with simple refresh API.
+- **Oversight**: A lens asks one typed question about every turn. Code, a classifier or
+  a model judge answers it, as you pick per lens. Rules block, mask or queue the turn for
+  a person, and start in report mode. Every turn of an agent with a policy is checked and
+  recorded, masked by default.
+- **Reindexing**: Rebuild a memory's index on demand, from code, an endpoint or the
+  `reindex_memories` command, without a restart.
+
+## Demo project
+
+[Studio](https://github.com/django-ai-sdk/studio/) is the demo project. It holds a Django
+app that uses the SDK's features: chat agents, swarms, deep research, memories, workflows
+with a worker, oversight, MCP integrations and both the django-ninja and DRF APIs. It also
+has native clients for macOS, iPhone and iPad.
 
 ## Documentation
 
-Full documentation and examples: [github.com/django-ai-sdk/django-ai-sdk](https://github.com/django-ai-sdk/django-ai-sdk)
+The full documentation is at [django-ai-sdk.github.io/django-ai-sdk/docs](https://django-ai-sdk.github.io/django-ai-sdk/docs/).
 
 ## Is it any good?
 
