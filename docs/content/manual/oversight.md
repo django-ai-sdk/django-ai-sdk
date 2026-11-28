@@ -15,7 +15,7 @@ An app imports everything it uses from `django_ai_sdk.oversight`. Its submodules
 | For | Names |
 | --- | --- |
 | Policies | `Policy`, `LensPack`, `RulePack`, `register_policy`, `unregister_policy`, `add_policy_loader`, `invalidate_policy`, `build_policy` (a policy resolved with its parents and settings, or a draft class with `policy_class=`), `ResolvedPolicy`, `Capture`, `Mode`, `Severity`, `Stage`, `Subject`, `Outcome` |
-| Lenses | `Lens`, `JudgeLens`, `PatternLens`, `CheckLens`, `PIILens`, `SecretsLens`, `RefusalLens`, `LengthLens`, `LanguageLens`, `EmptyRetrievalLens`, `ToolErrorsLens`, `Flag`, `Choice`, `Score`, `Entities`, `Violation`, `register_validator`, `Answer`, `TextSpan` (a span of an `Entities` answer), `TurnContext` |
+| Lenses | `Lens`, `JudgeLens`, `PatternLens`, `CheckLens`, `PIILens`, `SecretsLens`, `RefusalLens`, `LengthLens`, `LanguageLens`, `EmptyRetrievalLens`, `ToolErrorsLens`, `Flag`, `Choice`, `Score`, `Entities`, `Violation`, `register_validator`, `register_pii_kind`, `Answer`, `TextSpan` (a span of an `Entities` answer), `TurnContext` |
 | Rules | `Rule`, `L`, `Block`, `Mask`, `RestrictTools`, `Queue`, `Alert`, `Notify` |
 | Judges | `Judge`, `Classifier`, `certainty`, `PatternJudge`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `Maybe` (an alias a lens skips while `JUDGES` does not define it) |
 | Packs | `SecurityPack` (`PromptInjection`, `Exfiltration`), `SafetyPack` (`SelfHarm`, `HarmQuestion`, `HarmAnswer`), `QualityPack` (`ContextRelevance`, `Groundedness`, `TakenFrom`, `AnswerRelevance`, `Helpfulness`), `DefaultPolicy`, `INJECTION_PATTERNS`, `EXFILTRATION_PATTERNS` |
@@ -142,9 +142,9 @@ Each has a default `name`; subclass it to name your own.
 
 | Class | Kind | Answers |
 | --- | --- | --- |
-| `PIILens` | pattern | Personal data. `kinds` defaults to `patterns.DEFAULT_PII_KINDS`: `email`, `iban` (mod-97), `credit_card` (Luhn), `phone` (international format), `ip_address`. Country kinds (`COUNTRY_PII_KINDS`), only when named: `bsn` (11-check), `phone_nl`, `postcode_nl`. `patterns` adds your own, unchecked. |
+| `PIILens` | pattern | Personal data. `kinds` defaults to `patterns.DEFAULT_PII_KINDS`: `email`, `iban` (mod-97), `credit_card` (Luhn), `phone` (international format), `ip_address`. A host adds its own kinds with `register_pii_kind`, then names them. `patterns` adds your own, unchecked. See [Your own patterns](../oversight/oversight.md#your-own-patterns-countries-and-languages). |
 | `SecretsLens` | pattern | `api_key`, `stripe_key`, `google_api_key`, `github_token`, `aws_key`, `slack_token`, `jwt`, `private_key`, `password_assignment` (`patterns.SECRET_PATTERNS`). |
-| `RefusalLens` | judge | Answers that decline: `PatternJudge(REFUSAL_PATTERNS)` (English and Dutch), then `Maybe("classifier")`. |
+| `RefusalLens` | judge | Answers that decline: `PatternJudge(REFUSAL_PATTERNS)` (English), then `Maybe("classifier")`. |
 | `LengthLens` | check | A `Flag`: the subject is longer than `max_chars`. |
 | `LanguageLens` | check | A `Flag`: answered in another language than asked. Abstains when unsure. For the subject's language as a `Choice`, write a check lens over `lenses.guess_language`. |
 | `EmptyRetrievalLens`, `ToolErrorsLens` | check | A tool call that found no sources (a `Flag`); the share of tool calls that failed (a `Score`: `L("tool_errors") > 0` when any did). |

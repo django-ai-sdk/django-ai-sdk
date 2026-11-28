@@ -629,19 +629,105 @@ A second opinion that must always be asked, not only when the first judge is uns
 
 A `PIILens` finds personal data by kind, with checksums where a kind has one: a number shaped like an IBAN that fails mod-97 is not reported.
 
-- **Default kinds**, the same in every country: `email` (also spelled out, as `jan [at] example [dot] nl` or `jan apenstaartje example punt nl`), `iban` (mod-97), `credit_card` (Luhn), `phone` (international format, `+31 6 ...` or `0031 ...`), `ip_address` (IPv4).
-- **Country kinds**, only when you name them: `bsn` (Dutch citizen service number, 11-check), `phone_nl` (`06-12345678`), `postcode_nl` (`1234 AB`). A number right after an invoice or order label (`invoice no. 202611188`, `factuurnummer:`) is not a BSN, because one in eleven such numbers passes the 11-check. Only the label itself counts, so `factuur 111222333` leaves a real BSN unmasked for the model. That is the trade. A label a personal number goes by too (`kenmerk`, `referentie`) does not count, and the record masks the number whatever precedes it. `phone_nl` takes any grouping (`06-41-27-88-35`, `(06) 41278835`) but not a date and a time (`03-11-2026 14:00`).
+The SDK ships only kinds that hold in every country:
+
+- `email`, also spelled out in English, as `jan [at] example [dot] com`.
+- `iban`, checked with mod-97.
+- `credit_card`, checked with Luhn.
+- `phone` in international format, `+31 6 ...` or `0031 ...`.
+- `ip_address` (IPv4).
+
+`patterns` adds patterns of your own, after the kinds and unchecked:
+
+```python
+from django_ai_sdk.oversight import PIILens
+
+class CustomerData(PIILens):
+    name = "customer_data"
+    patterns = {"customer_id": [r"\bCUST-\d{6}\b"]}
+```
+
+A `SecretsLens` finds `api_key`, `stripe_key`, `google_api_key`, `github_token`, `aws_key`, `slack_token`, `jwt`, `private_key` and `password_assignment`. The tables are `PII_PATTERNS` and `SECRET_PATTERNS`, to use in a lens of your own.
+
+## Your own patterns: countries and languages
+
+A country's id numbers, its phone and postcode formats, and the words people use in its language are yours to add. The SDK gives you two ways. Register a personal data kind, or extend a pattern table in a lens of your own. The [Studio demo](https://github.com/django-ai-sdk/studio/tree/main/app/studio/oversight/dutch.py) does both for Dutch, and its examples follow.
+
+### A country kind
+
+`register_pii_kind(name, pattern, verify=None, not_after=None)` adds a kind that a `PIILens` may name in `kinds`. `verify` drops a match that fails it, such as a checksum. `not_after` is a regex for the text right before a match that makes it no match.
+
+```python
+import re
+
+from django_ai_sdk.oversight import register_pii_kind
+
+def bsn_ok(value: str) -> bool:
+    """Dutch BSN 11-check, the last digit weighted -1."""
+    digits = re.sub(r"\D", "", value).rjust(9, "0")
+    weights = [9, 8, 7, 6, 5, 4, 3, 2, -1]
+    return digits != "000000000" and sum(int(d) * w for d, w in zip(digits, weights)) % 11 == 0
+
+register_pii_kind(
+    "bsn",
+    r"(?<!\d)\d{9}(?!\d)",
+    verify=bsn_ok,
+    not_after=r"(?i)\b(?:invoice|factuur|order)(?:nummer|nr|number)?\s*[:#]?\s*$",
+)
+```
+
+One in eleven random nine-digit numbers passes the 11-check, so a number right after an invoice or order label is not reported. Only the label itself counts, so `factuur 111222333` leaves a real BSN unmasked for the model. That is the trade. The record ignores `not_after` and masks every registered kind it finds.
+
+Register the kind when the app loads: in the app's `oversight` module, which the SDK imports at startup, or in `AppConfig.ready()`. A stored policy definition that names a kind nobody registered fails to load.
+
+### Using it
+
+Name the kind next to the defaults, in code or in a stored definition:
 
 ```python
 from django_ai_sdk.oversight import DEFAULT_PII_KINDS, PIILens
 
 class CustomerData(PIILens):
     name = "customer_data"
-    kinds = [*DEFAULT_PII_KINDS, "bsn", "postcode_nl"]
-    patterns = {"customer_id": [r"\bCUST-\d{6}\b"]}  # your own, after the kinds, unchecked
+    kinds = [*DEFAULT_PII_KINDS, "bsn"]
 ```
 
-A `SecretsLens` finds `api_key`, `stripe_key`, `google_api_key`, `github_token`, `aws_key`, `slack_token`, `jwt`, `private_key` and `password_assignment`. The tables are `PII_PATTERNS` and `SECRET_PATTERNS`, to use in a lens of your own. The security pack's lenses use the default kinds. Give your policy its own lens to add country kinds.
+```json
+{"kind": "pattern", "preset": "pii", "name": "customer_data", "kinds": ["email", "bsn"]}
+```
+
+To keep a pack's lens and the rules that read it, override its attributes with `LensPack`. The pack's rule `pii_in_question` still reads `pii_question`:
+
+```python
+LensPack(SecurityPack.lenses, "pii_question", kinds=[*DEFAULT_PII_KINDS, "bsn"])
+```
+
+A registered kind also counts for [tool receipts](../agents/agents.md#tool-receipts) and for the record's masking.
+
+### Another language
+
+`INJECTION_PATTERNS`, `SECRET_PATTERNS` and `patterns.REFUSAL_PATTERNS` are in English. Extend a table and give it to the lens. The patterns are a fast first opinion. A classifier behind them judges any language.
+
+```python
+from django_ai_sdk.oversight import INJECTION_PATTERNS, LensPack, Maybe, PatternJudge, SecurityPack
+
+INJECTION_PATTERNS_EN_NL = {
+    **INJECTION_PATTERNS,
+    "override": [*INJECTION_PATTERNS["override"], r"\bnegeer\s{1,4}(?:alle\s{1,4})?(?:instructies|regels)\b"],
+}
+
+LensPack(
+    SecurityPack.lenses,
+    "injection_question",
+    judges=[PatternJudge(INJECTION_PATTERNS_EN_NL), Maybe("classifier")],
+)
+```
+
+A secret works the same way, with `patterns={**SECRET_PATTERNS, "password_assignment_nl": r"..."}` on a `SecretsLens`.
+
+### Test it
+
+Test that a valid number is found and an invalid one is not, and that a label stops a match. Studio's [`test_dutch_oversight.py`](https://github.com/django-ai-sdk/studio/tree/main/app/tests/test_dutch_oversight.py) has the cases for BSN, Dutch phone numbers and postcodes.
 
 A `Mask` replaces each span with its label in capitals: `Mail me at [EMAIL]`.
 

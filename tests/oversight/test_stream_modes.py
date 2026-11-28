@@ -290,7 +290,7 @@ class TestReceiptKeysAndValues:
 
     @pytest.mark.parametrize(
         "value",
-        ["NL91ABNA0417164300", "111222333", 111222333, "sk-proj-abcdefghijklmnopqrstuvwx"],
+        ["NL91ABNA0417164300", "4111111111111111", 4111111111111111, "sk-proj-abcdefghijklmnopqrstuvwx"],
     )
     def test_a_value_that_looks_personal_or_secret_is_left_out(self, value):
         from django_ai_sdk.receipts import receipt

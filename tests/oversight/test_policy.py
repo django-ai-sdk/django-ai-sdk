@@ -118,13 +118,13 @@ class Said(Judge):
 
 class TestConditions:
     def test_operators(self):
-        answers = {"inj": ans(True, 0.95), "tox": ans(0.9), "topic": ans("hr"), "pii": ans(["bsn"])}
+        answers = {"inj": ans(True, 0.95), "tox": ans(0.9), "topic": ans("hr"), "pii": ans(["email"])}
         assert (L("inj").is_true & L("inj").confident(0.9)).matches(answers)
         assert (L("tox") > 0.8).matches(answers)
         assert not (L("tox") < 0.8).matches(answers)
         assert (L("topic") == "hr").matches(answers)
         assert L("topic").in_({"hr", "legal"}).matches(answers)
-        assert L("pii").contains("bsn").matches(answers)
+        assert L("pii").contains("email").matches(answers)
         assert L("pii").is_true.matches(answers)
         assert (~(L("topic") == "billing")).matches(answers)
 

@@ -551,9 +551,9 @@ MIN_LANGUAGE_WORDS = 3
 class PIILens(PatternLens):
     """Personal data by kind, checksum-verified where possible.
 
-    `kinds` defaults to the country-neutral email, iban (mod-97), credit_card (Luhn),
-    phone (international) and ip_address; name country kinds to add them: bsn
-    (11-check), phone_nl, postcode_nl. Own `patterns` come after, unverified.
+    `kinds` defaults to email, iban (mod-97), credit_card (Luhn), phone (international)
+    and ip_address. Add a kind of your own, such as a country's id number, with
+    `register_pii_kind`, then name it here. Own `patterns` come after, unverified.
     """
 
     name = "pii"

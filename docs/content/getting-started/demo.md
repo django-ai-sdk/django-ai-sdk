@@ -22,6 +22,6 @@ just app::run      # http://localhost:8000
 just app::worker   # in a second terminal, for workflow runs
 ```
 
-Put `OPENAI_API_KEY` and `OPENAI_API_URL` in `app/studio/.env` first. To run it in Docker instead, use `just app::up`. `just app::up pypi` runs it against the latest release instead of your checkout.
+Put `OPENAI_API_KEY` and `OPENAI_API_URL` in `app/.env` first. To run it in Docker instead, use `just app::up`. `just app::up pypi` runs it against the latest release instead of your checkout.
 
 The macOS app is on [Studio's releases page](https://github.com/django-ai-sdk/studio/releases).

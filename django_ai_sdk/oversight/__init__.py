@@ -87,6 +87,7 @@ if typing.TYPE_CHECKING:
         mask,
         mask_all,
         mask_secrets,
+        register_pii_kind,
     )
     from django_ai_sdk.oversight.plugin import (
         TurnRequest,
@@ -142,6 +143,7 @@ _LAZY = {
             "mask",
             "mask_all",
             "mask_secrets",
+            "register_pii_kind",
         ],
         "patterns",
     ),

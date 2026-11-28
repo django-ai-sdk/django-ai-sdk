@@ -21,15 +21,17 @@ from django_ai_sdk.oversight import (
 from django_ai_sdk.oversight.judges.base import ask_judge
 from django_ai_sdk.oversight.lenses import lens_from_dict
 from django_ai_sdk.oversight.patterns import (
-    COUNTRY_PII_KINDS,
     DEFAULT_PII_KINDS,
+    PII_NOT_AFTER,
     PII_PATTERNS,
-    bsn_ok,
+    PII_VERIFY,
+    finds_personal_or_secret,
     iban_ok,
     luhn_ok,
     mask,
     mask_all,
     mask_secrets,
+    register_pii_kind,
 )
 from django_ai_sdk.oversight.lenses import (
     EmptyRetrievalLens,
@@ -58,12 +60,6 @@ async def answer(lens, turn: TurnContext) -> Answer | None:
 
 
 class TestChecksums:
-    def test_bsn_eleven_check(self):
-        assert bsn_ok("111222333")
-        assert bsn_ok("1112.22.333")
-        assert not bsn_ok("111222334")
-        assert not bsn_ok("000000000")
-
     def test_iban_mod_97(self):
         assert iban_ok("NL91ABNA0417164300")
         assert iban_ok("NL91 ABNA 0417 1643 00")
@@ -76,11 +72,11 @@ class TestChecksums:
 
 class TestPII:
     async def test_finds_valid_kinds_only(self):
-        text = "Mail a@b.nl, IBAN NL91ABNA0417164300, bsn 111222333, fake bsn 111222334"
-        found = await answer(PIILens(kinds=[*DEFAULT_PII_KINDS, "bsn"]), turn_context(text))
-        assert found.value == ["bsn", "email", "iban"]
+        text = "Mail a@b.nl, IBAN NL91ABNA0417164300, fake IBAN NL91ABNA0417164301"
+        found = await answer(PIILens(), turn_context(text))
+        assert found.value == ["email", "iban"]
         assert found.confidence == 1.0
-        assert len(found.spans) == 3
+        assert len(found.spans) == 2
         assert found.answerer == "patterns"
 
     async def test_nothing_found_is_a_quiet_no(self):
@@ -93,11 +89,6 @@ class TestPII:
         assert (
             await answer(PIILens(), turn_context("Mijn adres is Jan Voornstraat 8"))
         ).value == []
-
-    async def test_a_bsn_must_pass_the_eleven_check(self):
-        bsn = PIILens(kinds=["bsn"])
-        assert (await answer(bsn, turn_context("Mijn BSN is 123456789"))).value == []
-        assert (await answer(bsn, turn_context("Mijn BSN is 111222333"))).value == ["bsn"]
 
     def test_an_unknown_kind_is_refused(self):
         with pytest.raises(ImproperlyConfigured):
@@ -211,27 +202,14 @@ class TestPatternsInTheWild:
             ("rekening nl91abna0417164300 graag", "iban", "0417"),
             ("Duitse rekening de89-3704-0044-0532-0130-00 ok", "iban", "0532"),
             ("IBAN NL91\u200bABNA\u200b0417\u200b1643\u200b00 ok", "iban", "0417"),
-            ("BSN 111.222.333 ok", "bsn", "222"),
-            ("BSN 111-222-333 ok", "bsn", "222"),
-            ("BSN 1234 56 782 ok", "bsn", "782"),
-            ("overdracht bsn111222333 ok", "bsn", "222"),
-            ("BSN 111 222 333 ok", "bsn", "222"),
-            ("BSN 111\ufeff222\ufeff333 ok", "bsn", "222"),
             ("iban mt84malt011000012345mtlcast001s ok", "iban", "0123"),
-            ("bel 06 41 27 88 35 ok", "phone_nl", "88"),
-            ("bel (06) 41278835 ok", "phone_nl", "41278835"),
-            ("bel 06/41278835 ok", "phone_nl", "41278835"),
-            ("bel 06-41-27-88-35 ok", "phone_nl", "88"),
             ("mail sanne\uff20gmail.com ok", "email", "gmail"),
             ("mail mehmet [at] ziggo [dot] nl ok", "email", "ziggo"),
             ("mail jan (AT) example.co.uk ok", "email", "example"),
-            ("mail sanne punt devries apenstaartje gmail punt com ok", "email", "devries"),
         ],
     )
     async def test_numbers_in_other_formats_are_masked(self, text, kind, secret):
-        found = await answer(
-            PIILens(kinds=["iban", "bsn", "phone_nl", "email"]), turn_context(text)
-        )
+        found = await answer(PIILens(kinds=["iban", "email"]), turn_context(text))
         assert found.value == [kind]
         masked = mask(text, found.spans)
         assert secret not in masked and masked.endswith(" ok") or masked.endswith("graag")
@@ -255,27 +233,8 @@ class TestPatternsInTheWild:
         ],
     )
     async def test_dates_amounts_and_numbers_are_not_masked(self, text):
-        found = await answer(
-            PIILens(kinds=["iban", "bsn", "phone_nl", "email"]), turn_context(text)
-        )
+        found = await answer(PIILens(kinds=["iban", "email"]), turn_context(text))
         assert found.value == []
-
-    @pytest.mark.parametrize(
-        ("text", "masked"),
-        [
-            ("invoice 111222333 and bsn 123456782", "invoice 111222333 and bsn [BSN]"),
-            ("ordered 123456782", "ordered [BSN]"),
-            ("referendum 123456782", "referendum [BSN]"),
-            ("ticket 123456782", "ticket [BSN]"),
-            ("invoice for client 123456782", "invoice for client [BSN]"),
-            ("Mijn BSN, kenmerk: 111222333", "Mijn BSN, kenmerk: [BSN]"),
-            ("referentie 111222333", "referentie [BSN]"),
-            ("reference no. 111222333", "reference no. [BSN]"),
-        ],
-    )
-    async def test_only_a_label_right_before_a_number_makes_it_no_bsn(self, text, masked):
-        found = await answer(PIILens(kinds=["bsn"]), turn_context(text))
-        assert mask(text, found.spans) == masked
 
     async def test_a_card_followed_by_its_expiry_is_masked(self):
         text = "card 4111 1111 1111 1111 2027 please"
@@ -285,15 +244,6 @@ class TestPatternsInTheWild:
     async def test_a_shape_that_fails_its_checksum_stays_unmasked(self):
         found = await answer(PIILens(kinds=["iban"]), turn_context("BE69539007547034 EUR"))
         assert found.value == []
-
-    @pytest.mark.parametrize("text", ["4096 MB of memory", "HTTP 8080 OK", "In 1984 WE met"])
-    async def test_a_number_and_a_unit_is_not_a_postcode(self, text):
-        assert (await answer(PIILens(kinds=["postcode_nl"]), turn_context(text))).value == []
-
-    @pytest.mark.parametrize("text", ["Damrak 1, 1012 LG Amsterdam", "postcode 1012LG"])
-    async def test_a_postcode_still_is(self, text):
-        found = await answer(PIILens(kinds=["postcode_nl"]), turn_context(text))
-        assert found.value == ["postcode_nl"]
 
     @pytest.mark.parametrize(
         "text",
@@ -311,7 +261,6 @@ class TestPatternsInTheWild:
         [
             "password=hunter2",
             'password: "correcthorse"',
-            "wachtwoord: Welkom2024!",
             '{"password": "hunter2!"}',
             '{"pwd": "s3cret!"}',
             '{"db_password":"abcdef"}',
@@ -332,14 +281,8 @@ class TestPatternsInTheWild:
 class TestPIIKinds:
     TEXT = "BSN 111222333, bel 06-12345678 of +31 6 12345678, Damrak 1, 1012 LG Amsterdam"
 
-    async def test_country_kinds_are_off_by_default(self):
-        assert not set(COUNTRY_PII_KINDS) & set(PIILens().finder.labels())
+    async def test_a_national_number_needs_a_kind_of_its_own(self):
         assert (await answer(PIILens(), turn_context(self.TEXT))).value == ["phone"]
-
-    async def test_naming_them_turns_them_on(self):
-        lens = PIILens(kinds=[*DEFAULT_PII_KINDS, "bsn", "phone_nl", "postcode_nl"])
-        found = await answer(lens, turn_context(self.TEXT))
-        assert found.value == ["bsn", "phone", "phone_nl", "postcode_nl"]
 
     def test_no_kinds_picked_means_the_defaults(self):
         assert PIILens(kinds=[]).finder.labels() == list(DEFAULT_PII_KINDS)
@@ -359,6 +302,52 @@ class TestPIIKinds:
     )
     async def test_keys(self, key, label):
         assert (await answer(SecretsLens(), turn_context(f"use {key} now"))).value == [label]
+
+
+@pytest.fixture
+def member_id_kind():
+    from django_ai_sdk.oversight import patterns
+
+    tables = (PII_PATTERNS, PII_VERIFY, PII_NOT_AFTER)
+    saved = [dict(table) for table in tables]
+    saved_compiled = list(patterns._PII)
+    register_pii_kind(
+        "member_id",
+        r"\bM-\d{4}\b",
+        verify=lambda value: value.endswith("7"),
+        not_after=r"(?i)\bticket\s*$",
+    )
+    yield
+    for table, copy in zip(tables, saved, strict=True):
+        table.clear()
+        table.update(copy)
+    patterns._PII[:] = saved_compiled
+
+
+@pytest.mark.usefixtures("member_id_kind")
+class TestRegisterPIIKind:
+    async def test_a_named_kind_is_found_when_it_passes_its_check(self):
+        lens = PIILens(kinds=["member_id"])
+        found = await answer(lens, turn_context("member M-1237, not M-1234"))
+        assert found.value == ["member_id"]
+        assert len(found.spans) == 1
+
+    async def test_a_label_right_before_it_makes_it_no_match(self):
+        found = await answer(PIILens(kinds=["member_id"]), turn_context("ticket M-1237"))
+        assert found.value == []
+
+    def test_it_stays_off_until_a_lens_names_it(self):
+        assert "member_id" not in PIILens().finder.labels()
+
+    def test_a_stored_definition_may_name_it(self):
+        lens = lens_from_dict(
+            {"kind": "pattern", "preset": "pii", "name": "p", "kinds": ["member_id"]}
+        )
+        assert lens.finder.labels() == ["member_id"]
+
+    def test_receipts_and_the_record_see_it(self):
+        assert finds_personal_or_secret("member M-1237")
+        assert not finds_personal_or_secret("member M-1234")
 
 
 def even(text):
@@ -498,8 +487,8 @@ class TestFromDict:
             )
 
     def test_a_preset(self):
-        lens = lens_from_dict({"kind": "pattern", "preset": "pii", "name": "p", "kinds": ["bsn"]})
-        assert isinstance(lens, PIILens) and lens.kinds == ["bsn"]
+        lens = lens_from_dict({"kind": "pattern", "preset": "pii", "name": "p", "kinds": ["iban"]})
+        assert isinstance(lens, PIILens) and lens.kinds == ["iban"]
         with pytest.raises(ImproperlyConfigured, match="not a check one"):
             lens_from_dict({"kind": "check", "preset": "pii", "name": "p"})
 
