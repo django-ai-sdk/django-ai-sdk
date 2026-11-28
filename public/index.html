@@ -67,7 +67,8 @@
       height: 8px;
       background: rgba(31, 157, 92, 0.22);
     }
-    .feature-card:nth-child(1)::after {
+    .feature-card:nth-child(1)::after,
+    .feature-card:nth-child(11)::after {
       box-shadow: -8px 0px 0 0 rgba(31, 157, 92, 0.237),
     -16px 0px 0 0 rgba(31, 157, 92, 0.215),
     -24px 0px 0 0 rgba(31, 157, 92, 0.213),
@@ -219,7 +220,8 @@
     0px -144px 0 0 rgba(31, 157, 92, 0.025),
     0px -152px 0 0 rgba(31, 157, 92, 0.017);
     }
-    .feature-card:nth-child(2)::after {
+    .feature-card:nth-child(2)::after,
+    .feature-card:nth-child(12)::after {
       box-shadow: -8px 0px 0 0 rgba(31, 157, 92, 0.239),
     -16px 0px 0 0 rgba(31, 157, 92, 0.235),
     -32px 0px 0 0 rgba(31, 157, 92, 0.213),
@@ -2542,6 +2544,7 @@
       <nav class="hidden md:flex items-center gap-6 md:gap-8 text-sm text-text-secondary">
         <a href="#setup" class="hover:text-text transition">Setup</a>
         <a href="#features" class="hover:text-text transition">Features</a>
+        <a href="#studio" class="hover:text-text transition">Studio</a>
         <a href="docs/" class="hover:text-text transition">Docs</a>
         <a href="https://github.com/django-ai-sdk/django-ai-sdk" class="hover:text-text transition">GitHub</a>
         <a href="https://pypi.org/project/django-ai-sdk/" class="hover:text-text transition">PyPI</a>
@@ -2562,7 +2565,7 @@
           Build AI agents<br>in Django.
         </h1>
         <p class="text-lg text-text-secondary max-w-md mb-10 leading-relaxed">
-          Batteries included: agents, workflows, subagents, and RAG when you need it.
+          Batteries included: agents, workflows, subagents, oversight, and RAG when you need it.
           Ready in days.
         </p>
         <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
@@ -2792,6 +2795,20 @@ async def chat(request, payload: ChatRequest):
         <h3 class="font-display font-semibold mb-2">Integrations</h3>
         <p class="text-sm text-text-secondary">Let agents act on the tools your team already runs, like Zendesk, Linear, or GitHub.</p>
       </div>
+
+      <!-- Workers -->
+      <div class="feature-card bg-surface p-6 rounded-xl border border-border">
+        <div class="icon-box text-accent"><i class="ph-bold ph-gear-six"></i></div>
+        <h3 class="font-display font-semibold mb-2">Workers</h3>
+        <p class="text-sm text-text-secondary">Workflow runs and uploads run in a worker on DBOS, in your own database. If a worker dies, the next one picks up the run where it stopped.</p>
+      </div>
+
+      <!-- Oversight -->
+      <div class="feature-card bg-surface p-6 rounded-xl border border-border">
+        <div class="icon-box text-accent"><i class="ph-bold ph-shield-check"></i></div>
+        <h3 class="font-display font-semibold mb-2">Oversight</h3>
+        <p class="text-sm text-text-secondary">Block prompt injection, mask personal data and send risky turns to a person, from one Python class.</p>
+      </div>
     </div>
   </section>
 
@@ -2861,6 +2878,42 @@ async def chat(request, payload: ChatRequest):
     </div>
   </section>
 
+  <!-- Studio -->
+  <section id="studio" class="max-w-6xl mx-auto px-6 py-24">
+    <div class="mb-14">
+      <span class="index-label">04 / Studio</span>
+    </div>
+
+    <p class="font-display font-semibold text-2xl leading-snug max-w-lg mb-4">
+      See it all running in Studio.
+    </p>
+    <p class="text-text-secondary max-w-2xl mb-10 leading-relaxed">
+      Studio is the open-source reference app for the SDK: a Django project that uses every feature, and native apps for macOS, iPhone and iPad that talk to it.
+    </p>
+
+    <div class="grid md:grid-cols-2 gap-4 mb-10">
+      <div class="feature-card bg-surface p-6 rounded-xl border border-border">
+        <div class="icon-box text-accent"><i class="ph-bold ph-browser"></i></div>
+        <h3 class="font-display font-semibold mb-2">Django app</h3>
+        <p class="text-sm text-text-secondary">Chat agents, swarms, deep research, memories and RAG, workflows with a worker, MCP integrations, and django-ninja and DRF APIs. Run it in Docker, against your own SDK checkout or the release on PyPI.</p>
+      </div>
+      <div class="feature-card bg-surface p-6 rounded-xl border border-border">
+        <div class="icon-box text-accent"><i class="ph-bold ph-device-mobile"></i></div>
+        <h3 class="font-display font-semibold mb-2">macOS, iPhone and iPad</h3>
+        <p class="text-sm text-text-secondary">A native SwiftUI client. Streamed chat with reasoning, tool calls, artifacts, citations and file uploads. Build your own agents, and run a workflow and follow it live.</p>
+      </div>
+    </div>
+
+    <div class="flex flex-col sm:flex-row gap-3">
+      <a href="https://github.com/django-ai-sdk/studio" class="bg-text text-surface px-6 py-3 rounded-lg text-sm font-medium hover:bg-accent transition text-center">
+        Studio on GitHub ↗
+      </a>
+      <a href="https://github.com/django-ai-sdk/studio/releases" class="border border-border px-6 py-3 rounded-lg text-sm font-medium hover:border-accent transition text-center">
+        Download for macOS ↗
+      </a>
+    </div>
+  </section>
+
   <!-- Footer -->
   <footer>
     <div class="max-w-6xl mx-auto px-6 py-10 flex flex-col md:flex-row justify-between items-center gap-4">
@@ -2878,6 +2931,7 @@ async def chat(request, payload: ChatRequest):
     <nav>
       <a href="#setup"><span class="drawer-label">Setup</span><span class="drawer-arrow">→</span></a>
       <a href="#features"><span class="drawer-label">Features</span><span class="drawer-arrow">→</span></a>
+      <a href="#studio"><span class="drawer-label">Studio</span><span class="drawer-arrow">→</span></a>
       <a href="docs/"><span class="drawer-label">Docs</span><span class="drawer-arrow">→</span></a>
       <a href="https://github.com/django-ai-sdk/django-ai-sdk"><span class="drawer-label">GitHub</span><span class="drawer-arrow">↗</span></a>
       <a href="https://pypi.org/project/django-ai-sdk/"><span class="drawer-label">PyPI</span><span class="drawer-arrow">↗</span></a>

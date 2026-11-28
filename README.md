@@ -182,3 +182,11 @@ See the [Oversight guide](docs/content/oversight.md) for the rest, and its limit
 ## Documentation
 
 Full documentation and examples: [github.com/django-ai-sdk/django-ai-sdk](https://github.com/django-ai-sdk/django-ai-sdk)
+
+## Is it any good?
+
+[Yes.](http://news.ycombinator.com/item?id=3067434)
+
+## License
+
+[BSD-3-Clause](LICENSE)
