@@ -144,3 +144,29 @@ jobs:
 
       - name: Migrations match the models
         run: just check-migrations
+
+  studio:
+    name: Studio against this SDK
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: sdk
+
+      - uses: actions/checkout@v7
+        with:
+          repository: django-ai-sdk/studio
+          path: studio
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Run the studio tests
+        working-directory: studio
+        run: just app::test
