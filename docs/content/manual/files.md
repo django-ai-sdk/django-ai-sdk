@@ -53,7 +53,7 @@ Binary Office formats use `BaseBinaryFileProcessor`, which also requires a match
 | `JSONTransform` | JSON string → `dict` / `list` |
 | `TextTransform` | Any input → `{"data": ...}` dict |
 
-`BaseTransform` has a single `async run(data, **kwargs)` hook. Transforms receive `agent=` when a pipeline runs with an agent. Subclass `BaseTransform` to write your own. For LLM extraction, the demo's `DocumentExtractionTransform` ([`app/studio/apps/agents/transforms.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/apps/agents/transforms.py)) shows the pattern. It runs the extracted text through an agent with a `response_format`, such as the SDK's `DocumentExtraction` schema with summary, keywords, entities, facts, sections and events.
+`BaseTransform` has a single `async run(data, **kwargs)` hook. Transforms receive `agent=` when a pipeline runs with an agent. Subclass `BaseTransform` to write your own. For LLM extraction, the demo's `DocumentExtractionTransform` ([`app/studio/agents/transforms.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/agents/transforms.py)) shows the pattern. It runs the extracted text through an agent with a `response_format`, such as the SDK's `DocumentExtraction` schema with summary, keywords, entities, facts, sections and events.
 
 ## Default pipeline and FileService
 

@@ -251,7 +251,7 @@ class MySubagent(Agent):
     instructions = prompt("You are a subagent. Complete delegated tasks concisely.")
 ```
 
-Each `Agent` sets its own guardrails. A subagent caps its own loop with `max_agent_steps` and `max_tool_calls` (through `ToolCallBudgetHook`), both defaulting to `6`. `max_tool_calls = None` disables the cap. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo [`app/studio/apps/agents/agent_swarm.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/apps/agents/agent_swarm.py) (pirate crew) and [`app/studio/apps/agents/deep_research.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/apps/agents/deep_research.py) (web-research worker using `duckduckgo-api-haystack` and `trafilatura`).
+Each `Agent` sets its own guardrails. A subagent caps its own loop with `max_agent_steps` and `max_tool_calls` (through `ToolCallBudgetHook`), both defaulting to `6`. `max_tool_calls = None` disables the cap. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo [`app/studio/agents/agent_swarm.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/agents/agent_swarm.py) (pirate crew) and [`app/studio/agents/deep_research.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/agents/deep_research.py) (web-research worker using `duckduckgo-api-haystack` and `trafilatura`).
 
 ### Observability
 
@@ -278,7 +278,7 @@ The subagent running its own tool.
 
 Streaming clients receive `tool_call_start` / `tool_input` / `tool_output` SSE events for the coordinator's own calls and for the subagent's calls. The coordinator forwards its streaming callback into subagent tools (`stream_subagent_tools`, on by default). `SubagentStreamFilter` passes only tool-related chunks through and drops the subagent's raw text tokens, so the report isn't streamed twice. The SDK persists those forwarded chunks into the conversation history as they happen, in the order the calls start. So the stored history matches the streamed one, and subagent tool activity survives a page reload.
 
-Subagent loop limits are per-subagent class attributes, not only coordinator settings. `max_agent_steps` caps total loop iterations and `max_tool_calls` (through `ToolCallBudgetHook`) hard-caps tool calls, both defaulting to `6` on the subagent's own `Agent` class. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo [`app/studio/apps/agents/agent_swarm.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/apps/agents/agent_swarm.py) (pirate crew) and [`app/studio/apps/agents/deep_research.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/apps/agents/deep_research.py) (web-research worker using `duckduckgo-api-haystack` and `trafilatura`).
+Subagent loop limits are per-subagent class attributes, not only coordinator settings. `max_agent_steps` caps total loop iterations and `max_tool_calls` (through `ToolCallBudgetHook`) hard-caps tool calls, both defaulting to `6` on the subagent's own `Agent` class. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo [`app/studio/agents/agent_swarm.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/agents/agent_swarm.py) (pirate crew) and [`app/studio/agents/deep_research.py`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/agents/deep_research.py) (web-research worker using `duckduckgo-api-haystack` and `trafilatura`).
 
 ### Overriding `get_tools()`
 
@@ -606,7 +606,7 @@ class MyAgent(Agent):
 
 ## Reference agents
 
-The demo project ships seven agents in [`app/studio/apps/agents/`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/apps/agents/), each showing a different pattern:
+The demo project ships seven agents in [`app/studio/agents/`](https://github.com/django-ai-sdk/studio/tree/main/app/studio/agents/), each showing a different pattern:
 
 | Agent | Pattern |
 | --- | --- |
